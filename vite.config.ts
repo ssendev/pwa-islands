@@ -2,6 +2,10 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { defineConfig } from 'vite'
 
 export default defineConfig({
+  server: {
+    host: 'pwaislands.localhost',
+  },
+
   plugins: [VitePWA({
     registerType: 'prompt',
     injectRegister: false,
