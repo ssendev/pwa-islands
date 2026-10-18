@@ -1,5 +1,4 @@
 // IndexedDB-Hilfsmethoden für FileSystemDirectoryHandle (FSA)
-import { cacheFile, uncacheFile } from './storage.ts'
 const DB_NAME = 'pwa-islands-db'
 const DB_VERSION = 1
 const STORE_NAME = 'handles'
@@ -468,22 +467,6 @@ function openFolderNameModal(options: { onSave: (name: string) => Promise<void> 
 }
 
 /**
- * Spiegelt die aufgelisteten Dateien in die Cache Storage, damit der Service
- * Worker sie unter /<name> ausliefern kann. Fehler werden nur geloggt.
- */
-async function mirrorFilesToCache(storage: IFileStorage, entries: FileEntry[]): Promise<void> {
-  for (const entry of entries) {
-    if (entry.kind !== 'file') continue
-    try {
-      const content = await storage.readFile(entry.name)
-      await cacheFile(relativePathOf(storage, entry.name), content)
-    } catch (err) {
-      console.warn(`Datei "${entry.name}" konnte nicht gespiegelt werden:`, err)
-    }
-  }
-}
-
-/**
  * Voller relativer Pfad einer Datei inklusive Unterordner, z. B.
  * "projekte/meta.txt". Ausserhalb eines Ordners der blosse Name.
  */
@@ -518,10 +501,6 @@ async function renderGenericFileList(
   try {
     const entries = await storage.listFiles()
     const currentSubPath = storage instanceof FileSystemHandleStorage ? storage.subPath : ''
-
-    // Alle Dateien im Hintergrund in den Cache spiegeln, damit der Service
-    // Worker sie unter /<name> ohne Ordner-Berechtigung ausliefern kann.
-    void mirrorFilesToCache(storage, entries)
 
     if (entries.length === 0) {
       contentEl.innerHTML = `
@@ -695,7 +674,6 @@ async function renderGenericFileList(
         if (confirm(`Möchten Sie "${entryName}" wirklich löschen?`)) {
           try {
             await storage.deleteEntry(entryName)
-            await uncacheFile(relativePathOf(storage, entryName))
             handlers.onRefresh()
           } catch (err: unknown) {
             alert(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`)
@@ -989,7 +967,6 @@ export function renderFilesView(container: HTMLElement): void {
       mode: 'create',
       onSave: async (fileName, content) => {
         await storage.createFile(fileName, content)
-        await cacheFile(relativePathOf(storage, fileName), content)
         await refreshCurrentList()
       },
     })
@@ -1017,7 +994,6 @@ export function renderFilesView(container: HTMLElement): void {
         initialContent: content,
         onSave: async (name, newContent) => {
           await storage.createFile(name, newContent)
-          await cacheFile(relativePathOf(storage, name), newContent)
           await refreshCurrentList()
         },
       })
@@ -1044,7 +1020,6 @@ export function renderFilesView(container: HTMLElement): void {
       try {
         for (const file of Array.from(fileImportInput.files)) {
           await currentStorage.createFile(file.name, file)
-          await cacheFile(relativePathOf(currentStorage, file.name), file)
         }
         await refreshCurrentList()
       } catch (err: unknown) {

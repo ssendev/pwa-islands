@@ -113,16 +113,6 @@ export async function findSavedFile(relativePath: string): Promise<File | null> 
   const cleanPath = relativePath.replace(/^\/+|\/+$/g, '')
   if (!cleanPath) return null
 
-  // 0. Zuerst der Cache-Spiegel: Dateien, die die App gespeichert hat, werden
-  //    über die Cache Storage API gespiegelt, damit der Service Worker sie
-  //    ohne Ordner-Berechtigung ausliefern kann.
-  try {
-    const cached = await getCachedFile(cleanPath)
-    if (cached) return cached
-  } catch (err) {
-    console.warn('findSavedFile Cache Fehler:', err)
-  }
-
   // 1. Try FSA handle stored in IndexedDB
   try {
     const storedHandle = await getStoredDirectoryHandle()
@@ -156,83 +146,6 @@ export async function findSavedFile(relativePath: string): Promise<File | null> 
   }
 
   return null
-}
-
-/**
- * Name des Cache-Speichers, in dem gespeicherte Dateien für den Service Worker
- * gespiegelt werden.
- */
-export const FILES_CACHE_NAME = 'pwa-islands-files-v1'
-
-function cachedFileRequest(name: string): Request {
-  const cleanPath = name.replace(/^\/+|\/+$/g, '')
-  // Schrägstriche müssen erhalten bleiben, damit Dateien in Unterordnern unter
-  // ihrem vollen relativen Pfad (z. B. /projekte/meta.txt) abgelegt werden.
-  // encodeURIComponent würde sie zu %2F machen und den Pfad zerstören.
-  const encodedPath = cleanPath
-    .split('/')
-    .map((segment) => encodeURIComponent(segment))
-    .join('/')
-  return new Request(`${location.origin}/${encodedPath}`)
-}
-
-/**
- * Legt eine Kopie einer gespeicherten Datei im Cache ab, damit der Service
- * Worker sie unter /<name> ausliefern kann.
- */
-export async function cacheFile(name: string, content: string | Blob): Promise<void> {
-  if (typeof caches === 'undefined') return
-  const cache = await caches.open(FILES_CACHE_NAME)
-  const request = cachedFileRequest(name)
-  let body: Blob
-  if (typeof content === 'string') {
-    body = new Blob([content], { type: getMimeType(name) })
-  } else {
-    body = content
-  }
-  await cache.put(
-    request,
-    new Response(body, {
-      status: 200,
-      headers: {
-        'Content-Type': getMimeType(name, body.type),
-        'Content-Length': body.size.toString(),
-      },
-    })
-  )
-}
-
-/** Entfernt eine gespiegelte Datei aus dem Cache. */
-export async function uncacheFile(name: string): Promise<void> {
-  if (typeof caches === 'undefined') return
-  const cache = await caches.open(FILES_CACHE_NAME)
-  await cache.delete(cachedFileRequest(name))
-}
-
-/** Liest eine gespiegelte Datei aus dem Cache (für den Service Worker). */
-export async function getCachedFile(name: string): Promise<File | null> {
-  if (typeof caches === 'undefined') return null
-  const cache = await caches.open(FILES_CACHE_NAME)
-  const response = await cache.match(cachedFileRequest(name))
-  if (!response) return null
-  const blob = await response.blob()
-  return new File([blob], name, {
-    type: response.headers.get('Content-Type') ?? getMimeType(name),
-  })
-}
-
-/** Listet alle im Cache gespiegelten Dateinamen auf. */
-export async function listCachedFileNames(): Promise<string[]> {
-  if (typeof caches === 'undefined') return []
-  const cache = await caches.open(FILES_CACHE_NAME)
-  const requests = await cache.keys()
-  return requests
-    .map((req) => {
-      const pathname = new URL(req.url).pathname
-      if (!pathname.startsWith('/') || pathname.startsWith('/files')) return ''
-      return decodeURIComponent(pathname.slice(1))
-    })
-    .filter((name) => name.length > 0)
 }
 
 const MIME_TYPES: Record<string, string> = {
