@@ -11,8 +11,20 @@ declare let self: ServiceWorkerGlobalScope & {
 self.skipWaiting()
 clientsClaim()
 
-precacheAndRoute(self.__WB_MANIFEST || [])
+// Nur EINE Referenz auf self.__WB_MANIFEST erlaubt (vite-plugin-pwa ersetzt
+// genau ein Vorkommen). Deshalb hier einmal in eine lokale Variable legen.
+const precacheManifest: Array<string | { revision: string | null; url: string }> =
+  self.__WB_MANIFEST || []
+
+precacheAndRoute(precacheManifest)
 cleanupOutdatedCaches()
+
+// Die Datei-API (/api.js, /api.d.ts) liegt ungehasht im dist/Wurzelverzeichnis
+// und steht in Produktion im Precache-Manifest, wird also von precacheAndRoute
+// bedient. In der Entwicklung liefert das Vite-Plugin (vite.config.ts) die
+// Dateien direkt aus. In beiden Fällen sind es daher nie gespeicherte Dateien:
+// die Pfade werden in isInternalPath() ausgenommen (siehe unten),
+// dedizierte Routen sind nicht nötig.
 
 // App-Shell nur noch für die App-Route /files. / wird von der Datei-Route
 // unten behandelt (gespeicherte index.html); fehlt sie, greift der Catch-all
@@ -63,13 +75,13 @@ registerRoute(
 
 // Sub-Ressourcen gespeicherter Dateien (nicht-navigationale Requests, z. B. CSS,
 // JS oder Bilder, die eine Island-Datei relativ nachlädt).
-// Vite-Dev-Pfade (/src/, /@vite/, /node_modules/, /@fs/) werden nie als
-// gespeicherte Dateien behandelt, damit der Dev-Modulgraph intakt bleibt.
+// App-eigene Dateien und Vite-Dev-Pfade (/src/, /@vite/, /node_modules/, /@fs/)
+// werden nie als gespeicherte Dateien behandelt (siehe isInternalPath()).
 registerRoute(
   ({ request, url, sameOrigin }) =>
     sameOrigin &&
     url.pathname !== '/' &&
-    !isDevInternalPath(url.pathname) &&
+    !isInternalPath(url.pathname) &&
     request.mode !== 'navigate',
   async ({ request, url }) => {
     const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ''))
@@ -126,20 +138,41 @@ function resolveRequestPath(pathname: string): string {
   return `${trimmed}/index.html`
 }
 
-/** Vite-Dev-/Build-interne Pfade, die nie gespeicherte Dateien sind. */
-function isDevInternalPath(pathname: string): boolean {
-  return (
-    pathname.startsWith('/src/') ||
-    pathname.startsWith('/@vite/') ||
-    pathname.startsWith('/@fs/') ||
-    pathname.startsWith('/@id/') ||
-    pathname.startsWith('/node_modules/') ||
+/**
+ * Pfade, die nie gespeicherte Dateien sind und daher von der Datei-Route
+ * ausgenommen werden.
+ *
+ * Zwei Gruppen:
+ * - App-eigene Dateien, die es in jedem Build gibt (API, Manifest, App-Assets).
+ * - Vite-Dev-Pfade, die nur im Entwicklungsmodus existieren. Sie werden per
+ *   import.meta.env.DEV entfernt, damit sie im Produktions-SW nicht mitlaufen.
+ */
+function isInternalPath(pathname: string): boolean {
+  // Immer ausgenommen: Dateien der App selbst.
+  if (
+    pathname === '/api.js' ||
+    pathname === '/api.d.ts' ||
     pathname.startsWith('/assets/') ||
-    pathname.startsWith('/dev-sw.js') ||
     pathname.startsWith('/manifest.webmanifest') ||
     pathname === '/sw.js' ||
     pathname === '/registerSW.js'
-  )
+  ) {
+    return true
+  }
+
+  // Nur im Entwicklungsmodus vorhanden (Vite-Modulgraph).
+  if (import.meta.env.DEV) {
+    return (
+      pathname.startsWith('/src/') ||
+      pathname.startsWith('/@vite/') ||
+      pathname.startsWith('/@fs/') ||
+      pathname.startsWith('/@id/') ||
+      pathname.startsWith('/node_modules/') ||
+      pathname.startsWith('/dev-sw.js')
+    )
+  }
+
+  return false
 }
 
 async function appShell(

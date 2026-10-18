@@ -176,6 +176,62 @@ const MIME_TYPES: Record<string, string> = {
   zip: 'application/zip',
 }
 
+export function normalizePath(path: string): string {
+  return (path ?? '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/')
+}
+
+export function splitPath(path: string): string[] {
+  const clean = normalizePath(path)
+  return clean ? clean.split('/').filter(Boolean) : []
+}
+
+/**
+ * Findet die aktive Speicher-Wurzel: zuerst der gespeicherte FSA-Ordner,
+ * danach OPFS. Liefert null, wenn keiner verfügbar ist (z. B. wenn die
+ * Berechtigung für den gespeicherten Ordner fehlt).
+ */
+export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | null> {
+  try {
+    const storedHandle = await getStoredDirectoryHandle()
+    if (storedHandle) {
+      let perm: PermissionState = 'granted'
+      if (storedHandle.queryPermission) {
+        try {
+          perm = await storedHandle.queryPermission({ mode: 'readwrite' })
+        } catch {
+          perm = 'prompt'
+        }
+      }
+      if (perm === 'granted') return storedHandle
+    }
+  } catch (err) {
+    console.warn('findActiveStorage FSA Fehler:', err)
+  }
+
+  try {
+    return await getOPFSDirectoryHandle()
+  } catch (err) {
+    console.warn('findActiveStorage OPFS Fehler:', err)
+    return null
+  }
+}
+
+/**
+ * Läuft von einer Wurzel-Handle entlang der Pfadsegmente zu einem
+ * Verzeichnis. Mit create=true werden fehlende Ordner angelegt.
+ */
+export async function getDirectory(
+  root: FileSystemDirectoryHandle,
+  dirs: string[],
+  create = false
+): Promise<FileSystemDirectoryHandle> {
+  let current = root
+  for (const segment of dirs) {
+    current = await current.getDirectoryHandle(segment, { create })
+  }
+  return current
+}
+
 export function getMimeType(filename: string, fallback?: string): string {
   const dotIndex = filename.lastIndexOf('.')
   if (dotIndex !== -1) {
