@@ -377,19 +377,6 @@ code {
   }
 }
 
-.files-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.files-header h2 {
-  margin: 0;
-}
-
 .files-toolbar {
   display: flex;
   align-items: center;

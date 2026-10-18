@@ -1,8 +1,13 @@
-// IndexedDB-Hilfsmethoden für FileSystemDirectoryHandle (FSA)
-const DB_NAME = 'pwa-islands-db'
-const DB_VERSION = 1
-const STORE_NAME = 'handles'
-const HANDLE_KEY = 'selected_folder'
+// IndexedDB-Persistenz wird aus storage.ts wiederverwendet (siehe Import).
+import {
+  getStoredDirectoryHandle,
+  storeDirectoryHandle,
+  clearStoredDirectoryHandle,
+  getStoredStorageType,
+  storeStorageType,
+  clearStoredStorageType,
+  getOPFSDirectoryHandle,
+} from './storage.ts'
 
 export interface FileEntry {
   name: string
@@ -23,6 +28,7 @@ export interface IFileStorage {
   listFiles(): Promise<FileEntry[]>
   readFile(name: string): Promise<string>
   createFile(name: string, content: string | Blob): Promise<void>
+  writeFile(name: string, content: string | Blob): Promise<void>
   createDirectory(name: string): Promise<void>
   deleteEntry(name: string): Promise<void>
   ensureWritePermission(): Promise<boolean>
@@ -151,6 +157,33 @@ export class FileSystemHandleStorage implements IFileStorage {
     if (!(await this.ensureWritePermission())) {
       throw new Error('Schreibzugriff verweigert.')
     }
+    // Vorhandene Dateien nicht überschreiben.
+    let alreadyExists = false
+    try {
+      await this.handle.getFileHandle(name)
+      alreadyExists = true
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'NotFoundError')) {
+        throw err
+      }
+    }
+    if (alreadyExists) {
+      throw new Error(`Datei "${name}" existiert bereits.`)
+    }
+    const fileHandle = await this.handle.getFileHandle(name, { create: true })
+    const writable = await fileHandle.createWritable()
+    await writable.write(content)
+    await writable.close()
+  }
+
+  /**
+   * Überschreibt eine vorhandene Datei (oder erstellt sie, falls sie fehlt).
+   * Für Bearbeitungen, im Gegensatz zu {@link createFile}.
+   */
+  async writeFile(name: string, content: string | Blob): Promise<void> {
+    if (!(await this.ensureWritePermission())) {
+      throw new Error('Schreibzugriff verweigert.')
+    }
     const fileHandle = await this.handle.getFileHandle(name, { create: true })
     const writable = await fileHandle.createWritable()
     await writable.write(content)
@@ -170,79 +203,6 @@ export class FileSystemHandleStorage implements IFileStorage {
     }
     await this.handle.removeEntry(name, { recursive: true })
   }
-}
-
-function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
-
-    request.onupgradeneeded = () => {
-      const db = request.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME)
-      }
-    }
-
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-  })
-}
-
-export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
-  try {
-    const db = await openDB()
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
-      const store = tx.objectStore(STORE_NAME)
-      const req = store.get(HANDLE_KEY)
-
-      req.onsuccess = () => resolve(req.result ?? null)
-      req.onerror = () => reject(req.error)
-    })
-  } catch (error) {
-    console.error('Fehler beim Abrufen des gespeicherten Ordners:', error)
-    return null
-  }
-}
-
-export async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    const req = store.put(handle, HANDLE_KEY)
-
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error)
-  })
-}
-
-export async function clearStoredDirectoryHandle(): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
-    const store = tx.objectStore(STORE_NAME)
-    const req = store.delete(HANDLE_KEY)
-
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error)
-  })
-}
-
-export async function getOPFSDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
-  if (
-    typeof navigator !== 'undefined' &&
-    'storage' in navigator &&
-    typeof navigator.storage.getDirectory === 'function'
-  ) {
-    try {
-      return await navigator.storage.getDirectory()
-    } catch (err) {
-      console.error('Fehler beim Abrufen des OPFS-Handles:', err)
-      return null
-    }
-  }
-  return null
 }
 
 function formatBytes(bytes: number): string {
@@ -352,9 +312,6 @@ function openFileEditorModal(options: FileEditorModalOptions): void {
   document.addEventListener('keydown', handleKeydown)
   closeBtn.addEventListener('click', closeModal)
   cancelBtn.addEventListener('click', closeModal)
-  modalOverlay.addEventListener('click', (e) => {
-    if (e.target === modalOverlay) closeModal()
-  })
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
@@ -440,9 +397,6 @@ function openFolderNameModal(options: { onSave: (name: string) => Promise<void> 
   document.addEventListener('keydown', handleKeydown)
   closeBtn.addEventListener('click', closeModal)
   cancelBtn.addEventListener('click', closeModal)
-  modalOverlay.addEventListener('click', (e) => {
-    if (e.target === modalOverlay) closeModal()
-  })
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
@@ -567,7 +521,6 @@ async function renderGenericFileList(
               <span class="file-icon" aria-hidden="true">${icon}</span>
               <span class="file-name" title="${entry.name}">${entry.name}</span>
             </td>
-            <td class="file-type-cell">${isDir ? 'Ordner' : 'Datei'}</td>
             <td class="file-size-cell">${sizeDisplay}</td>
             <td class="file-date-cell">${dateDisplay}</td>
             <td class="files-actions-cell">
@@ -613,7 +566,6 @@ async function renderGenericFileList(
           <thead>
             <tr>
               <th scope="col" class="th-name">Name</th>
-              <th scope="col" class="th-type">Typ</th>
               <th scope="col" class="th-size">Größe</th>
               <th scope="col" class="th-date">Zuletzt geändert</th>
               <th scope="col" class="th-actions">Aktionen</th>
@@ -709,13 +661,6 @@ export function renderFilesView(container: HTMLElement): void {
 
   container.innerHTML = `
     <div class="files-page">
-      <header class="files-header">
-        <button id="btn-back-home" type="button" class="btn btn-secondary">
-          &larr; Zurück zur Startseite
-        </button>
-        <h2>Lokales Dateisystem</h2>
-      </header>
-
       <div id="files-alert-area"></div>
 
       <div class="files-toolbar">
@@ -737,17 +682,12 @@ export function renderFilesView(container: HTMLElement): void {
     </div>
   `
 
-  const btnBack = container.querySelector<HTMLButtonElement>('#btn-back-home')!
   const alertArea = container.querySelector<HTMLDivElement>('#files-alert-area')!
   const folderNameDisplay = container.querySelector<HTMLSpanElement>('#folder-name-display')!
   const statusIndicator = container.querySelector<HTMLSpanElement>('#status-indicator')!
   const folderActions = container.querySelector<HTMLDivElement>('#folder-actions')!
   const filesContent = container.querySelector<HTMLDivElement>('#files-content')!
   const fileImportInput = container.querySelector<HTMLInputElement>('#files-import-input')!
-
-  // Echte Navigation statt SPA-Routing: / wird vom Service Worker behandelt
-  // (gespeicherte index.html oder App-Shell).
-  btnBack.addEventListener('click', () => window.location.assign('/'))
 
   if (!hasDirectoryPicker && !hasOPFS) {
     statusIndicator.className = 'status-indicator status-error'
@@ -993,7 +933,7 @@ export function renderFilesView(container: HTMLElement): void {
         fileName,
         initialContent: content,
         onSave: async (name, newContent) => {
-          await storage.createFile(name, newContent)
+          await storage.writeFile(name, newContent)
           await refreshCurrentList()
         },
       })
@@ -1046,6 +986,7 @@ export function renderFilesView(container: HTMLElement): void {
       })
 
       await storeDirectoryHandle(handle)
+      await storeStorageType('fsa')
       const storage = new FileSystemHandleStorage(handle, 'fsa', false)
       await updateView(storage)
     } catch (err: unknown) {
@@ -1070,6 +1011,7 @@ export function renderFilesView(container: HTMLElement): void {
   async function handleUseOPFS() {
     const opfsHandle = await getOPFSDirectoryHandle()
     if (opfsHandle) {
+      await storeStorageType('opfs')
       const storage = new FileSystemHandleStorage(opfsHandle, 'opfs', isFallbackToOPFS)
       await updateView(storage)
     } else {
@@ -1079,6 +1021,7 @@ export function renderFilesView(container: HTMLElement): void {
 
   async function handleDisconnectFolder() {
     await clearStoredDirectoryHandle()
+    await clearStoredStorageType()
     await updateView(null)
   }
 
@@ -1139,6 +1082,16 @@ export function renderFilesView(container: HTMLElement): void {
     }
 
     try {
+      // Wenn OPFS zuvor ausdrücklich gewählt wurde, diese Wahl beibehalten
+      // (solange kein FSA-Ordner erzwungen wird).
+      if (!forceLocal) {
+        const storedType = await getStoredStorageType()
+        if (storedType === 'opfs' && hasOPFS) {
+          await handleUseOPFS()
+          return
+        }
+      }
+
       // Async-Ladevorgang (Datenbank) isolieren von requestPermission
       const storedHandle = await getStoredDirectoryHandle()
       if (!storedHandle) {

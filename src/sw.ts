@@ -46,6 +46,13 @@ registerRoute(
 registerRoute(
   ({ request, sameOrigin }) => sameOrigin && request.mode === 'navigate',
   async ({ request, url, event }) => {
+    // Mit ?editisland wird immer die App-Shell ausgeliefert – auch wenn unter
+    // dem Pfad eine gespeicherte Datei liegt. Damit lässt sich eine Island
+    // aufrufen und bearbeiten, statt sie zu rendern.
+    if (url.searchParams.has('editisland')) {
+      return appShell(request, url, event)
+    }
+
     // /foo.html -> gespeicherte Datei foo.html; / -> index.html;
     // /foo -> foo/index.html (wie bei einem Webserver mit Index-Datei).
     const relativePath = resolveRequestPath(url.pathname)

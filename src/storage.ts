@@ -2,6 +2,7 @@ export const DB_NAME = 'pwa-islands-db'
 export const DB_VERSION = 1
 export const STORE_NAME = 'handles'
 export const HANDLE_KEY = 'selected_folder'
+export const STORAGE_TYPE_KEY = 'selected_storage_type'
 
 export function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -54,6 +55,49 @@ export async function clearStoredDirectoryHandle(): Promise<void> {
     const tx = db.transaction(STORE_NAME, 'readwrite')
     const store = tx.objectStore(STORE_NAME)
     const req = store.delete(HANDLE_KEY)
+
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+/** Liest die zuletzt gewählte Speicherart ('fsa' oder 'opfs'). */
+export async function getStoredStorageType(): Promise<'fsa' | 'opfs' | null> {
+  try {
+    const db = await openDB()
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readonly')
+      const store = tx.objectStore(STORE_NAME)
+      const req = store.get(STORAGE_TYPE_KEY)
+
+      req.onsuccess = () => resolve((req.result as 'fsa' | 'opfs') ?? null)
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error('Fehler beim Abrufen der gespeicherten Speicherart:', error)
+    return null
+  }
+}
+
+/** Speichert die zuletzt gewählte Speicherart. */
+export async function storeStorageType(type: 'fsa' | 'opfs'): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const store = tx.objectStore(STORE_NAME)
+    const req = store.put(type, STORAGE_TYPE_KEY)
+
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async function clearStoredStorageType(): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const store = tx.objectStore(STORE_NAME)
+    const req = store.delete(STORAGE_TYPE_KEY)
 
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
