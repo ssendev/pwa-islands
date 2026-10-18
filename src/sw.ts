@@ -22,7 +22,7 @@ cleanupOutdatedCaches()
 // Fehler und die SW-Evaluation schlägt fehl.
 registerRoute(
   new NavigationRoute(
-    ({ request, url }) => appShell(request, url),
+    ({ request, url, event }) => appShell(request, url, event),
     { allowlist: [/^\/files\/?$/] }
   )
 )
@@ -33,7 +33,7 @@ registerRoute(
 // abgefangen, daher ist hier kein /files-Ausschluss nötig.
 registerRoute(
   ({ request, sameOrigin }) => sameOrigin && request.mode === 'navigate',
-  async ({ request, url }) => {
+  async ({ request, url, event }) => {
     // /foo.html -> gespeicherte Datei foo.html; / -> index.html;
     // /foo -> foo/index.html (wie bei einem Webserver mit Index-Datei).
     const relativePath = resolveRequestPath(url.pathname)
@@ -57,7 +57,7 @@ registerRoute(
 
     // Datei nicht gefunden: App-Shell ausliefern, damit die App eine deutsche
     // 404-/„Ordner wählen"-Meldung zeigen kann.
-    return appShell(request, url)
+    return appShell(request, url, event)
   }
 )
 
@@ -100,7 +100,7 @@ registerRoute(
 // nicht bereits erfasste Navigationen.
 registerRoute(
   ({ request }) => request.mode === 'navigate',
-  ({ request, url }) => appShell(request, url)
+  ({ request, url, event }) => appShell(request, url, event)
 )
 
 /**
@@ -142,11 +142,16 @@ function isDevInternalPath(pathname: string): boolean {
   )
 }
 
-async function appShell(request: Request, url: URL): Promise<Response> {
+async function appShell(
+  request: Request,
+  url: URL,
+  event: ExtendableEvent
+): Promise<Response> {
   try {
     const handler = createHandlerBoundToURL('index.html')
-    return await handler({ request, url, event: undefined as any, params: {} })
-  } catch {
+    return await handler({ request, url, event, params: {} })
+  } catch (err) {
+    console.error('SW: App-Shell konnte nicht geladen werden:', err)
     return fetch(request)
   }
 }
