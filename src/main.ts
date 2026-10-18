@@ -67,8 +67,11 @@ function renderMainView() {
 
 function renderRoute() {
   const path = window.location.pathname.replace(/\/$/, '') || '/'
+  // Nur die App-Routen werden clientseitig gerendert. Gespeicherte Dateien
+  // liegen direkt unter /<name> und werden vom Service Worker ausgeliefert,
+  // dorthin wird per echter Navigation (location.assign) gewechselt.
   if (path === '/files') {
-    renderFilesView(routerView, navigate)
+    renderFilesView(routerView)
   } else {
     renderMainView()
   }

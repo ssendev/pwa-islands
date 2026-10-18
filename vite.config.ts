@@ -7,7 +7,10 @@ export default defineConfig({
   },
 
   plugins: [VitePWA({
-    registerType: 'prompt',
+    strategies: 'injectManifest',
+    srcDir: 'src',
+    filename: 'sw.ts',
+    registerType: 'autoUpdate',
     injectRegister: false,
 
     pwaAssets: {
@@ -24,15 +27,12 @@ export default defineConfig({
       display: "fullscreen"
     },
 
-    workbox: {
+    injectManifest: {
       globPatterns: ['**/*.{js,css,html,svg,png,ico}'],
-      cleanupOutdatedCaches: true,
-      clientsClaim: true,
-      navigateFallback: 'index.html',
     },
 
     devOptions: {
-      enabled: false,
+      enabled: true,
       type: 'module',
     },
   })],

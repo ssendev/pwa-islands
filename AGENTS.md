@@ -4,7 +4,7 @@ Dies ist eine PWA welche dazu dient eine reihe von mini APPs zu speichern und zw
 
 # Architecture
 
-Dies ist eine minimale PWA in der kleine .html projekte gespeichert werden können
+Dies ist eine minimale PWA in der kleine .html projekte mit FS API gespeichert undwerden und dann angezeigt werden können
 
 # UI
 

@@ -1,4 +1,5 @@
 // IndexedDB-Hilfsmethoden für FileSystemDirectoryHandle (FSA)
+import { cacheFile, uncacheFile } from './storage.ts'
 const DB_NAME = 'pwa-islands-db'
 const DB_VERSION = 1
 const STORE_NAME = 'handles'
@@ -23,6 +24,7 @@ export interface IFileStorage {
   listFiles(): Promise<FileEntry[]>
   readFile(name: string): Promise<string>
   createFile(name: string, content: string | Blob): Promise<void>
+  createDirectory(name: string): Promise<void>
   deleteEntry(name: string): Promise<void>
   ensureWritePermission(): Promise<boolean>
 }
@@ -34,19 +36,40 @@ export class FileSystemHandleStorage implements IFileStorage {
   private readonly handle: FileSystemDirectoryHandle
   readonly type: 'fsa' | 'opfs'
   readonly isFallback: boolean
+  /**
+   * Anzeigename (z. B. "Origin Private File System" oder der Ordnername), damit
+   * der Pfad in der Oberfläche erhalten bleibt, wenn in einen Unterordner
+   * gewechselt wird.
+   */
+  private readonly displayName: string
+  /** Pfad dieses Ordners relativ zur Wurzel, z. B. "projekte" oder "a/b". */
+  readonly subPath: string
+  /** Wurzel-Handle, auf dem die Navigation gestartet wurde (für "nach oben"). */
+  readonly rootHandle: FileSystemDirectoryHandle
 
   constructor(
     handle: FileSystemDirectoryHandle,
     type: 'fsa' | 'opfs',
-    isFallback: boolean = false
+    isFallback: boolean = false,
+    subPath: string = '',
+    displayName?: string,
+    rootHandle?: FileSystemDirectoryHandle
   ) {
     this.handle = handle
     this.type = type
     this.isFallback = isFallback
+    this.subPath = subPath
+    this.rootHandle = rootHandle ?? handle
+    this.displayName = displayName ?? (type === 'opfs' ? 'Origin Private File System' : handle.name)
   }
 
   get name(): string {
-    return this.type === 'opfs' ? 'Origin Private File System' : this.handle.name
+    return this.subPath ? `${this.displayName}/${this.subPath}` : this.displayName
+  }
+
+  /** Anzeigename des Wurzelordners ohne Unterpfad. */
+  get rootName(): string {
+    return this.displayName
   }
 
   get canChangeFolder(): boolean {
@@ -55,6 +78,20 @@ export class FileSystemHandleStorage implements IFileStorage {
 
   get rawHandle(): FileSystemDirectoryHandle {
     return this.handle
+  }
+
+  /** Wechselt in einen direkten Unterordner und liefert die gescopte Sicht. */
+  async enterDirectory(name: string): Promise<FileSystemHandleStorage> {
+    const nextHandle = await this.handle.getDirectoryHandle(name)
+    const nextPath = this.subPath ? `${this.subPath}/${name}` : name
+    return new FileSystemHandleStorage(
+      nextHandle,
+      this.type,
+      this.isFallback,
+      nextPath,
+      this.displayName,
+      this.rootHandle
+    )
   }
 
   async listFiles(): Promise<FileEntry[]> {
@@ -119,6 +156,13 @@ export class FileSystemHandleStorage implements IFileStorage {
     const writable = await fileHandle.createWritable()
     await writable.write(content)
     await writable.close()
+  }
+
+  async createDirectory(name: string): Promise<void> {
+    if (!(await this.ensureWritePermission())) {
+      throw new Error('Schreibzugriff verweigert.')
+    }
+    await this.handle.getDirectoryHandle(name, { create: true })
   }
 
   async deleteEntry(name: string): Promise<void> {
@@ -335,14 +379,133 @@ function openFileEditorModal(options: FileEditorModalOptions): void {
   })
 }
 
+function openFolderNameModal(options: { onSave: (name: string) => Promise<void> }): void {
+  const existingModal = document.querySelector('.modal-overlay')
+  if (existingModal) existingModal.remove()
+
+  const modalOverlay = document.createElement('div')
+  modalOverlay.className = 'modal-overlay'
+
+  modalOverlay.innerHTML = `
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <header class="modal-header">
+        <h3 id="modal-title">Neuen Ordner erstellen</h3>
+        <button type="button" class="modal-close-btn" aria-label="Schließen">&times;</button>
+      </header>
+      <form id="modal-form">
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="modal-file-name">Ordnername:</label>
+            <input
+              type="text"
+              id="modal-file-name"
+              class="form-input"
+              value="Neuer Ordner"
+              required
+              placeholder="z. B. projekte"
+            />
+          </div>
+        </div>
+        <footer class="modal-footer">
+          <button type="button" id="modal-btn-cancel" class="btn btn-secondary">
+            Abbrechen
+          </button>
+          <button type="submit" id="modal-btn-save" class="btn btn-primary">
+            Erstellen
+          </button>
+        </footer>
+      </form>
+    </div>
+  `
+
+  document.body.appendChild(modalOverlay)
+
+  const nameInput = modalOverlay.querySelector<HTMLInputElement>('#modal-file-name')!
+  const form = modalOverlay.querySelector<HTMLFormElement>('#modal-form')!
+  const closeBtn = modalOverlay.querySelector<HTMLButtonElement>('.modal-close-btn')!
+  const cancelBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-cancel')!
+  const saveBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-save')!
+
+  nameInput.focus()
+  nameInput.select()
+
+  function closeModal() {
+    document.removeEventListener('keydown', handleKeydown)
+    modalOverlay.remove()
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') closeModal()
+  }
+
+  document.addEventListener('keydown', handleKeydown)
+  closeBtn.addEventListener('click', closeModal)
+  cancelBtn.addEventListener('click', closeModal)
+  modalOverlay.addEventListener('click', (e) => {
+    if (e.target === modalOverlay) closeModal()
+  })
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const folderName = nameInput.value.trim()
+    if (!folderName) {
+      alert('Bitte geben Sie einen gültigen Ordnernamen ein.')
+      return
+    }
+
+    saveBtn.disabled = true
+    saveBtn.textContent = 'Wird erstellt...'
+
+    try {
+      await options.onSave(folderName)
+      closeModal()
+    } catch (err: unknown) {
+      saveBtn.disabled = false
+      saveBtn.textContent = 'Erstellen'
+      alert(`Fehler beim Erstellen des Ordners: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  })
+}
+
+/**
+ * Spiegelt die aufgelisteten Dateien in die Cache Storage, damit der Service
+ * Worker sie unter /<name> ausliefern kann. Fehler werden nur geloggt.
+ */
+async function mirrorFilesToCache(storage: IFileStorage, entries: FileEntry[]): Promise<void> {
+  for (const entry of entries) {
+    if (entry.kind !== 'file') continue
+    try {
+      const content = await storage.readFile(entry.name)
+      await cacheFile(relativePathOf(storage, entry.name), content)
+    } catch (err) {
+      console.warn(`Datei "${entry.name}" konnte nicht gespiegelt werden:`, err)
+    }
+  }
+}
+
+/**
+ * Voller relativer Pfad einer Datei inklusive Unterordner, z. B.
+ * "projekte/meta.txt". Ausserhalb eines Ordners der blosse Name.
+ */
+function relativePathOf(storage: IFileStorage, name: string): string {
+  if (storage instanceof FileSystemHandleStorage && storage.subPath) {
+    return `${storage.subPath}/${name}`
+  }
+  return name
+}
+
 async function renderGenericFileList(
   contentEl: HTMLElement,
   storage: IFileStorage,
   handlers: {
     onRefresh: () => void
+    onNavigateUp: () => void
     onRequestNewFile: () => void
+    onRequestNewFolder: () => void
     onRequestImport: () => void
     onRequestEdit: (name: string) => void
+    onRequestOpen: (name: string) => void
+    onRequestOpenFolder: (name: string) => void
   }
 ): Promise<void> {
   contentEl.innerHTML = `
@@ -354,9 +517,24 @@ async function renderGenericFileList(
 
   try {
     const entries = await storage.listFiles()
+    const currentSubPath = storage instanceof FileSystemHandleStorage ? storage.subPath : ''
+
+    // Alle Dateien im Hintergrund in den Cache spiegeln, damit der Service
+    // Worker sie unter /<name> ohne Ordner-Berechtigung ausliefern kann.
+    void mirrorFilesToCache(storage, entries)
 
     if (entries.length === 0) {
       contentEl.innerHTML = `
+        ${
+          currentSubPath
+            ? `<div class="files-breadcrumb">
+                <button type="button" id="btn-navigate-up" class="btn btn-secondary btn-sm">
+                  ⬅️ Übergeordneter Ordner
+                </button>
+                <span class="breadcrumb-path">${storage.name}</span>
+              </div>`
+            : ''
+        }
         <div class="empty-state">
           <div class="empty-icon">📁</div>
           <h3>Verzeichnis ist leer</h3>
@@ -365,13 +543,18 @@ async function renderGenericFileList(
             <button id="btn-empty-new-file" type="button" class="btn btn-primary">
               ➕ Neue Datei
             </button>
+            <button id="btn-empty-new-folder" type="button" class="btn btn-secondary">
+              📁 Neuer Ordner
+            </button>
             <button id="btn-empty-import-file" type="button" class="btn btn-secondary">
               📥 Dateien importieren
             </button>
           </div>
         </div>
       `
+      contentEl.querySelector<HTMLButtonElement>('#btn-navigate-up')?.addEventListener('click', handlers.onNavigateUp)
       contentEl.querySelector<HTMLButtonElement>('#btn-empty-new-file')?.addEventListener('click', handlers.onRequestNewFile)
+      contentEl.querySelector<HTMLButtonElement>('#btn-empty-new-folder')?.addEventListener('click', handlers.onRequestNewFolder)
       contentEl.querySelector<HTMLButtonElement>('#btn-empty-import-file')?.addEventListener('click', handlers.onRequestImport)
       return
     }
@@ -411,8 +594,13 @@ async function renderGenericFileList(
             <td class="files-actions-cell">
               ${
                 isDir
-                  ? ''
-                  : `<button type="button" class="btn btn-secondary btn-sm btn-edit-entry" data-entry="${encodeURIComponent(entry.name)}" title="Datei bearbeiten">
+                  ? `<button type="button" class="btn btn-primary btn-sm btn-open-folder" data-entry="${encodeURIComponent(entry.name)}" title="Ordner öffnen">
+                      📂 Öffnen
+                    </button>`
+                  : `<button type="button" class="btn btn-primary btn-sm btn-open-entry" data-entry="${encodeURIComponent(entry.name)}" title="Datei öffnen">
+                      📂 Öffnen
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm btn-edit-entry" data-entry="${encodeURIComponent(entry.name)}" title="Datei bearbeiten">
                       ✏️ Bearbeiten
                     </button>`
               }
@@ -426,8 +614,20 @@ async function renderGenericFileList(
       .join('')
 
     contentEl.innerHTML = `
+      ${
+        currentSubPath
+          ? `<div class="files-breadcrumb">
+              <button type="button" id="btn-navigate-up" class="btn btn-secondary btn-sm">
+                ⬅️ Übergeordneter Ordner
+              </button>
+              <span class="breadcrumb-path">${storage.name}</span>
+            </div>`
+          : ''
+      }
       <div class="files-summary">
-        <span>${summaryText} in <strong>${storage.name}</strong></span>
+        <span>${summaryText}${
+          currentSubPath ? '' : ` in <strong>${storage.name}</strong>`
+        }</span>
       </div>
       <div class="table-responsive">
         <table class="files-table">
@@ -446,6 +646,26 @@ async function renderGenericFileList(
         </table>
       </div>
     `
+
+    contentEl.querySelector<HTMLButtonElement>('#btn-navigate-up')?.addEventListener('click', handlers.onNavigateUp)
+
+    const openButtons = contentEl.querySelectorAll<HTMLButtonElement>('.btn-open-entry')
+    openButtons.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLButtonElement
+        const entryName = decodeURIComponent(target.dataset.entry || '')
+        if (entryName) handlers.onRequestOpen(entryName)
+      })
+    })
+
+    const openFolderButtons = contentEl.querySelectorAll<HTMLButtonElement>('.btn-open-folder')
+    openFolderButtons.forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const target = e.currentTarget as HTMLButtonElement
+        const entryName = decodeURIComponent(target.dataset.entry || '')
+        if (entryName) handlers.onRequestOpenFolder(entryName)
+      })
+    })
 
     const editButtons = contentEl.querySelectorAll<HTMLButtonElement>('.btn-edit-entry')
     editButtons.forEach((btn) => {
@@ -475,6 +695,7 @@ async function renderGenericFileList(
         if (confirm(`Möchten Sie "${entryName}" wirklich löschen?`)) {
           try {
             await storage.deleteEntry(entryName)
+            await uncacheFile(relativePathOf(storage, entryName))
             handlers.onRefresh()
           } catch (err: unknown) {
             alert(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`)
@@ -499,10 +720,7 @@ async function renderGenericFileList(
   }
 }
 
-export function renderFilesView(
-  container: HTMLElement,
-  navigate: (path: string) => void
-): void {
+export function renderFilesView(container: HTMLElement): void {
   const hasDirectoryPicker = typeof window !== 'undefined' && 'showDirectoryPicker' in window
   const hasOPFS =
     typeof navigator !== 'undefined' &&
@@ -549,7 +767,9 @@ export function renderFilesView(
   const filesContent = container.querySelector<HTMLDivElement>('#files-content')!
   const fileImportInput = container.querySelector<HTMLInputElement>('#files-import-input')!
 
-  btnBack.addEventListener('click', () => navigate('/'))
+  // Echte Navigation statt SPA-Routing: / wird vom Service Worker behandelt
+  // (gespeicherte index.html oder App-Shell).
+  btnBack.addEventListener('click', () => window.location.assign('/'))
 
   if (!hasDirectoryPicker && !hasOPFS) {
     statusIndicator.className = 'status-indicator status-error'
@@ -633,6 +853,9 @@ export function renderFilesView(
       <button id="btn-new-file" type="button" class="btn btn-primary">
         ➕ Neue Datei
       </button>
+      <button id="btn-new-folder" type="button" class="btn btn-primary">
+        📁 Neuer Ordner
+      </button>
       <button id="btn-import-file" type="button" class="btn btn-secondary">
         📥 Dateien importieren
       </button>
@@ -666,6 +889,7 @@ export function renderFilesView(
     `
 
     container.querySelector<HTMLButtonElement>('#btn-new-file')?.addEventListener('click', handleCreateFile)
+    container.querySelector<HTMLButtonElement>('#btn-new-folder')?.addEventListener('click', handleCreateFolder)
     container.querySelector<HTMLButtonElement>('#btn-import-file')?.addEventListener('click', handleImportFiles)
     container.querySelector<HTMLButtonElement>('#btn-refresh-folder')?.addEventListener('click', () => refreshCurrentList())
     container.querySelector<HTMLButtonElement>('#btn-change-folder')?.addEventListener('click', handleSelectFolder)
@@ -678,12 +902,84 @@ export function renderFilesView(
 
   async function refreshCurrentList() {
     if (!currentStorage) return
+
     await renderGenericFileList(filesContent, currentStorage, {
       onRefresh: refreshCurrentList,
+      onNavigateUp: () => {
+        void navigateUp()
+      },
       onRequestNewFile: handleCreateFile,
+      onRequestNewFolder: handleCreateFolder,
       onRequestImport: handleImportFiles,
       onRequestEdit: handleEditFile,
+      onRequestOpen: (name) => {
+        // Echte Browser-Navigation (kein SPA-Routing), damit der Service
+        // Worker unter /<pfad> die gespeicherte Datei ausliefern kann. Der
+        // volle relative Pfad bleibt erhalten, damit Dateien in Unterordnern
+        // unter /<ordner>/<name> geladen werden.
+        const path = relativePathOf(currentStorage!, name)
+        window.location.assign(
+          `/${path.split('/').map((segment) => encodeURIComponent(segment)).join('/')}`
+        )
+      },
+      onRequestOpenFolder: (name) => {
+        void openFolder(name)
+      },
     })
+  }
+
+  /** Öffnet einen Unterordner und zeigt dessen Inhalt in der Liste. */
+  async function openFolder(name: string) {
+    if (!currentStorage) return
+    const storage = currentStorage
+    if (!(storage instanceof FileSystemHandleStorage)) return
+
+    try {
+      if (!(await storage.ensureWritePermission())) {
+        console.warn('Kein Schreibzugriff auf den Ordner; Inhalt wird nur gelesen.')
+      }
+    } catch (err) {
+      console.error('Fehler bei der Berechtigungsprüfung:', err)
+    }
+
+    try {
+      const next = await storage.enterDirectory(name)
+      currentStorage = next
+      await refreshCurrentList()
+    } catch (err: unknown) {
+      alert(`Ordner "${name}" konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  /** Geht eine Ebene nach oben (nur innerhalb eines geöffneten Ordners). */
+  async function navigateUp() {
+    if (!currentStorage) return
+    const storage = currentStorage
+    if (!(storage instanceof FileSystemHandleStorage) || !storage.subPath) return
+
+    const parentPath = storage.subPath.includes('/')
+      ? storage.subPath.slice(0, storage.subPath.lastIndexOf('/'))
+      : ''
+
+    try {
+      let handle = storage.rootHandle
+      if (parentPath) {
+        for (const segment of parentPath.split('/')) {
+          handle = await handle.getDirectoryHandle(segment)
+        }
+      }
+      currentStorage = new FileSystemHandleStorage(
+        handle,
+        storage.type,
+        storage.isFallback,
+        parentPath,
+        storage.rootName,
+        storage.rootHandle
+      )
+      await refreshCurrentList()
+    } catch (err: unknown) {
+      alert(`Übergeordneter Ordner konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 
   function handleCreateFile() {
@@ -693,6 +989,18 @@ export function renderFilesView(
       mode: 'create',
       onSave: async (fileName, content) => {
         await storage.createFile(fileName, content)
+        await cacheFile(relativePathOf(storage, fileName), content)
+        await refreshCurrentList()
+      },
+    })
+  }
+
+  function handleCreateFolder() {
+    if (!currentStorage) return
+    const storage = currentStorage
+    openFolderNameModal({
+      onSave: async (folderName) => {
+        await storage.createDirectory(folderName)
         await refreshCurrentList()
       },
     })
@@ -709,6 +1017,7 @@ export function renderFilesView(
         initialContent: content,
         onSave: async (name, newContent) => {
           await storage.createFile(name, newContent)
+          await cacheFile(relativePathOf(storage, name), newContent)
           await refreshCurrentList()
         },
       })
@@ -735,6 +1044,7 @@ export function renderFilesView(
       try {
         for (const file of Array.from(fileImportInput.files)) {
           await currentStorage.createFile(file.name, file)
+          await cacheFile(relativePathOf(currentStorage, file.name), file)
         }
         await refreshCurrentList()
       } catch (err: unknown) {

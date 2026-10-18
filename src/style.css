@@ -478,6 +478,21 @@ code {
   font-weight: 500;
 }
 
+.files-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.breadcrumb-path {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  word-break: break-all;
+}
+
 .table-responsive {
   overflow-x: auto;
   border: 1px solid var(--border);
