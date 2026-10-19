@@ -1134,8 +1134,10 @@ export function renderFilesView(container: HTMLElement): void {
         mode: 'readwrite',
       })
 
-      await storeDirectoryHandle(handle)
+      // Speicherart ZUERST schreiben: das Ablegen eines FileSystemDirectoryHandle
+      // kann fehlschlagen (DataCloneError). Dann soll die Wahl trotzdem stehen.
       await storeStorageType('fsa')
+      await storeDirectoryHandle(handle)
       const storage = new FileSystemHandleStorage(handle, 'fsa', false)
       await updateView(storage)
     } catch (err: unknown) {
@@ -1151,6 +1153,11 @@ export function renderFilesView(container: HTMLElement): void {
     }
   }
 
+  /**
+   * Wechselt zum zuletzt gespeicherten lokalen Ordner. Ist einer vorhanden,
+   * wird diese Wahl auch als Speicherart gespeichert -- sonst greift beim
+   * naechsten Neuladen wieder die alte OPFS-Wahl.
+   */
   async function handleSwitchToLocalFolder() {
     // Um User Gesture Verluste durch IndexedDB zu vermeiden, nutzen wir
     // stattdessen den strikten und sicheren Start-Ablauf:
@@ -1203,6 +1210,13 @@ export function renderFilesView(container: HTMLElement): void {
           const permission = await storedHandle.requestPermission({ mode: 'readwrite' })
 
           if (permission === 'granted') {
+            // Zugriff ist jetzt da -- die Wahl persistieren, damit sie ein
+            // Neuladen uebersteht.
+            try {
+              await storeStorageType('fsa')
+            } catch (err) {
+              console.warn('Speicherart konnte nicht gespeichert werden:', err)
+            }
             const storage = new FileSystemHandleStorage(storedHandle, 'fsa', false)
             await updateView(storage)
           } else {
@@ -1225,11 +1239,15 @@ export function renderFilesView(container: HTMLElement): void {
       return
     }
 
+    // Die gespeicherte Wahl, falls ueberhaupt eine vorliegt.
+    let storedType: 'fsa' | 'opfs' | null = null
+
     try {
-      // Wenn OPFS zuvor ausdrücklich gewählt wurde, diese Wahl beibehalten
-      // (solange kein FSA-Ordner erzwungen wird).
+      // Wenn OPFS zuvor ausdruecklich gewaehlt wurde, diese Wahl beibehalten.
+      // Bei forceLocal (Zahnrad -> "Zu lokalem Ordner wechseln") wird dieser
+      // Zweig uebersprungen, damit der lokale Ordner erreichbar bleibt.
       if (!forceLocal) {
-        const storedType = await getStoredStorageType()
+        storedType = await getStoredStorageType()
         if (storedType === 'opfs' && hasOPFS) {
           await handleUseOPFS()
           return
@@ -1252,7 +1270,22 @@ export function renderFilesView(container: HTMLElement): void {
         }
       }
 
+      // Ab hier steht fest, dass der lokale Ordner verwendet wird. Die Wahl
+      // jetzt persistieren, damit sie ein Neuladen uebersteht. Das Schreiben
+      // darf den Aufbau der Ansicht nicht verhindern, falls es fehlschlaegt.
       if (permission === 'granted') {
+        /*
+         * Nur schreiben, wenn sich die Wahl tatsaechlich aendert -- sonst
+         * laeuft bei jedem Seitenaufbau ein Schreibvorgang mit, obwohl bereits
+         * "fsa" gespeichert ist.
+         */
+        if (storedType !== 'fsa') {
+          try {
+            await storeStorageType('fsa')
+          } catch (err) {
+            console.warn('Speicherart konnte nicht gespeichert werden:', err)
+          }
+        }
         // Perfekt, Browser/Android hat es sich (im Hintergrund) gemerkt
         const storage = new FileSystemHandleStorage(storedHandle, 'fsa', false)
         await updateView(storage)
