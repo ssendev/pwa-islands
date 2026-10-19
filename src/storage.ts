@@ -3,6 +3,12 @@ export const DB_VERSION = 1
 export const STORE_NAME = 'handles'
 export const HANDLE_KEY = 'selected_folder'
 export const STORAGE_TYPE_KEY = 'selected_storage_type'
+/**
+ * OPFS hat pro Origin nur EINE Wurzel -- eine zweite Wurzel laesst sich nicht
+ * waehlen. Damit die App nicht direkt im Origin-Wurzelverzeichnis schreibt,
+ * liegen alle Dateien in diesem Unterordner.
+ */
+export const OPFS_APP_FOLDER = 'PWA Islands'
 
 export function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -111,7 +117,8 @@ export async function getOPFSDirectoryHandle(): Promise<FileSystemDirectoryHandl
     typeof navigator.storage.getDirectory === 'function'
   ) {
     try {
-      return await navigator.storage.getDirectory()
+      const root = await navigator.storage.getDirectory()
+      return await root.getDirectoryHandle(OPFS_APP_FOLDER, { create: true })
     } catch (err) {
       console.error('Fehler beim Abrufen des OPFS-Handles:', err)
       return null
