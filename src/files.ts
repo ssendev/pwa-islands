@@ -735,81 +735,165 @@ export function renderFilesView(container: HTMLElement): void {
   }
 
   let currentStorage: IFileStorage | null = null
+  /**
+   * Die aktuell gewaehlte Speicherart. Bleibt auch dann gesetzt, wenn (noch)
+   * kein Ordner offen ist -- so bietet das Zahnrad-Menue im Leerzustand nur
+   * den Wechsel in die *andere* Speicherart an.
+   */
+  let currentStorageType: 'fsa' | 'opfs' | null = null
+
+  /** Sammelt die Menüeinträge des Zahnrads -- eine einzige Quelle der Wahrheit. */
+  interface SettingsAction {
+    id: string
+    html: string
+    /** Kurze Beschreibung der Speicherart, erscheint als Tooltip/Untertitel. */
+    hint?: string
+    danger?: boolean
+    run: () => void
+  }
+
+  /**
+   * Baut die Einträge des Zahnrad-Menüs. Reihenfolge ist immer:
+   * 1. Speicherwechsel (immer zuerst, immer nur in die *andere* Art),
+   * 2. Ordnerverwaltung (wechseln / trennen), falls verfügbar.
+   * Welche Speicherart aktiv ist, entscheidet `currentStorageType`.
+   */
+  function buildSettingsActions(): SettingsAction[] {
+    const actions: SettingsAction[] = []
+
+    if (currentStorageType !== 'opfs' && hasOPFS) {
+      actions.push({
+        id: 'btn-use-opfs',
+        html: '📦 Zu App-Speicher wechseln',
+        hint: 'App-Speicher (OPFS): liegt versteckt im Browser, funktioniert ohne Ordnerauswahl und ohne Berechtigung. Die Dateien sind aber an diesen Browser gebunden.',
+        run: () => void handleUseOPFS(),
+      })
+    }
+
+    if (currentStorageType !== 'fsa' && hasDirectoryPicker) {
+      actions.push({
+        id: 'btn-select-folder',
+        html: '💻 Zu lokalem Ordner wechseln',
+        hint: 'Lokaler Ordner (FS API): ein normaler Ordner auf dem Gerät, jederzeit mit anderen Programmen bearbeitbar. Der Browser fragt nach Zugriff.',
+        run: () => void handleSwitchToLocalFolder(),
+      })
+    }
+
+    if (currentStorage?.canChangeFolder) {
+      actions.push({
+        id: 'btn-change-folder',
+        html: '📂 Ordner wechseln',
+        run: () => void handleSelectFolder(),
+      })
+      actions.push({
+        id: 'btn-disconnect-folder',
+        html: '🔌 Trennen',
+        danger: true,
+        run: () => void handleDisconnectFolder(),
+      })
+    }
+
+    return actions
+  }
+
+  /** Baut das komplette Zahnrad-Menü; leer, wenn es nichts anzubieten gibt. */
+  function renderSettingsMenu(): string {
+    const actions = buildSettingsActions()
+    if (actions.length === 0) return ''
+
+    return `
+      <div class="settings-menu" id="settings-menu">
+        <button
+          id="btn-settings"
+          type="button"
+          class="btn btn-secondary btn-icon"
+          aria-haspopup="true"
+          aria-expanded="false"
+          aria-label="Einstellungen"
+          title="Einstellungen"
+        >
+          ⚙️
+        </button>
+        <div class="settings-menu-list" id="settings-menu-list" hidden>
+          ${actions
+            .map((a) => {
+              const classes = `settings-menu-item${a.danger ? ' is-danger' : ''}`
+              // Der Erklaertext erscheint als Tooltip (data-tooltip), nicht
+              // dauerhaft im Eintrag -- das Menue soll schlank bleiben.
+              const tip = a.hint ? ` data-tooltip="${escapeHtml(a.hint)}" aria-description="${escapeHtml(a.hint)}"` : ''
+              return `<button id="${a.id}" type="button" class="${classes}"${tip}>${a.html}</button>`
+            })
+            .join('')}
+        </div>
+      </div>
+    `
+  }
+
+  /** Verdrahtet die Aktionen des zuletzt gerenderten Menüs mit ihren Handlern. */
+  function bindSettingsActions(scope: HTMLElement) {
+    for (const action of buildSettingsActions()) {
+      scope.querySelector<HTMLButtonElement>(`#${action.id}`)?.addEventListener('click', () => {
+        closeSettingsMenu()
+        action.run()
+      })
+    }
+  }
+
+  /**
+   * Beim Start (noch) keine Speicherart bekannt? Dann die zuletzt gewaehlte
+   * Speicherart nachladen, damit der Leerzustand nicht beide Wechsel anbietet.
+   */
+  function ensureStorageTypeKnown() {
+    if (currentStorageType) return
+    void getStoredStorageType().then((stored) => {
+      if (!currentStorageType && !currentStorage) {
+        currentStorageType = stored ?? (hasDirectoryPicker ? 'fsa' : null)
+        void updateView(null)
+      }
+    })
+  }
   /** Aufräumfunktion des Einstellungen-Menüs (Listener), falls es offen ist. */
   let settingsMenuCleanup: (() => void) | null = null
 
   async function updateView(storage: IFileStorage | null) {
     currentStorage = storage
+    if (storage) currentStorageType = storage.type
 
     if (!storage) {
-      folderNameDisplay.textContent = 'Kein Ordner ausgewählt'
+      /*
+       * Auch ohne offenen Ordner zeigt die Kopfzeile die aktive Speicherart:
+       * bei der lokalen Variante das PC-Symbol -- so ist auf den ersten Blick
+       * klar, in welcher Art gearbeitet wird. Den Ordnernamen gibt es hier
+       * noch nicht, der Hinweis steht im Leerzustand darunter.
+       */
+      folderNameDisplay.innerHTML = currentStorageType === 'fsa' ?
+        '<span class="breadcrumb-current">💻 PWA Islands</span>' : ''
 
-      folderActions.innerHTML = `
-        <button id="btn-select-folder" type="button" class="btn btn-primary">
-          📂 Ordner auswählen
-        </button>
-        ${
-          hasOPFS
-            ? `<button id="btn-use-opfs" type="button" class="btn btn-secondary">
-                📦 Zu App-Speicher wechseln
-              </button>`
-            : ''
-        }
-      `
-      container.querySelector<HTMLButtonElement>('#btn-select-folder')?.addEventListener('click', handleSelectFolder)
-      container.querySelector<HTMLButtonElement>('#btn-use-opfs')?.addEventListener('click', handleUseOPFS)
+      folderActions.innerHTML = renderSettingsMenu()
+      bindSettingsActions(container)
 
       filesContent.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">📂</div>
           <h3>Kein Ordner ausgewählt</h3>
-          <p>Wählen Sie einen lokalen Ordner aus, in dem Daten gespeichert sind, um die Dateien anzuzeigen.</p>
+          <p>Wähle einen lokalen Ordner, in dem deine Projekte gespeichert werden.</p>
           <div class="empty-actions">
             <button id="btn-select-folder-hero" type="button" class="btn btn-primary">
               📂 Ordner wählen
             </button>
-            ${
-              hasOPFS
-                ? `<button id="btn-use-opfs-hero" type="button" class="btn btn-secondary">
-                    📦 Zu App-Speicher wechseln
-                  </button>`
-                : ''
-            }
           </div>
         </div>
       `
       container.querySelector<HTMLButtonElement>('#btn-select-folder-hero')?.addEventListener('click', handleSelectFolder)
-      container.querySelector<HTMLButtonElement>('#btn-use-opfs-hero')?.addEventListener('click', handleUseOPFS)
+
+      setupSettingsMenu(container)
+      ensureStorageTypeKnown()
       return
     }
 
     // Den Pfad als Breadcrumb aufbauen: jeder Abschnitt ist anklickbar und
     // springt direkt in den entsprechenden Ordner.
     updateBreadcrumbs()
-
-    // Menüeinträge sammeln und den Zahnrad-Button nur zeigen, wenn es welche gibt.
-    const settingsItems: string[] = []
-
-    if (hasDirectoryPicker && storage.type === 'opfs') {
-      settingsItems.push(`<button id="btn-switch-picker" type="button" class="settings-menu-item">
-        📂 Zu lokalem Ordner wechseln
-      </button>`)
-    }
-
-    if (hasOPFS && storage.type === 'fsa') {
-      settingsItems.push(`<button id="btn-use-opfs" type="button" class="settings-menu-item">
-        📦 Zu App-Speicher wechseln
-      </button>`)
-    }
-
-    if (storage.canChangeFolder) {
-      settingsItems.push(`<button id="btn-change-folder" type="button" class="settings-menu-item">
-        📂 Ordner wechseln
-      </button>`)
-      settingsItems.push(`<button id="btn-disconnect-folder" type="button" class="settings-menu-item is-danger">
-        Trennen
-      </button>`)
-    }
 
     folderActions.innerHTML = `
       <button id="btn-new-file" type="button" class="btn btn-primary">
@@ -827,50 +911,14 @@ export function renderFilesView(container: HTMLElement): void {
         <span class="btn-icon-only" aria-hidden="true">📥</span>
         <span class="btn-label">Hochladen</span>
       </button>
-      ${
-        settingsItems.length > 0
-          ? `<div class="settings-menu" id="settings-menu">
-              <button
-                id="btn-settings"
-                type="button"
-                class="btn btn-secondary btn-icon"
-                aria-haspopup="true"
-                aria-expanded="false"
-                aria-label="Einstellungen"
-                title="Einstellungen"
-              >
-                ⚙️
-              </button>
-              <div class="settings-menu-list" id="settings-menu-list" hidden>
-                ${settingsItems.join('')}
-              </div>
-            </div>`
-          : ''
-      }
+      ${renderSettingsMenu()}
     `
 
     container.querySelector<HTMLButtonElement>('#btn-new-file')?.addEventListener('click', handleCreateFile)
     container.querySelector<HTMLButtonElement>('#btn-new-folder')?.addEventListener('click', handleCreateFolder)
     container.querySelector<HTMLButtonElement>('#btn-import-file')?.addEventListener('click', handleImportFiles)
 
-    // Breadcrumb-Klicks: über data-segment steuert jeder Eintrag sein Ziel an.
-    container.querySelector<HTMLButtonElement>('#btn-change-folder')?.addEventListener('click', () => {
-      closeSettingsMenu()
-      void handleSelectFolder()
-    })
-    container.querySelector<HTMLButtonElement>('#btn-disconnect-folder')?.addEventListener('click', () => {
-      closeSettingsMenu()
-      void handleDisconnectFolder()
-    })
-    container.querySelector<HTMLButtonElement>('#btn-switch-picker')?.addEventListener('click', () => {
-      closeSettingsMenu()
-      void handleSwitchToLocalFolder()
-    })
-    container.querySelector<HTMLButtonElement>('#btn-use-opfs')?.addEventListener('click', () => {
-      closeSettingsMenu()
-      void handleUseOPFS()
-    })
-
+    bindSettingsActions(container)
     setupSettingsMenu(container)
 
     await refreshCurrentList()
@@ -1118,6 +1166,22 @@ export function renderFilesView(container: HTMLElement): void {
     fileImportInput.click()
   }
 
+  /**
+   * Merkt sich die Speicherart dauerhaft (IndexedDB). Wird NUR von den
+   * Wechsel-Aktionen im Zahnrad-Menü aufgerufen: dort -- und nur dort --
+   * entscheidet der Nutzer aktiv, in welcher Art gearbeitet wird. Das blosse
+   * Öffnen eines Ordners oder ein Neuladen soll die Wahl nicht ändern.
+   * Fehler werden nur geloggt, damit sie den Aufbau der Ansicht nicht stoppen.
+   */
+  async function persistStorageChoice(type: 'fsa' | 'opfs') {
+    currentStorageType = type
+    try {
+      await storeStorageType(type)
+    } catch (err) {
+      console.warn('Speicherart konnte nicht gespeichert werden:', err)
+    }
+  }
+
   async function handleSelectFolder() {
     try {
       if (!window.showDirectoryPicker) {
@@ -1136,7 +1200,7 @@ export function renderFilesView(container: HTMLElement): void {
 
       // Speicherart ZUERST schreiben: das Ablegen eines FileSystemDirectoryHandle
       // kann fehlschlagen (DataCloneError). Dann soll die Wahl trotzdem stehen.
-      await storeStorageType('fsa')
+      await persistStorageChoice('fsa')
       await storeDirectoryHandle(handle)
       const storage = new FileSystemHandleStorage(handle, 'fsa', false)
       await updateView(storage)
@@ -1154,20 +1218,22 @@ export function renderFilesView(container: HTMLElement): void {
   }
 
   /**
-   * Wechselt zum zuletzt gespeicherten lokalen Ordner. Ist einer vorhanden,
-   * wird diese Wahl auch als Speicherart gespeichert -- sonst greift beim
-   * naechsten Neuladen wieder die alte OPFS-Wahl.
+   * Wechselt zum zuletzt gespeicherten lokalen Ordner. Die Wahl wird sofort
+   * beim Klick persistiert -- nicht erst, wenn die Berechtigung später erteilt
+   * wird; sonst greift beim nächsten Neuladen wieder die alte OPFS-Wahl.
+   * Aufgerufen aus dem Zahnrad-Menü (`buildSettingsActions`).
    */
   async function handleSwitchToLocalFolder() {
-    // Um User Gesture Verluste durch IndexedDB zu vermeiden, nutzen wir
-    // stattdessen den strikten und sicheren Start-Ablauf:
+    await persistStorageChoice('fsa')
+    // Init ohne die gespeicherte Wahl auszulesen: der lokale Ordner soll
+    // Vorrang haben, auch wenn in der Datenbank noch 'opfs' stehen sollte.
     await initStorage(true)
   }
 
   async function handleUseOPFS() {
     const opfsHandle = await getOPFSDirectoryHandle()
     if (opfsHandle) {
-      await storeStorageType('opfs')
+      await persistStorageChoice('opfs')
       const storage = new FileSystemHandleStorage(opfsHandle, 'opfs', isFallbackToOPFS)
       await updateView(storage)
     } else {
@@ -1178,18 +1244,23 @@ export function renderFilesView(container: HTMLElement): void {
   async function handleDisconnectFolder() {
     await clearStoredDirectoryHandle()
     await clearStoredStorageType()
+    /*
+     * Nach dem Trennen bleibt die Voreinstellung bestehen (lokal, sofern
+     * verfuegbar). Mit `null` wuerde das Zahnrad beide Wechsel gleichzeitig
+     * anbieten -- es gaebe also zwei Wege zum selben Ziel.
+     */
+    currentStorageType = hasDirectoryPicker ? 'fsa' : null
     await updateView(null)
   }
 
   // Hilfsfunktion: Bereitet die UI so vor, dass der Klick direkt in requestPermission resultiert.
   function showReopenButtonUI(storedHandle: FileSystemDirectoryHandle) {
-    folderNameDisplay.innerHTML = `<span class="breadcrumb-current">💻 ${escapeHtml(storedHandle.name)} (Zugriff erforderlich)</span>`
+    folderNameDisplay.innerHTML = `<span class="breadcrumb-current">💻 ${escapeHtml(storedHandle.name)}</span>`
 
-    folderActions.innerHTML = `
-      <button id="btn-grant-permission" type="button" class="btn btn-primary">
-        🔓 Zugriff erlauben
-      </button>
-    `
+    // Das Zahnrad-Menü kommt zentral aus buildSettingsActions(): Dort gibt es
+    // den Speicherwechsel nur in die *andere* Art. Ein "Trennen" ergänzt den
+    // Eintrag, weil der Ordner zwar bekannt, aber nicht freigegeben ist.
+    folderActions.innerHTML = renderSettingsMenu()
 
     filesContent.innerHTML = `
       <div class="empty-state">
@@ -1210,13 +1281,9 @@ export function renderFilesView(container: HTMLElement): void {
           const permission = await storedHandle.requestPermission({ mode: 'readwrite' })
 
           if (permission === 'granted') {
-            // Zugriff ist jetzt da -- die Wahl persistieren, damit sie ein
-            // Neuladen uebersteht.
-            try {
-              await storeStorageType('fsa')
-            } catch (err) {
-              console.warn('Speicherart konnte nicht gespeichert werden:', err)
-            }
+            // Der Nutzer hat den Zugriff gerade bestätigt -- das ist eine
+            // bewusste Wahl der lokalen Speicherart.
+            await persistStorageChoice('fsa')
             const storage = new FileSystemHandleStorage(storedHandle, 'fsa', false)
             await updateView(storage)
           } else {
@@ -1228,13 +1295,16 @@ export function renderFilesView(container: HTMLElement): void {
       }
     }
 
-    container.querySelector<HTMLButtonElement>('#btn-grant-permission')?.addEventListener('click', handleUserClickToUnlock)
     container.querySelector<HTMLButtonElement>('#btn-grant-permission-hero')?.addEventListener('click', handleUserClickToUnlock)
+
+    bindSettingsActions(container)
+    setupSettingsMenu(container)
   }
 
   // 1. Beim App-Start NUR prüfen, ob das Recht noch da ist
   async function initStorage(forceLocal = false) {
-    if (isFallbackToOPFS && !forceLocal) {
+    // Kein Picker vorhanden -> es bleibt nur der App-Speicher.
+    if (!hasDirectoryPicker) {
       await handleUseOPFS()
       return
     }
@@ -1248,19 +1318,29 @@ export function renderFilesView(container: HTMLElement): void {
       // Zweig uebersprungen, damit der lokale Ordner erreichbar bleibt.
       if (!forceLocal) {
         storedType = await getStoredStorageType()
+        currentStorageType = storedType
         if (storedType === 'opfs' && hasOPFS) {
           await handleUseOPFS()
           return
         }
+      } else {
+        currentStorageType = 'fsa'
       }
 
       // Async-Ladevorgang (Datenbank) isolieren von requestPermission
       const storedHandle = await getStoredDirectoryHandle()
       if (!storedHandle) {
+        /*
+         * Erststart ohne gespeicherten Ordner: die Voreinstellung ist die
+         * lokale Speicherart (FSA), nicht OPFS. Es wird hier nichts persistiert
+         * -- die Wahl entsteht erst durch einen aktiven Wechsel bzw. das
+         * Auswaehlen eines Ordners.
+         */
+        currentStorageType = forceLocal ? 'fsa' : storedType
+        if (!currentStorageType && hasDirectoryPicker) currentStorageType = 'fsa'
         await updateView(null)
         return
       }
-
       let permission: PermissionState = 'prompt'
       if (storedHandle.queryPermission) {
         try {
@@ -1270,22 +1350,9 @@ export function renderFilesView(container: HTMLElement): void {
         }
       }
 
-      // Ab hier steht fest, dass der lokale Ordner verwendet wird. Die Wahl
-      // jetzt persistieren, damit sie ein Neuladen uebersteht. Das Schreiben
-      // darf den Aufbau der Ansicht nicht verhindern, falls es fehlschlaegt.
+      // Ab hier steht fest, dass der lokale Ordner verwendet wird.
       if (permission === 'granted') {
-        /*
-         * Nur schreiben, wenn sich die Wahl tatsaechlich aendert -- sonst
-         * laeuft bei jedem Seitenaufbau ein Schreibvorgang mit, obwohl bereits
-         * "fsa" gespeichert ist.
-         */
-        if (storedType !== 'fsa') {
-          try {
-            await storeStorageType('fsa')
-          } catch (err) {
-            console.warn('Speicherart konnte nicht gespeichert werden:', err)
-          }
-        }
+        currentStorageType = 'fsa'
         // Perfekt, Browser/Android hat es sich (im Hintergrund) gemerkt
         const storage = new FileSystemHandleStorage(storedHandle, 'fsa', false)
         await updateView(storage)

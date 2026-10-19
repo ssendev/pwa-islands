@@ -326,6 +326,20 @@ code {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  /*
+   * Alle Toolbar-Buttons (Datei, Ordner, Hochladen, Zahnrad) bekommen eine
+   * gemeinsame, feste Hoehe. Ohne das waechst die Leiste minimal, sobald die
+   * Text-Buttons dazukommen -- und das Zahnrad (ohne Beschriftung) wirkt
+   * dann kleiner als die uebrigen Buttons.
+   */
+  --toolbar-btn-height: 38px;
+  align-items: center;
+}
+
+.folder-actions > .btn,
+.folder-actions .settings-menu > .btn {
+  height: var(--toolbar-btn-height);
+  box-sizing: border-box;
 }
 
 .files-content {
@@ -841,6 +855,11 @@ button#pwa-refresh {
     font-size: 16px;
   }
 
+  /* Mobil gilt die kompakte Groesse auch fuer die uebrigen Toolbar-Buttons. */
+  .folder-actions {
+    --toolbar-btn-height: 34px;
+  }
+
   /*
    * WICHTIG: dieser Selektor steht VOR der Desktop-Regel in der Datei. Bei
    * gleicher Spezifitaet gewinnt die spaetere -- deshalb hier eine Stufe
@@ -1036,6 +1055,16 @@ button#pwa-refresh {
 }
 
 
+@media (min-width: 350px) and (max-width: 720px) {
+  /*
+   * geaendert neben Groesse.
+   */
+  .files-table td.file-date-cell {
+    margin-top: -36px;
+    margin-left: max(114px, 30vw)
+  }
+}
+
 /* Breadcrumbs */
 .breadcrumbs {
   display: flex;
@@ -1101,9 +1130,16 @@ button#pwa-refresh {
 }
 
 .btn-icon {
-  padding: 8px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* Quadratisch und genauso hoch wie die beschrifteten Buttons daneben. */
+  width: var(--toolbar-btn-height, 38px);
+  height: var(--toolbar-btn-height, 38px);
+  padding: 0;
   font-size: 17px;
   line-height: 1;
+  box-sizing: border-box;
 }
 
 .settings-menu-list {
@@ -1111,7 +1147,12 @@ button#pwa-refresh {
   top: calc(100% + 8px);
   right: 0;
   z-index: 20;
-  min-width: 240px;
+  /*
+   * Feste, aber grosszuegige Breite: die Eintraege tragen jetzt einen
+   * erklaerenden Untertitel, der umbrechen soll statt das Menue zu verbreitern.
+   */
+  width: max-content;
+  max-width: min(340px, calc(100vw - 32px));
   padding: 6px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -1137,6 +1178,55 @@ button#pwa-refresh {
   cursor: pointer;
   border-radius: 6px;
   white-space: nowrap;
+  position: relative;
+}
+
+/*
+ * Erklaer-Tooltip der Einträge: erscheint erst bei Hover bzw. Tastatur-Fokus,
+ * links vom Eintrag, damit er nicht aus dem Bildschirm laeuft.
+ */
+.settings-menu-item[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: 50%;
+  right: calc(100% + 10px);
+  transform: translateY(-50%);
+  z-index: 30;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 48px));
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--text-h);
+  color: var(--bg);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease;
+  pointer-events: none;
+}
+
+.settings-menu-item[data-tooltip]:hover::after,
+.settings-menu-item[data-tooltip]:focus-visible::after {
+  opacity: 1;
+  visibility: visible;
+}
+
+/*
+ * Schmale Bildschirme: kein Platz links vom Menue -- der Tooltip klappt nach
+ * unten und bleibt innerhalb des Viewports.
+ */
+@media (max-width: 520px) {
+  .settings-menu-item[data-tooltip]::after {
+    top: calc(100% + 6px);
+    right: 0;
+    transform: none;
+    max-width: calc(100vw - 32px);
+  }
 }
 
 .settings-menu-item:hover,
