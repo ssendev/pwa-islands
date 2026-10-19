@@ -674,10 +674,67 @@ code {
   gap: 6px;
 }
 
+/* `display: flex` ueberschreibt das hidden-Attribut -- daher explizit ausblenden. */
+.form-group[hidden],
+.file-preview[hidden] {
+  display: none;
+}
+
 .form-group label {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-h);
+}
+
+/* Hinweis im Formular, z. B. wenn der Inhalt einer Binaerdatei gesperrt ist. */
+.form-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+/* Checkbox-Zeile im Formular, z. B. "Als Base64 bearbeiten". */
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text-h);
+  cursor: pointer;
+}
+
+.form-check input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Base64-Feld: Monospace, damit die Zeichenfolge lesbar bleibt. */
+.form-textarea-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+/* Bildvorschau im Bearbeiten-Fenster (Binaerdateien ohne Textfeld). */
+.file-preview {
+  margin: 4px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.file-preview-image {
+  max-width: 100%;
+  max-height: 45vh;
+  object-fit: contain;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: repeating-conic-gradient(var(--code-bg) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
 }
 
 .form-input {
@@ -728,13 +785,82 @@ code {
 .modal-footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 10px;
   padding: 16px 20px;
   border-top: 1px solid var(--border);
   background: var(--social-bg);
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
+}
+
+/* Links steht die zerstoerende Aktion allein, rechts Abbrechen/Speichern. */
+.modal-footer-left,
+.modal-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/*
+ * Buttons mit Icon + Beschriftung. Auf schmalen Bildschirmen bleibt nur das
+ * Icon uebrig; der zugaengliche Name kommt dann aus aria-label/title.
+ */
+.icon-label-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-label-btn-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+/*
+ * Tooltip nur, solange die Beschriftung ausgeblendet ist (schmale Bildschirme).
+ * `data-tip` statt `title`, damit der Browser nicht doppelt einblendet.
+ */
+.icon-label-btn[data-tip] {
+  position: relative;
+}
+
+.icon-label-btn[data-tip]:hover::after,
+.icon-label-btn[data-tip]:focus-visible::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--text-h);
+  color: var(--bg);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+}
+
+@media (max-width: 520px) {
+  .icon-label-btn .icon-label-btn-text {
+    display: none;
+  }
+
+  .icon-label-btn {
+    width: var(--toolbar-btn-height, 34px);
+    height: var(--toolbar-btn-height, 34px);
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+/* Ab 521px steht die Beschriftung im Button -- dann kein Tooltip. */
+@media (min-width: 521px) {
+  .icon-label-btn[data-tip]:hover::after,
+  .icon-label-btn[data-tip]:focus-visible::after {
+    content: none;
+  }
 }
 
 #pwa-toast {
@@ -1071,6 +1197,12 @@ button#pwa-refresh {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.breadcrumb-root-icon {
+  font-size: 15px;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
 .breadcrumb-item {

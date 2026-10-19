@@ -29,10 +29,16 @@ export interface IFileStorage {
 
   listFiles(): Promise<FileEntry[]>
   readFile(name: string): Promise<string>
+  /** Liest die Datei als Blob -- fuer Binaerdateien, die der Editor nicht anfassen darf. */
+  readFileBlob(name: string): Promise<Blob>
+  /** Groesse in Bytes, ohne die Datei zu laden (0, wenn unbekannt). */
+  getFileSize(name: string): Promise<number>
   createFile(name: string, content: string | Blob): Promise<void>
   writeFile(name: string, content: string | Blob): Promise<void>
   createDirectory(name: string): Promise<void>
   deleteEntry(name: string): Promise<void>
+  /** True, wenn unter dem Namen bereits eine Datei oder ein Ordner liegt. */
+  hasEntry(name: string): Promise<boolean>
   /** Benennt eine Datei oder einen Ordner um. */
   renameEntry(oldName: string, newName: string): Promise<void>
   ensureWritePermission(): Promise<boolean>
@@ -146,6 +152,21 @@ export class FileSystemHandleStorage implements IFileStorage {
     return await file.text()
   }
 
+  async readFileBlob(name: string): Promise<Blob> {
+    const fileHandle = await this.handle.getFileHandle(name)
+    return await fileHandle.getFile()
+  }
+
+  async getFileSize(name: string): Promise<number> {
+    try {
+      const fileHandle = await this.handle.getFileHandle(name)
+      return (await fileHandle.getFile()).size
+    } catch (err) {
+      console.warn(`Groesse von "${name}" nicht lesbar:`, err)
+      return 0
+    }
+  }
+
   async ensureWritePermission(): Promise<boolean> {
     if (this.type !== 'fsa') return true
     if (!this.handle.queryPermission || !this.handle.requestPermission) return true
@@ -161,17 +182,9 @@ export class FileSystemHandleStorage implements IFileStorage {
     if (!(await this.ensureWritePermission())) {
       throw new Error('Schreibzugriff verweigert.')
     }
-    // Vorhandene Dateien nicht überschreiben.
-    let alreadyExists = false
-    try {
-      await this.handle.getFileHandle(name)
-      alreadyExists = true
-    } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'NotFoundError')) {
-        throw err
-      }
-    }
-    if (alreadyExists) {
+    // Vorhandene Dateien nicht ueberschreiben -- auch nicht, wenn der Name
+    // bereits als Ordner existiert (dann meldet der Browser TypeMismatchError).
+    if (await this.hasEntry(name)) {
       throw new Error(`Datei "${name}" existiert bereits.`)
     }
     const fileHandle = await this.handle.getFileHandle(name, { create: true })
@@ -232,7 +245,9 @@ export class FileSystemHandleStorage implements IFileStorage {
     try {
       kind = (await this.handle.getFileHandle(oldName)).kind
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err
+      if (!(err instanceof DOMException && (err.name === 'NotFoundError' || err.name === 'TypeMismatchError'))) {
+        throw err
+      }
       kind = (await this.handle.getDirectoryHandle(oldName)).kind
     }
 
@@ -249,19 +264,27 @@ export class FileSystemHandleStorage implements IFileStorage {
     await this.handle.removeEntry(oldName, { recursive: true })
   }
 
-  /** True, wenn unter dem Namen bereits Datei oder Ordner existiert. */
-  private async hasEntry(name: string): Promise<boolean> {
+  /**
+   * True, wenn unter dem Namen bereits Datei oder Ordner existiert. Wird unter
+   * dem Namen ein Ordner gefunden, melden Browser einen `TypeMismatchError` --
+   * der zaehlt hier ebenfalls als "belegt".
+   */
+  async hasEntry(name: string): Promise<boolean> {
     try {
       await this.handle.getFileHandle(name)
       return true
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err
+      if (!(err instanceof DOMException && (err.name === 'NotFoundError' || err.name === 'TypeMismatchError'))) {
+        throw err
+      }
     }
     try {
       await this.handle.getDirectoryHandle(name)
       return true
     } catch (err) {
-      if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err
+      if (!(err instanceof DOMException && (err.name === 'NotFoundError' || err.name === 'TypeMismatchError'))) {
+        throw err
+      }
     }
     return false
   }
@@ -322,6 +345,15 @@ function formatDate(timestamp: number): string {
   }).format(new Date(timestamp))
 }
 
+/**
+ * Visueller Inhalt einer Datei, die der Editor nicht als Text anbietet.
+ * `previewUrl` ist eine Object-URL und muss beim Schliessen freigegeben werden.
+ */
+interface ContentPreview {
+  kind: 'image'
+  previewUrl: string
+}
+
 interface EditorModalOptions {
   /** 'file' zeigt zusaetzlich den Inhalt, 'folder' nur den Namen. */
   kind: 'file' | 'folder'
@@ -329,9 +361,111 @@ interface EditorModalOptions {
   mode: 'create' | 'edit'
   name?: string
   initialContent?: string
-  onSave: (name: string, content: string) => Promise<void>
+  /**
+   * Nur bei Binaerdateien gesetzt: dann gibt es kein Inhaltsfeld, sondern nur
+   * die Vorschau bzw. die Base64-Option. Der Inhalt bleibt beim Speichern
+   * unveraendert.
+   */
+  contentLocked?: boolean
+  /** Optionale Vorschau statt Textfeld (z. B. ein Bild). */
+  preview?: ContentPreview
+  /**
+   * Nur bei Binaerdateien unterhalb der Groessengrenze: erlaubt das Bearbeiten
+   * der Datei als Base64-Text. `base64` ist die Vorabbelegung des Feldes.
+   */
+  base64Editable?: boolean
+  base64?: string
+  onSave: (name: string, content: string | Blob | null) => Promise<void>
   /** Nur bei mode 'edit': loescht den Eintrag. */
   onDelete?: () => Promise<void>
+}
+
+/**
+ * Baut eine Bildvorschau ueber eine Object-URL. Der Aufrufer (Editor-Modal)
+ * gibt die URL beim Schliessen wieder frei.
+ */
+function buildImagePreview(blob: Blob): ContentPreview {
+  return {
+    kind: 'image',
+    previewUrl: URL.createObjectURL(blob),
+  }
+}
+
+/** Dateiendungen, die als Bild angezeigt werden koennen (Browser-Standard). */
+const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg', 'ico'])
+
+/** Obergrenze fuer Dateien, die der Editor als Text laedt (10 MB). */
+const MAX_EDITABLE_TEXT_BYTES = 10 * 1024 * 1024
+
+/** Dateiendungen, die der Editor als Text oeffnen und speichern darf. */
+const TEXT_EXTENSIONS = new Set([
+  'html',
+  'htm',
+  'xhtml',
+  'js',
+  'mjs',
+  'cjs',
+  'jsx',
+  'ts',
+  'tsx',
+  'css',
+  'json',
+  'webmanifest',
+  'txt',
+  'md',
+  'csv',
+  'svg',
+  'xml',
+  'yml',
+  'yaml',
+  'sh',
+  'toml',
+  'ini',
+  'map',
+])
+
+/**
+ * Prueft, ob eine Datei gefahrlos als Text bearbeitet werden kann: sie muss
+ * vollstaendig gelesen werden koennen und beim Zurueckwandeln in Bytes wieder
+ * exakt dieselben Daten ergeben (UTF-8-Roundtrip). Nur dann ist garantiert,
+ * dass ein Speichern ohne Aenderung die Datei nicht veraendert.
+ *
+ * Eine reine Endungspruefung reicht nicht -- eine `.png`, die als `.xml`
+ * gespeichert wurde, wuerde sonst beim Speichern zerstoert.
+ *
+ * Grosse Dateien werden nie als Text geoeffnet: das Dekodieren im Browser
+ * blockiert die Oberflaeche. Sie gelten ab {@link MAX_EDITABLE_TEXT_BYTES} als
+ * Blob (nur umbenennen/loeschen).
+ */
+async function isEditableTextFile(file: Blob, name: string): Promise<boolean> {
+  const ext = getExtension(name)
+  if (!TEXT_EXTENSIONS.has(ext)) return false
+  if (file.size > MAX_EDITABLE_TEXT_BYTES) return false
+
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    // `ignoreBOM: true` behaelt die Bytefolge bei -- sonst wuerde ein fuehrendes
+    // BOM beim Speichern verloren gehen und der Vergleich scheitern.
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+    if (text.includes('\uFFFD')) return false
+    const roundtrip = new TextEncoder().encode(text)
+    if (roundtrip.length !== bytes.length) return false
+    for (let i = 0; i < bytes.length; i++) {
+      if (roundtrip[i] !== bytes[i]) return false
+    }
+    return true
+  } catch {
+    // `fatal: true` wirft bei ungueltigem UTF-8 -- genau der Binaerfall.
+    return false
+  }
+}
+
+/** Endung ohne Punkt, klein geschrieben; leer, wenn keine vorhanden ist. */
+function getExtension(name: string): string {
+  const dotIndex = name.lastIndexOf('.')
+  return dotIndex === -1 || dotIndex === name.length - 1
+    ? ''
+    : name.slice(dotIndex + 1).toLowerCase()
 }
 
 /**
@@ -361,12 +495,13 @@ function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
   const segments = storage.subPath ? storage.subPath.split('/') : []
 
   const parts: string[] = []
+  parts.push(`<span class="breadcrumb-root-icon" aria-hidden="true">${rootIcon}</span>`)
   parts.push(
     segments.length === 0
-      ? `<span class="breadcrumb-current">${rootIcon} ${escapeHtml(rootLabel)}</span>`
+      ? `<span class="breadcrumb-current">${escapeHtml(rootLabel)}</span>`
       : `<button type="button" class="breadcrumb-item" data-segment="" title="${escapeHtml(
           rootLabel
-        )}">${rootIcon} ${escapeHtml(rootLabel)}</button>`
+        )}">${escapeHtml(rootLabel)}</button>`
   )
 
   let accumulated = ''
@@ -384,6 +519,171 @@ function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
   })
 
   return parts.join('')
+}
+
+/**
+ * Baut aus einem Base64-Text wieder einen Blob. Whitespace und Zeilenumbrueche
+ * werden ignoriert; ungueltige Zeichen fuehren zu einer verstaendlichen Meldung,
+ * damit nicht versehentlich eine kaputte Datei gespeichert wird.
+ */
+function base64ToBlob(base64: string): Blob {
+  const cleaned = base64.replace(/\s+/g, '')
+  let binary: string
+  try {
+    binary = atob(cleaned)
+  } catch {
+    throw new Error('Der Base64-Inhalt ist ungültig.')
+  }
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return new Blob([bytes])
+}
+
+/**
+ * Baut aus einem Blob den Base64-Text fuer das Bearbeitungsfeld.
+ */
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
+/**
+ * Baut den Inhaltsbereich des Editors: bei editierbaren Textdateien das
+ * Textfeld, bei Binaerdateien nur einen kurzen Hinweis -- plus eine Vorschau
+ * (Bild) und/oder die Option, die Bytes als Base64 zu bearbeiten.
+ */
+function renderFileContent(options: {
+  locked: boolean
+  preview?: ContentPreview
+  base64Editable?: boolean
+}): string {
+  const editorHtml = `<div class="form-group">
+      <label for="modal-file-content">Inhalt:</label>
+      <textarea
+        id="modal-file-content"
+        class="form-textarea"
+        placeholder="Geben Sie hier den Dateiinhalt ein..."
+      ></textarea>
+    </div>`
+
+  if (!options.locked) return editorHtml
+
+  const previewHtml =
+    options.preview?.kind === 'image'
+      ? `<figure id="modal-file-preview" class="file-preview">
+          <img
+            src="${escapeHtml(options.preview.previewUrl)}"
+            alt="Vorschau der Datei"
+            class="file-preview-image"
+          />
+        </figure>`
+      : ''
+
+  const base64Html = options.base64Editable
+    ? `<label class="form-check">
+        <input type="checkbox" id="modal-use-base64" />
+        <span>Binärdatei bearbeiten</span>
+      </label>
+      <div id="modal-base64-editor" class="form-group" hidden>
+        <label for="modal-file-content-b64">Base64-Inhalt:</label>
+        <textarea
+          id="modal-file-content-b64"
+          class="form-textarea form-textarea-mono"
+          spellcheck="false"
+          placeholder="Base64-Daten dieser Datei"
+        ></textarea>
+      </div>`
+    : ''
+
+  return `<div class="form-group">
+    ${base64Html}
+    ${previewHtml}
+  </div>`
+}
+
+/**
+ * Fragt bei einem Namenskonflikt beim Import nach: ueberschreiben, umbenennen
+ * oder ueberspringen. Die Option "fuer alle" wird separat gefragt (siehe
+ * {@link askApplyToAll}).
+ */
+function askImportCollision(name: string): 'replace' | 'rename' | 'skip' {
+  if (confirm(`"${name}"\n\nexistiert bereits. überschreiben?`)) {
+    return 'replace'
+  }
+  // Zweite Frage: umbenennen, wenn nicht ersetzt werden soll.
+  if (confirm(`"${name}"\n\numbenennen?`)) {
+    return 'rename'
+  }
+  return 'skip'
+}
+
+/**
+ * Nach der ersten Entscheidung einmalig fragen, ob sie fuer alle weiteren
+ * Konflikte gelten soll. `count` sind die noch offenen Konflikte.
+ */
+function askApplyToAll(decision: 'replace' | 'rename' | 'skip', count: number): boolean {
+  const label =
+    decision === 'replace' ? 'überschreiben' : decision === 'rename' ? 'umbenennen' : 'überspringen'
+  return confirm(
+    `Alle weiteren ${count} Konflikte auch ${label}?`
+  )
+}
+
+/**
+ * Zaehlt, wie viele der noch folgenden Dateien einen Namenskonflikt haben.
+ * `files` sind die importierten Dateien, `fromIndex` die naechste Position.
+ */
+async function countRemainingCollisions(
+  storage: IFileStorage,
+  files: File[],
+  fromIndex: number
+): Promise<number> {
+  let count = 0
+  const seen = new Set<string>()
+  for (let i = fromIndex; i < files.length; i++) {
+    const name = files[i].name
+    if (seen.has(name)) {
+      count++
+      continue
+    }
+    seen.add(name)
+    if (await storage.hasEntry(name)) count++
+  }
+  return count
+}
+
+/**
+ * Sucht einen freien Namen der Form "name (1).ext", "name (2).ext", ...
+ * Heisst die Datei bereits "name (2).ext", wird ab 3 weitergezaehlt -- eine
+ * vorhandene Datei wird dabei nie ueberschrieben.
+ */
+async function findFreeName(storage: IFileStorage, name: string): Promise<string> {
+  if (!(await storage.hasEntry(name))) return name
+
+  const dotIndex = name.lastIndexOf('.')
+  let base = dotIndex > 0 ? name.slice(0, dotIndex) : name
+  const ext = dotIndex > 0 ? name.slice(dotIndex) : ''
+
+  // Bereits vorhandene Nummerierung aufgreifen: "foto (2)" -> Basis "foto", Start 3.
+  let startIndex = 1
+  const numbered = /^(.*) \((\d+)\)$/.exec(base)
+  if (numbered) {
+    base = numbered[1]
+    startIndex = Number(numbered[2]) + 1
+  }
+
+  for (let i = startIndex; i < startIndex + 1000; i++) {
+    const candidate = `${base} (${i})${ext}`
+    if (!(await storage.hasEntry(candidate))) return candidate
+  }
+  throw new Error(`Für "${name}" wurde kein freier Name gefunden.`)
 }
 
 /**
@@ -427,30 +727,36 @@ function openEditorModal(options: EditorModalOptions): void {
           ${
             isFolder
               ? ''
-              : `<div class="form-group">
-                  <label for="modal-file-content">Inhalt:</label>
-                  <textarea
-                    id="modal-file-content"
-                    class="form-textarea"
-                    placeholder="Geben Sie hier den Dateiinhalt ein..."
-                  ></textarea>
-                </div>`
+              : renderFileContent({
+                  locked: Boolean(options.contentLocked),
+                  preview: options.preview,
+                  base64Editable: options.base64Editable,
+                })
           }
         </div>
         <footer class="modal-footer">
-          ${
-            options.onDelete
-              ? `<button type="button" id="modal-btn-delete" class="btn btn-danger">
-                  🗑️ Löschen
-                </button>`
-              : ''
-          }
-          <button type="button" id="modal-btn-cancel" class="btn btn-secondary">
-            Abbrechen
-          </button>
-          <button type="submit" id="modal-btn-save" class="btn btn-primary">
-            ${isCreate ? 'Erstellen' : 'Speichern'}
-          </button>
+          <div class="modal-footer-left">
+            ${
+              options.onDelete
+                ? `<button type="button" id="modal-btn-delete" class="btn btn-danger icon-label-btn" aria-label="Löschen" data-tip="Löschen">
+                    <span class="icon-label-btn-icon" aria-hidden="true">🗑️</span>
+                    <span class="icon-label-btn-text">Löschen</span>
+                  </button>`
+                : ''
+            }
+          </div>
+          <div class="modal-footer-right">
+            <button type="button" id="modal-btn-cancel" class="btn btn-secondary icon-label-btn" aria-label="Abbrechen" data-tip="Abbrechen">
+              <span class="icon-label-btn-icon" aria-hidden="true">✕</span>
+              <span class="icon-label-btn-text">Abbrechen</span>
+            </button>
+            <button type="submit" id="modal-btn-save" class="btn btn-primary icon-label-btn" aria-label="${
+              isCreate ? 'Erstellen' : 'Speichern'
+            }" data-tip="${isCreate ? 'Erstellen' : 'Speichern'}">
+              <span class="icon-label-btn-icon" aria-hidden="true">💾</span>
+              <span class="icon-label-btn-text">${isCreate ? 'Erstellen' : 'Speichern'}</span>
+            </button>
+          </div>
         </footer>
       </form>
     </div>
@@ -460,23 +766,47 @@ function openEditorModal(options: EditorModalOptions): void {
 
   const nameInput = modalOverlay.querySelector<HTMLInputElement>('#modal-file-name')!
   const contentTextarea = modalOverlay.querySelector<HTMLTextAreaElement>('#modal-file-content')
+  const base64Checkbox = modalOverlay.querySelector<HTMLInputElement>('#modal-use-base64')
+  const base64Wrapper = modalOverlay.querySelector<HTMLDivElement>('#modal-base64-editor')
+  const base64Textarea = modalOverlay.querySelector<HTMLTextAreaElement>('#modal-file-content-b64')
   const form = modalOverlay.querySelector<HTMLFormElement>('#modal-form')!
   const closeBtn = modalOverlay.querySelector<HTMLButtonElement>('.modal-close-btn')!
   const cancelBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-cancel')!
   const saveBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-save')!
   const deleteBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-delete')
 
-  if (contentTextarea) contentTextarea.value = options.initialContent ?? ''
+  if (contentTextarea) {
+    contentTextarea.value = options.initialContent ?? ''
+    if (options.contentLocked) contentTextarea.readOnly = true
+  }
 
+  if (base64Textarea) base64Textarea.value = options.base64 ?? ''
+
+  // Ohne Haken bleibt die Datei unangetastet und die Vorschau sichtbar. Mit Haken
+  // wird der Base64-Text zur einzigen Inhaltsquelle und die Vorschau weicht dem
+  // Feld.
+  const previewFigure = modalOverlay.querySelector<HTMLElement>('#modal-file-preview')
+  const syncBase64State = () => {
+    const active = Boolean(base64Checkbox?.checked)
+    if (base64Wrapper) base64Wrapper.hidden = !active
+    if (previewFigure) previewFigure.hidden = active
+    if (active) base64Textarea?.focus()
+  }
+  base64Checkbox?.addEventListener('change', syncBase64State)
   if (isCreate) {
     nameInput.focus()
     nameInput.select()
-  } else if (contentTextarea) {
+  } else if (contentTextarea && !options.contentLocked) {
     contentTextarea.focus()
+  } else {
+    // Bei gesperrtem Inhalt ist der Name das einzige Feld, das sich aendert.
+    nameInput.focus()
   }
 
   function closeModal() {
     document.removeEventListener('keydown', handleKeydown)
+    // Object-URLs belegen Speicher, bis sie freigegeben werden.
+    if (options.preview?.previewUrl) URL.revokeObjectURL(options.preview.previewUrl)
     modalOverlay.remove()
   }
 
@@ -499,14 +829,27 @@ function openEditorModal(options: EditorModalOptions): void {
     }
 
     saveBtn.disabled = true
-    saveBtn.textContent = 'Wird gespeichert...'
+    saveBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = 'Wird gespeichert...'
 
     try {
-      await options.onSave(name, contentTextarea?.value ?? '')
+      // Bei gesperrtem Inhalt (Binaerdatei) ist der Inhalt nur dann eine Quelle,
+      // wenn die Base64-Bearbeitung aktiviert wurde; sonst null uebergeben und
+      // die Datei bleibt byte-identisch.
+      let payload: string | Blob | null
+      if (!options.contentLocked) {
+        payload = contentTextarea?.value ?? ''
+      } else if (base64Checkbox?.checked && base64Textarea) {
+        payload = base64ToBlob(base64Textarea.value)
+      } else {
+        payload = null
+      }
+      await options.onSave(name, payload)
       closeModal()
     } catch (err: unknown) {
       saveBtn.disabled = false
-      saveBtn.textContent = isCreate ? 'Erstellen' : 'Speichern'
+      saveBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = isCreate
+        ? 'Erstellen'
+        : 'Speichern'
       alert(`Fehler beim Speichern: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
@@ -516,14 +859,14 @@ function openEditorModal(options: EditorModalOptions): void {
     if (!confirm(`Möchten Sie "${options.name}" wirklich löschen?`)) return
 
     deleteBtn.disabled = true
-    deleteBtn.textContent = 'Wird gelöscht...'
+    deleteBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = 'Wird gelöscht...'
 
     try {
       await options.onDelete()
       closeModal()
     } catch (err: unknown) {
       deleteBtn.disabled = false
-      deleteBtn.textContent = '🗑️ Löschen'
+      deleteBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = 'Löschen'
       alert(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
@@ -1073,7 +1416,7 @@ export function renderFilesView(container: HTMLElement): void {
       kind: 'file',
       mode: 'create',
       onSave: async (fileName, content) => {
-        await storage.createFile(fileName, content)
+        await storage.createFile(fileName, content instanceof Blob ? content : (content ?? ''))
         await refreshCurrentList()
       },
     })
@@ -1113,9 +1456,10 @@ export function renderFilesView(container: HTMLElement): void {
       await refreshCurrentList()
     }
 
-    const saveEntry = async (newName: string, content: string) => {
+    const saveEntry = async (newName: string, content: string | Blob | null) => {
       if (newName !== name) await storage.renameEntry(name, newName)
-      if (kind === 'file') await storage.writeFile(newName, content)
+      // content === null bedeutet: Binaerdatei, Inhalt bleibt unveraendert.
+      if (kind === 'file' && content !== null) await storage.writeFile(newName, content)
       await refreshCurrentList()
     }
 
@@ -1125,12 +1469,40 @@ export function renderFilesView(container: HTMLElement): void {
     }
 
     try {
-      const content = await storage.readFile(name)
+      // Grosse Dateien (> 10 MB) werden gar nicht erst als Text geladen. Ist es
+      // ein Bild, zeigen wir trotzdem eine Vorschau.
+      const size = await storage.getFileSize(name)
+      if (size > MAX_EDITABLE_TEXT_BYTES) {
+        const tooLargeBlob = IMAGE_EXTENSIONS.has(getExtension(name))
+          ? await storage.readFileBlob(name)
+          : null
+        openEditorModal({
+          kind: 'file',
+          mode: 'edit',
+          name,
+          contentLocked: true,
+          preview: tooLargeBlob ? buildImagePreview(tooLargeBlob) : undefined,
+          onSave: saveEntry,
+          onDelete: removeEntry,
+        })
+        return
+      }
+
+      const blob = await storage.readFileBlob(name)
+      const editable = await isEditableTextFile(blob, name)
       openEditorModal({
         kind: 'file',
         mode: 'edit',
         name,
-        initialContent: content,
+        // Nur Textdateien werden dekodiert; bei Binaerdateien waere die
+        // Textdarstellung verlustbehaftet und ein Speichern wuerde die Datei
+        // zerstoeren.
+        initialContent: editable ? await blob.text() : '',
+        contentLocked: !editable,
+        preview: !editable && IMAGE_EXTENSIONS.has(getExtension(name)) ? buildImagePreview(blob) : undefined,
+        // Bis zur Groessengrenze laesst sich jede Datei als Base64 bearbeiten.
+        base64Editable: !editable && blob.size <= MAX_EDITABLE_TEXT_BYTES,
+        base64: !editable && blob.size <= MAX_EDITABLE_TEXT_BYTES ? await blobToBase64(blob) : undefined,
         onSave: saveEntry,
         onDelete: removeEntry,
       })
@@ -1154,12 +1526,57 @@ export function renderFilesView(container: HTMLElement): void {
     fileImportInput.value = ''
     fileImportInput.onchange = async () => {
       if (!fileImportInput.files || fileImportInput.files.length === 0 || !currentStorage) return
+      const storage = currentStorage
+      const files = Array.from(fileImportInput.files)
+      let imported = 0
+      let skipped = 0
+      // Merkt sich die Antwort des ersten Konflikts und wendet sie auf alle
+      // weiteren an -- sonst waere der Hinweis im Dialog gelogen.
+      let applyToAll: 'replace' | 'rename' | 'skip' | null = null
+
       try {
-        for (const file of Array.from(fileImportInput.files)) {
-          await currentStorage.createFile(file.name, file)
+        for (let index = 0; index < files.length; index++) {
+          const file = files[index]
+          let decision: 'replace' | 'rename' | 'skip' = 'rename'
+          const collision = await storage.hasEntry(file.name)
+
+          if (collision) {
+            decision = applyToAll ?? askImportCollision(file.name)
+
+            // Nur einmal fragen, und nur wenn noch weitere Dateien folgen.
+            if (!applyToAll && index < files.length - 1) {
+              const remaining = await countRemainingCollisions(storage, files, index + 1)
+              if (remaining > 0 && askApplyToAll(decision, remaining)) {
+                applyToAll = decision
+              }
+            }
+
+            if (decision === 'skip') {
+              skipped++
+              continue
+            }
+          }
+
+          const targetName =
+            decision === 'replace' ? file.name : await findFreeName(storage, file.name)
+
+          if (decision === 'replace') {
+            await storage.writeFile(targetName, file)
+          } else {
+            await storage.createFile(targetName, file)
+          }
+          imported++
         }
+
         await refreshCurrentList()
+
+        if (skipped > 0) {
+          alert(
+            `${imported} Datei(en) importiert, ${skipped} übersprungen.`
+          )
+        }
       } catch (err: unknown) {
+        await refreshCurrentList()
         alert(`Dateien konnten nicht importiert werden: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
