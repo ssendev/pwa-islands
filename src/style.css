@@ -46,10 +46,6 @@
       rgba(0, 0, 0, 0.4) 0 10px 15px -3px, rgba(0, 0, 0, 0.25) 0 4px 6px -2px;
   }
 
-  #social .button-icon {
-    filter: invert(1) brightness(2);
-  }
-
   .badge-warning {
     color: #fbbf24;
     background: rgba(245, 158, 11, 0.2);
@@ -95,8 +91,7 @@ p {
   margin: 0;
 }
 
-code,
-.counter {
+code {
   font-family: var(--mono);
   display: inline-flex;
   border-radius: 4px;
@@ -108,25 +103,6 @@ code {
   line-height: 135%;
   padding: 4px 8px;
   background: var(--code-bg);
-}
-
-.counter {
-  font-size: 16px;
-  padding: 5px 10px;
-  border-radius: 5px;
-  color: var(--accent);
-  background: var(--accent-bg);
-  border: 2px solid transparent;
-  transition: border-color 0.3s;
-  cursor: pointer;
-
-  &:hover {
-    border-color: var(--accent-border);
-  }
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
 }
 
 /* Button Component Styles */
@@ -258,111 +234,6 @@ code {
   flex-grow: 1;
 }
 
-#center {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  place-content: center;
-  place-items: center;
-  flex-grow: 1;
-
-  @media (max-width: 1024px) {
-    padding: 32px 20px 24px;
-    gap: 18px;
-  }
-}
-
-#next-steps {
-  display: flex;
-  border-top: 1px solid var(--border);
-  text-align: left;
-
-  & > div {
-    flex: 1 1 0;
-    padding: 32px;
-    @media (max-width: 1024px) {
-      padding: 24px 20px;
-    }
-  }
-
-  .icon {
-    margin-bottom: 16px;
-    width: 22px;
-    height: 22px;
-  }
-
-  @media (max-width: 1024px) {
-    flex-direction: column;
-    text-align: center;
-  }
-}
-
-#docs {
-  border-right: 1px solid var(--border);
-
-  @media (max-width: 1024px) {
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-}
-
-#next-steps ul {
-  list-style: none;
-  padding: 0;
-  display: flex;
-  gap: 8px;
-  margin: 32px 0 0;
-
-  .logo {
-    height: 18px;
-  }
-
-  a {
-    color: var(--text-h);
-    font-size: 16px;
-    border-radius: 6px;
-    background: var(--social-bg);
-    display: flex;
-    padding: 6px 12px;
-    align-items: center;
-    gap: 8px;
-    text-decoration: none;
-    transition: box-shadow 0.3s;
-
-    &:hover {
-      box-shadow: var(--shadow);
-    }
-    .button-icon {
-      height: 18px;
-      width: 18px;
-    }
-  }
-
-  @media (max-width: 1024px) {
-    margin-top: 20px;
-    flex-wrap: wrap;
-    justify-content: center;
-
-    li {
-      flex: 1 1 calc(50% - 8px);
-    }
-
-    a {
-      width: 100%;
-      justify-content: center;
-      box-sizing: border-box;
-    }
-  }
-}
-
-#spacer {
-  height: 88px;
-  border-top: 1px solid var(--border);
-  @media (max-width: 1024px) {
-    height: 48px;
-  }
-}
-
 /* Files Page Styles */
 .files-page {
   display: flex;
@@ -396,6 +267,9 @@ code {
   gap: 10px;
   font-weight: 500;
   color: var(--text-h);
+  /* Der Pfad darf schrumpfen und umbrechen; die Buttons bleiben rechts. */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .status-indicator {
@@ -478,6 +352,22 @@ code {
   color: var(--text);
   font-weight: 500;
   word-break: break-all;
+  /*
+   * Der Pfad nimmt den freien Platz und schiebt die Toolbar-Buttons an den
+   * rechten Rand. Wird der Pfad zu lang, bricht ER um -- nicht die Buttons.
+   */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/*
+ * Die Button-Gruppe bleibt zusammen und rechts. `margin-left: auto` hat den
+ * gleichen Zweck wie `flex: 1 1 auto` am Pfad; `flex: 0 0 auto` verhindert,
+ * dass die Gruppe selbst schrumpft und umbricht.
+ */
+.folder-actions {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .table-responsive {
@@ -488,9 +378,18 @@ code {
   box-shadow: var(--shadow);
 }
 
+/*
+ * ECHTE Tabellenanordnung: die Zeilen sind KEINE Flex-Container, damit der
+ * Browser die Spaltenbreiten ueber alle Zeilen hinweg gleich berechnet.
+ *
+ * Spaltenreihenfolge im Markup: Name | Groesse | Datum | Aktionen -- so steht
+ * sie auf dem Desktop. Die Kartenansicht (media query) baut daraus per
+ * `order` die Reihenfolge Aktionen, Name, Metadaten.
+ */
 .files-table {
   width: 100%;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 15px;
 }
 
@@ -502,29 +401,69 @@ code {
   text-align: left;
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
+  box-sizing: border-box;
 }
 
+/* Keine Zellrahmen: die Trennlinie der Zeile liegt auf dem <tr> selbst, damit
+ * sie ohne Luecken ueber die ganze Breite laeuft. */
 .files-table td {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
   color: var(--text);
   vertical-align: middle;
+  box-sizing: border-box;
 }
 
-.files-table tr:last-child td {
+.files-table tbody tr {
+  border-bottom: 1px solid var(--border);
+}
+
+.files-table tbody tr:last-child {
   border-bottom: none;
 }
 
-.files-table tr:hover td {
+/*
+ * Der Hover faerbt die <td>-Boxen. Bei `border-collapse: separate` malt der
+ * Browser sie als eigene Boxen -- ohne Luecken, weil sie die Zeile ausfuellen.
+ */
+.files-table tbody tr:hover td {
   background-color: var(--accent-bg);
 }
 
+/* Groesse und Datum: Inhalt linksbuendig, Breite aus dem Inhalt. */
+.files-table th.th-size,
+.files-table th.th-date,
+.files-table td.file-size-cell,
+.files-table td.file-date-cell {
+  text-align: left;
+  white-space: nowrap;
+}
+
+/*
+ * Aktionsspalte: nur so breit wie der Button. `width: 1%` ist der Trick, mit
+ * dem eine Tabellenspalte auf ihre Inhaltsbreite schrumpft -- der Rest geht an
+ * die Namensspalte.
+ */
+.files-table th.th-actions,
+.files-table td.files-actions-cell {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
 .file-name-cell {
+  font-weight: 500;
+  color: var(--text-h);
+}
+
+/*
+ * Der Name ist ein Flex-Container, damit Icon und Text auf einer Linie liegen.
+ * Achtung: `display: flex` auf dem <td> nimmt die Zelle aus dem Tabellenlayout
+ * -- deshalb liegt der Flex-Container in einem <span> INNERHALB der Zelle.
+ */
+.file-name-inner {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 500;
-  color: var(--text-h);
   word-break: break-all;
 }
 
@@ -537,12 +476,25 @@ code {
   color: var(--accent);
 }
 
-.files-actions-cell {
-  text-align: right;
-  white-space: nowrap;
+.files-actions-inner {
   display: flex;
-  gap: 8px;
+  align-items: center;
   justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+/*
+ * Die ganze Zeile ist klickbar (Ordner oeffnen, Datei laden), deshalb zeigt
+ * der Cursor das an. Die Aktionsbuttons fangen den Klick ab, damit sie nicht
+ * zusaetzlich navigieren.
+ */
+.file-row {
+  cursor: pointer;
+}
+
+.file-row .files-actions-cell button {
+  cursor: pointer;
 }
 
 .empty-state {
@@ -814,24 +766,455 @@ button#pwa-refresh {
   display: block;
 }
 
-.ticks {
+/*
+ * Karten-Ansicht fuer schmale Viewports (≤720 px): Aus jeder Tabellenzeile
+ * wird eine Karte. Der Bearbeiten-Button steht LINKS vom Namen -- dazu wird
+ * die Tabellenstruktur aufgeloest (`display: block`), die Zeile wird ein
+ * Flex-Container und die Zellen bekommen die gewuenschte Reihenfolge:
+ * Aktionen (1), Name (2), Metadaten (3).
+ */
+/*
+ * Doppel-Icon in den Toolbar-Buttons: das Datei-/Ordner-Symbol gross in der
+ * Mitte, das Plus in halber Groesse darueber (mobil) bzw. daneben (Desktop).
+ *
+ * Beide Zeichen liegen in DERSELBEN Rasterzelle -- nur so stehen sie
+ * uebereinander. Wichtig: im HTML darf zwischen den beiden Spans KEIN
+ * Whitespace stehen, sonst wird der Textknoten zu einer eigenen Zelle und die
+ * Zeichen rutschen auseinander.
+ */
+.btn-icon-only {
+  display: inline-grid;
+  grid-template-columns: auto;
+  place-items: center;
+  line-height: 1;
+}
+
+.btn-icon-only > span {
+  grid-area: 1 / 1;
+  line-height: 1;
+}
+
+.btn-icon-only > .btn-icon-sub {
+  font-size: 1.2em;
+}
+
+.btn-icon-only > .btn-icon-main {
+  font-size: 0.6em;
+}
+
+@media (max-width: 900px) {
+  /*
+   * Ohne Beschriftung werden alle Symbol-Buttons quadratisch und gleich
+   * gross -- sowohl die Toolbar (Datei, Ordner, Hochladen, Zahnrad) als auch
+   * der Bearbeiten-Button in der Zeile. Das Zellen-Padding der Aktionsspalte
+   * bleibt hier unveraendert (siehe Basisregel); es wird erst bei 720px fuer
+   * das Kartenlayout aufgehoben.
+   */
+  .folder-actions .btn {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    line-height: 1;
+    /*
+     * Das Doppel-Icon ("+" plus Datei/Ordner) wird gestapelt statt
+     * nebeneinander gesetzt -- nebeneinander ist es in einem 34px-Button zu
+     * breit und die beiden Zeichen ueberlappen sich. Die Groesse des Icons
+     * bleibt die des Basiszeichens, damit alle Buttons gleich wirken.
+     */
+    position: relative;
+  }
+
+  /*
+   * Zwei gestapelte Zeichen im Button: das grosse "`+"` und darueber -- leicht
+   * versetzt -- das kleine Datei-/Ordner-Symbol. Beide liegen als eigene
+   * Zeilen in einem Raster, damit sie wirklich uebereinander stehen und sich
+   * nicht ueberlappen.
+   */
+  .settings-menu .btn-icon {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    font-size: 16px;
+  }
+
+  /*
+   * WICHTIG: dieser Selektor steht VOR der Desktop-Regel in der Datei. Bei
+   * gleicher Spezifitaet gewinnt die spaetere -- deshalb hier eine Stufe
+   * hoeher (zusaetzlich `.table-responsive`), damit die Groesse auch wirklich
+   * ueberschrieben wird.
+   */
+  .table-responsive .files-table td.files-actions-cell .btn-sm {
+    width: 34px;
+    height: 34px;
+    /* Der Button ist Flex-Item in `.files-actions-inner`; ohne
+     * `flex-shrink: 0` quetscht der umliegende Container ihn auf seine
+     * Inhaltsbreite zusammen. */
+    flex: 0 0 auto;
+    padding: 0;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .btn-label {
+    display: none;
+  }
+
+}
+
+@media (max-width: 720px) {
+  .table-responsive {
+    overflow-x: visible;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .files-table thead {
+    display: none;
+  }
+
+  /*
+   * Jede Zeile wird eine Karte:
+   *
+   *   [ ✏️ ] [ 📄 Dateiname ... ]   <- Zeile 1: Button, dann Name
+   *          [ Größe ] [ Geändert ]  <- Zeile 2: Metadaten
+   *
+   * Die Zeile ist ein Flex-Container mit Umbruch. Button und Name stehen
+   * beide in Zeile 1; der Button hat `flex: 0 0 auto` und behaelt seine
+   * Breite, der Name nimmt den Rest. Damit der Name auch bei sehr langer
+   * Beschriftung NICHT den Button in eine eigene Reihe draengt, bekommt der
+   * Name mindestens so viel Platz, dass er umbrechen kann (`min-width: 0`).
+   */
+  .files-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 14px;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow);
+    transition: background-color 0.15s ease;
+  }
+
+  .files-table tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  /* Der Kartenrahmen faerbt sich beim Hover -- nicht die einzelnen Zellen. */
+  .files-table tbody tr:hover {
+    background-color: var(--accent-bg);
+  }
+
+  .files-table tbody tr:hover td {
+    background-color: transparent;
+  }
+
+  .files-table td {
+    display: block;
+    padding: 0;
+    border-bottom: none;
+    width: auto;
+    box-sizing: border-box;
+    flex: 0 0 auto;
+  }
+
+  /*
+   * Button NACH dem Namen, aber in derselben Zeile: der Name bekommt
+   * `order: 1` und nimmt den freien Platz, der Button `order: 2` und behaelt
+   * seine Icongroesse. Beide sind mit `align-self: center` auf dieselbe
+   * Mittellinie ausgerichtet.
+   *
+   * WICHTIG: hier wird das Zellen-Padding der Aktionsspalte aufgehoben. Ab
+   * dieser Breite ist die Zeile eine Karte mit eigenem Padding (`12px 16px`),
+   * ein Zellen-Padding obendrauf ergaebe einen doppelten Rand. Der
+   * `.table-responsive`-Vorfahr ist noetig, weil die Basisregel weiter unten
+   * in der Datei steht und bei gleicher Spezifitaet die spaetere gewinnt.
+   */
+  .table-responsive .files-table th.th-actions,
+  .table-responsive .files-table td.files-actions-cell {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .files-table td.files-actions-cell {
+    order: 2;
+    flex: 0 0 auto;
+    padding: 0;
+    min-width: 38px;
+    /*
+     * Der Button darf NICHT schrumpfen -- `flex: 0 0 auto` allein reicht
+     * nicht, weil die Zelle ohne Inhalt keine Mindestbreite beisteuert und
+     * die Nachbarspalte (Name) den Platz belegt. Deshalb eine harte
+     * Mindestbreite in Buttonbreite.
+     */
+    text-align: right;
+    margin: 0;
+    align-self: center;
+  }
+
+  .files-actions-inner {
+    justify-content: flex-end;
+  }
+
+  .files-table td.file-name-cell {
+    order: 1;
+    flex: 1 1 0;
+    min-width: 0;
+    align-self: center;
+  }
+
+  /*
+   * Groesse und Datum stehen in Zeile 2 unter dem Namen. Beide marschieren
+   * zusammen (`flex: 1 1 100%`) und brechen damit nie einzeln um; innerhalb
+   * der Zeile teilen sie sich den Platz. Weil jede Zelle `nowrap` ist, bricht
+   * nie ein WERT mitten im Text um.
+   */
+  .files-table td.file-size-cell,
+  .files-table td.file-date-cell {
+    order: 3;
+    flex: 1 1 100%;
+    padding: 0;
+    margin: 0;
+    border: none;
+    font-size: 13px;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  /*
+   * In der Karte tragen Groesse und Datum ihre Bezeichnung als Praefix, weil
+   * die Tabellenkopfzeile hier nicht sichtbar ist.
+   */
+  .files-table td.file-size-cell::before,
+  .files-table td.file-date-cell::before {
+    content: attr(data-label) ': ';
+    font-weight: 600;
+    color: var(--text-h);
+  }
+
+  .files-table td.file-date-cell::before {
+    content: attr(data-label-short) ': ';
+  }
+
+  /* Ordner haben keine Groesse und kein Datum -- die Zellen entfallen. */
+  .files-table tr.file-row.is-directory .file-size-cell,
+  .files-table tr.file-row.is-directory .file-date-cell {
+    display: none;
+  }
+
+  /*
+   * Der Dateiname darf umbrechen. Das Icon bleibt dabei LINKS vom Textblock
+   * stehen: es ist `flex-shrink: 0` und die erste Spalte des inneren
+   * Flex-Containers, sodass der Text rechts daneben umbricht -- nicht unter
+   * dem Icon.
+   */
+  .file-name-inner {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+
+  .file-name-inner .file-icon {
+    flex-shrink: 0;
+    /*
+     * Das Icon sitzt auf der ersten Textzeile. `line-height` entspricht der
+     * Zeilenhoehe des Namens, damit beide auf derselben Grundlinie beginnen --
+     * bei einzeiligen wie bei mehrzeiligen Namen.
+     */
+    line-height: 1.4;
+  }
+}
+
+
+/* Breadcrumbs */
+.breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.breadcrumb-item {
+  background: none;
+  border: none;
+  padding: 2px 4px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb-item:hover {
+  background: var(--accent-bg);
+  text-decoration: underline;
+}
+
+.breadcrumb-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.breadcrumb-current {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+  padding: 2px 4px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.breadcrumb-separator {
+  color: var(--text);
+  opacity: 0.5;
+  font-size: 13px;
+  user-select: none;
+}
+
+/* Ordner-Aktionen (Toolbar) + Einstellungs-Menue (Zahnrad) */
+.folder-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.settings-menu {
   position: relative;
-  width: 100%;
+}
 
-  &::before,
-  &::after {
-    content: '';
-    position: absolute;
-    top: -4.5px;
-    border: 5px solid transparent;
-  }
+.btn-icon {
+  padding: 8px 12px;
+  font-size: 17px;
+  line-height: 1;
+}
 
-  &::before {
-    left: 0;
-    border-left-color: var(--border);
-  }
-  &::after {
-    right: 0;
-    border-right-color: var(--border);
-  }
+.settings-menu-list {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  min-width: 240px;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-menu-list[hidden] {
+  display: none;
+}
+
+.settings-menu-item {
+  background: none;
+  border: none;
+  padding: 9px 12px;
+  font-family: var(--sans);
+  font-size: 14px;
+  text-align: left;
+  color: var(--text-h);
+  cursor: pointer;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.settings-menu-item:hover,
+.settings-menu-item:focus-visible {
+  background: var(--accent-bg);
+  outline: none;
+}
+
+.settings-menu-item.is-danger {
+  color: #dc2626;
+}
+
+.settings-menu-item.is-danger:hover {
+  background: rgba(220, 38, 38, 0.1);
+}
+
+/*
+ * Unsichtbar, aber im Layout vorhanden: die Ordner-Zeile haelt damit ihren
+ * Bearbeiten-Platz frei, ohne dass sich die Spalten verschieben.
+ */
+.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/*
+ * Nur fuer Screenreader: der Text bleibt im Accessibility-Baum, belegt aber
+ * keinen sichtbaren Platz (im Gegensatz zu `display: none`).
+ */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * Der Bearbeiten-Button zeigt nur das Stift-Icon -- die Beschriftung ist auf
+ * jeder Breite ausgeblendet. Der `aria-label` am Button bleibt fuer
+ * Screenreader erhalten.
+ */
+.files-actions-cell .btn-label {
+  display: none;
+}
+
+/*
+ * Quadratischer Icon-Button: gleiche Breite und Hoehe, ohne das seitliche
+ * Text-Padding. Sonst ist der Button ein breites Rechteck, in dem das Icon
+ * verloren wirkt, und er wird hoeher als eine Textzeile.
+ *
+ * Der Button ist bewusst groesser als die reine Icongroesse -- er ist in der
+ * Tabelle das einzige Bedienelement der Zeile und soll gut zu treffen sein.
+ * Das Zellen-Padding ist entsprechend kleiner, damit die Zeilenhoehe nicht
+ * waechst (siehe `.files-actions-cell`).
+ */
+.files-table td.files-actions-cell .btn-sm {
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 17px;
+  line-height: 1;
+}
+
+/*
+ * Die Aktionsspalte braucht so nur die Breite des Icons. Der Aussenabstand des
+ * Buttons sitzt in diesem Zellen-Padding; in der Kartenansicht (<= 720px) wird
+ * er aufgehoben, dort kommt der Abstand aus dem Karten-Padding.
+ */
+.files-table th.th-actions,
+.files-table td.files-actions-cell {
+  padding-left: 8px;
+  padding-right: 16px;
 }

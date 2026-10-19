@@ -22,6 +22,8 @@ export interface FileEntry {
 export interface IFileStorage {
   readonly type: 'fsa' | 'opfs'
   readonly name: string
+  /** Anzeigename des Wurzelordners ohne Unterpfad. */
+  readonly rootName: string
   readonly isFallback: boolean
   readonly canChangeFolder: boolean
 
@@ -31,6 +33,8 @@ export interface IFileStorage {
   writeFile(name: string, content: string | Blob): Promise<void>
   createDirectory(name: string): Promise<void>
   deleteEntry(name: string): Promise<void>
+  /** Benennt eine Datei oder einen Ordner um. */
+  renameEntry(oldName: string, newName: string): Promise<void>
   ensureWritePermission(): Promise<boolean>
 }
 
@@ -203,6 +207,101 @@ export class FileSystemHandleStorage implements IFileStorage {
     }
     await this.handle.removeEntry(name, { recursive: true })
   }
+
+  /**
+   * Benennt eine Datei oder einen Ordner um. Die Plattform kennt kein
+   * Umbenennen; daher wird kopiert und anschliessend das Original geloescht.
+   * Existiert das Ziel bereits, wird nichts veraendert.
+   */
+  async renameEntry(oldName: string, newName: string): Promise<void> {
+    if (oldName === newName) return
+    if (oldName.includes('/') || newName.includes('/')) {
+      throw new Error('Name darf keinen Schraegstrich enthalten.')
+    }
+    if (!(await this.ensureWritePermission())) {
+      throw new Error('Schreibzugriff verweigert.')
+    }
+
+    // Kollision vorab pruefen: `getFileHandle`/`getDirectoryHandle` liefern
+    // ohne `create` einen NotFoundError, wenn der Name frei ist.
+    if (await this.hasEntry(newName)) {
+      throw new Error(`"${newName}" existiert bereits.`)
+    }
+
+    let kind: FileSystemHandleKind
+    try {
+      kind = (await this.handle.getFileHandle(oldName)).kind
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err
+      kind = (await this.handle.getDirectoryHandle(oldName)).kind
+    }
+
+    if (kind === 'file') {
+      const source = await this.handle.getFileHandle(oldName)
+      const target = await this.handle.getFileHandle(newName, { create: true })
+      const writable = await target.createWritable()
+      await writable.write(await source.getFile())
+      await writable.close()
+    } else {
+      await this.copyDirectoryEntry(oldName, newName)
+    }
+
+    await this.handle.removeEntry(oldName, { recursive: true })
+  }
+
+  /** True, wenn unter dem Namen bereits Datei oder Ordner existiert. */
+  private async hasEntry(name: string): Promise<boolean> {
+    try {
+      await this.handle.getFileHandle(name)
+      return true
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err
+    }
+    try {
+      await this.handle.getDirectoryHandle(name)
+      return true
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'NotFoundError')) throw err
+    }
+    return false
+  }
+
+  /** Kopiert einen Ordner samt Inhalt rekursiv unter einen neuen Namen. */
+  private async copyDirectoryEntry(sourceName: string, targetName: string): Promise<void> {
+    const source = await this.handle.getDirectoryHandle(sourceName)
+    const target = await this.handle.getDirectoryHandle(targetName, { create: true })
+
+    for await (const entry of source.values()) {
+      if (entry.kind === 'file') {
+        const file = await (entry as FileSystemFileHandle).getFile()
+        const targetFile = await target.getFileHandle(entry.name, { create: true })
+        const writable = await targetFile.createWritable()
+        await writable.write(file)
+        await writable.close()
+      } else {
+        await this.copyDirectoryInto(entry as FileSystemDirectoryHandle, target)
+      }
+    }
+  }
+
+  /** Rekursionshelfer: kopiert `source` inklusive Inhalt nach `target`. */
+  private async copyDirectoryInto(
+    source: FileSystemDirectoryHandle,
+    target: FileSystemDirectoryHandle
+  ): Promise<void> {
+    const nested = await target.getDirectoryHandle(source.name, { create: true })
+    for await (const entry of source.values()) {
+      if (entry.kind === 'file') {
+        const file = await (entry as FileSystemFileHandle).getFile()
+        const targetFile = await nested.getFileHandle(entry.name, { create: true })
+        const writable = await targetFile.createWritable()
+        await writable.write(file)
+        await writable.close()
+      } else {
+        await this.copyDirectoryInto(entry as FileSystemDirectoryHandle, nested)
+      }
+    }
+  }
 }
 
 function formatBytes(bytes: number): string {
@@ -223,52 +322,129 @@ function formatDate(timestamp: number): string {
   }).format(new Date(timestamp))
 }
 
-interface FileEditorModalOptions {
+interface EditorModalOptions {
+  /** 'file' zeigt zusaetzlich den Inhalt, 'folder' nur den Namen. */
+  kind: 'file' | 'folder'
+  /** 'create' legt neu an, 'edit' aendert Name und/oder Inhalt. */
   mode: 'create' | 'edit'
-  fileName?: string
+  name?: string
   initialContent?: string
-  onSave: (fileName: string, content: string) => Promise<void>
+  onSave: (name: string, content: string) => Promise<void>
+  /** Nur bei mode 'edit': loescht den Eintrag. */
+  onDelete?: () => Promise<void>
 }
 
 /**
- * Öffnet ein modales Dialogfenster mit Textarea zur Erstellung oder Bearbeitung einer Datei.
+ * Maskiert Text fuer die Ausgabe in HTML-Attributen und -Textknoten.
+ * Datei- und Ordnernamen koennen beliebige Zeichen enthalten.
  */
-function openFileEditorModal(options: FileEditorModalOptions): void {
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+/**
+ * Baut den Pfad als Breadcrumb. Jeder Abschnitt ist ein Button mit seinem
+ * Zielpfad in `data-segment`; der letzte Eintrag ist der aktuelle Ordner und
+ * daher nicht anklickbar. Die Wurzel traegt je nach Speicherart ein Icon
+ * (💻 fuer einen lokalen Ordner, 📦 fuer den App-Speicher).
+ */
+function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
+  const isOpfs = storage.type === 'opfs'
+  const rootIcon = isOpfs ? '📦' : '💻'
+  // Der API-Name "Origin Private File System" ist fuer den Breadcrumb zu lang.
+  const rootLabel = isOpfs ? 'PWA Islands' : storage.rootName
+  const segments = storage.subPath ? storage.subPath.split('/') : []
+
+  const parts: string[] = []
+  parts.push(
+    segments.length === 0
+      ? `<span class="breadcrumb-current">${rootIcon} ${escapeHtml(rootLabel)}</span>`
+      : `<button type="button" class="breadcrumb-item" data-segment="" title="${escapeHtml(
+          rootLabel
+        )}">${rootIcon} ${escapeHtml(rootLabel)}</button>`
+  )
+
+  let accumulated = ''
+  segments.forEach((segment, index) => {
+    accumulated = accumulated ? `${accumulated}/${segment}` : segment
+    const isLast = index === segments.length - 1
+    parts.push(`<span class="breadcrumb-separator" aria-hidden="true">/</span>`)
+    parts.push(
+      isLast
+        ? `<span class="breadcrumb-current">${escapeHtml(segment)}</span>`
+        : `<button type="button" class="breadcrumb-item" data-segment="${escapeHtml(
+            accumulated
+          )}" title="${escapeHtml(segment)}">${escapeHtml(segment)}</button>`
+    )
+  })
+
+  return parts.join('')
+}
+
+/**
+ * Öffnet das Bearbeiten-Fenster für eine Datei oder einen Ordner. Im Modus
+ * 'edit' lässt sich der Name ändern (Umbenennen) und der Eintrag löschen; bei
+ * Dateien kommt das Inhaltsfeld hinzu.
+ */
+function openEditorModal(options: EditorModalOptions): void {
   const existingModal = document.querySelector('.modal-overlay')
   if (existingModal) existingModal.remove()
 
   const isCreate = options.mode === 'create'
+  const isFolder = options.kind === 'folder'
+  const noun = isFolder ? 'Ordner' : 'Datei'
+  const title = isCreate
+    ? `Neuen ${noun} erstellen`
+    : `${noun} bearbeiten: ${options.name}`
+
   const modalOverlay = document.createElement('div')
   modalOverlay.className = 'modal-overlay'
 
   modalOverlay.innerHTML = `
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-title">
       <header class="modal-header">
-        <h3 id="modal-title">${isCreate ? 'Neue Datei erstellen' : `Datei bearbeiten: ${options.fileName}`}</h3>
+        <h3 id="modal-title">${escapeHtml(title)}</h3>
         <button type="button" class="modal-close-btn" aria-label="Schließen">&times;</button>
       </header>
       <form id="modal-form">
         <div class="modal-body">
           <div class="form-group">
-            <label for="modal-file-name">Dateiname:</label>
+            <label for="modal-file-name">${noun}name:</label>
             <input
               type="text"
               id="modal-file-name"
               class="form-input"
-              value="${options.fileName ?? 'notiz.txt'}"
-              ${isCreate ? 'required placeholder="z. B. index.html, daten.json"' : 'disabled'}
+              value="${escapeHtml(options.name ?? (isFolder ? 'Neuer Ordner' : 'notiz.txt'))}"
+              required
+              placeholder="${isFolder ? 'z. B. projekte' : 'z. B. index.html, daten.json'}"
             />
           </div>
-          <div class="form-group">
-            <label for="modal-file-content">Inhalt:</label>
-            <textarea
-              id="modal-file-content"
-              class="form-textarea"
-              placeholder="Geben Sie hier den Dateiinhalt ein..."
-            ></textarea>
-          </div>
+          ${
+            isFolder
+              ? ''
+              : `<div class="form-group">
+                  <label for="modal-file-content">Inhalt:</label>
+                  <textarea
+                    id="modal-file-content"
+                    class="form-textarea"
+                    placeholder="Geben Sie hier den Dateiinhalt ein..."
+                  ></textarea>
+                </div>`
+          }
         </div>
         <footer class="modal-footer">
+          ${
+            options.onDelete
+              ? `<button type="button" id="modal-btn-delete" class="btn btn-danger">
+                  🗑️ Löschen
+                </button>`
+              : ''
+          }
           <button type="button" id="modal-btn-cancel" class="btn btn-secondary">
             Abbrechen
           </button>
@@ -283,18 +459,19 @@ function openFileEditorModal(options: FileEditorModalOptions): void {
   document.body.appendChild(modalOverlay)
 
   const nameInput = modalOverlay.querySelector<HTMLInputElement>('#modal-file-name')!
-  const contentTextarea = modalOverlay.querySelector<HTMLTextAreaElement>('#modal-file-content')!
+  const contentTextarea = modalOverlay.querySelector<HTMLTextAreaElement>('#modal-file-content')
   const form = modalOverlay.querySelector<HTMLFormElement>('#modal-form')!
   const closeBtn = modalOverlay.querySelector<HTMLButtonElement>('.modal-close-btn')!
   const cancelBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-cancel')!
   const saveBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-save')!
+  const deleteBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-delete')
 
-  contentTextarea.value = options.initialContent ?? ''
+  if (contentTextarea) contentTextarea.value = options.initialContent ?? ''
 
   if (isCreate) {
     nameInput.focus()
     nameInput.select()
-  } else {
+  } else if (contentTextarea) {
     contentTextarea.focus()
   }
 
@@ -315,9 +492,9 @@ function openFileEditorModal(options: FileEditorModalOptions): void {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
-    const fileName = (isCreate ? nameInput.value : options.fileName)?.trim()
-    if (!fileName) {
-      alert('Bitte geben Sie einen gültigen Dateinamen ein.')
+    const name = nameInput.value.trim()
+    if (!name) {
+      alert(`Bitte geben Sie einen gültigen ${noun}namen ein.`)
       return
     }
 
@@ -325,97 +502,29 @@ function openFileEditorModal(options: FileEditorModalOptions): void {
     saveBtn.textContent = 'Wird gespeichert...'
 
     try {
-      await options.onSave(fileName, contentTextarea.value)
+      await options.onSave(name, contentTextarea?.value ?? '')
       closeModal()
     } catch (err: unknown) {
       saveBtn.disabled = false
       saveBtn.textContent = isCreate ? 'Erstellen' : 'Speichern'
-      alert(`Fehler beim Speichern der Datei: ${err instanceof Error ? err.message : String(err)}`)
+      alert(`Fehler beim Speichern: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
-}
 
-function openFolderNameModal(options: { onSave: (name: string) => Promise<void> }): void {
-  const existingModal = document.querySelector('.modal-overlay')
-  if (existingModal) existingModal.remove()
+  deleteBtn?.addEventListener('click', async () => {
+    if (!options.onDelete) return
+    if (!confirm(`Möchten Sie "${options.name}" wirklich löschen?`)) return
 
-  const modalOverlay = document.createElement('div')
-  modalOverlay.className = 'modal-overlay'
-
-  modalOverlay.innerHTML = `
-    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-      <header class="modal-header">
-        <h3 id="modal-title">Neuen Ordner erstellen</h3>
-        <button type="button" class="modal-close-btn" aria-label="Schließen">&times;</button>
-      </header>
-      <form id="modal-form">
-        <div class="modal-body">
-          <div class="form-group">
-            <label for="modal-file-name">Ordnername:</label>
-            <input
-              type="text"
-              id="modal-file-name"
-              class="form-input"
-              value="Neuer Ordner"
-              required
-              placeholder="z. B. projekte"
-            />
-          </div>
-        </div>
-        <footer class="modal-footer">
-          <button type="button" id="modal-btn-cancel" class="btn btn-secondary">
-            Abbrechen
-          </button>
-          <button type="submit" id="modal-btn-save" class="btn btn-primary">
-            Erstellen
-          </button>
-        </footer>
-      </form>
-    </div>
-  `
-
-  document.body.appendChild(modalOverlay)
-
-  const nameInput = modalOverlay.querySelector<HTMLInputElement>('#modal-file-name')!
-  const form = modalOverlay.querySelector<HTMLFormElement>('#modal-form')!
-  const closeBtn = modalOverlay.querySelector<HTMLButtonElement>('.modal-close-btn')!
-  const cancelBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-cancel')!
-  const saveBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-save')!
-
-  nameInput.focus()
-  nameInput.select()
-
-  function closeModal() {
-    document.removeEventListener('keydown', handleKeydown)
-    modalOverlay.remove()
-  }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') closeModal()
-  }
-
-  document.addEventListener('keydown', handleKeydown)
-  closeBtn.addEventListener('click', closeModal)
-  cancelBtn.addEventListener('click', closeModal)
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const folderName = nameInput.value.trim()
-    if (!folderName) {
-      alert('Bitte geben Sie einen gültigen Ordnernamen ein.')
-      return
-    }
-
-    saveBtn.disabled = true
-    saveBtn.textContent = 'Wird erstellt...'
+    deleteBtn.disabled = true
+    deleteBtn.textContent = 'Wird gelöscht...'
 
     try {
-      await options.onSave(folderName)
+      await options.onDelete()
       closeModal()
     } catch (err: unknown) {
-      saveBtn.disabled = false
-      saveBtn.textContent = 'Erstellen'
-      alert(`Fehler beim Erstellen des Ordners: ${err instanceof Error ? err.message : String(err)}`)
+      deleteBtn.disabled = false
+      deleteBtn.textContent = '🗑️ Löschen'
+      alert(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
 }
@@ -436,11 +545,10 @@ async function renderGenericFileList(
   storage: IFileStorage,
   handlers: {
     onRefresh: () => void
-    onNavigateUp: () => void
     onRequestNewFile: () => void
     onRequestNewFolder: () => void
     onRequestImport: () => void
-    onRequestEdit: (name: string) => void
+    onRequestEdit: (name: string, kind: 'file' | 'directory') => void
     onRequestOpen: (name: string) => void
     onRequestOpenFolder: (name: string) => void
   }
@@ -454,41 +562,14 @@ async function renderGenericFileList(
 
   try {
     const entries = await storage.listFiles()
-    const currentSubPath = storage instanceof FileSystemHandleStorage ? storage.subPath : ''
 
     if (entries.length === 0) {
       contentEl.innerHTML = `
-        ${
-          currentSubPath
-            ? `<div class="files-breadcrumb">
-                <button type="button" id="btn-navigate-up" class="btn btn-secondary btn-sm">
-                  ⬅️ Übergeordneter Ordner
-                </button>
-                <span class="breadcrumb-path">${storage.name}</span>
-              </div>`
-            : ''
-        }
         <div class="empty-state">
-          <div class="empty-icon">📁</div>
-          <h3>Verzeichnis ist leer</h3>
-          <p>In <strong>${storage.name}</strong> wurden keine Dateien gefunden. Sie können neue Dateien erstellen oder importieren.</p>
-          <div class="empty-actions">
-            <button id="btn-empty-new-file" type="button" class="btn btn-primary">
-              ➕ Neue Datei
-            </button>
-            <button id="btn-empty-new-folder" type="button" class="btn btn-secondary">
-              📁 Neuer Ordner
-            </button>
-            <button id="btn-empty-import-file" type="button" class="btn btn-secondary">
-              📥 Dateien importieren
-            </button>
-          </div>
+          <div class="empty-icon" aria-hidden="true">📁</div>
+          <h3>Ordner ist leer</h3>
         </div>
       `
-      contentEl.querySelector<HTMLButtonElement>('#btn-navigate-up')?.addEventListener('click', handlers.onNavigateUp)
-      contentEl.querySelector<HTMLButtonElement>('#btn-empty-new-file')?.addEventListener('click', handlers.onRequestNewFile)
-      contentEl.querySelector<HTMLButtonElement>('#btn-empty-new-folder')?.addEventListener('click', handlers.onRequestNewFolder)
-      contentEl.querySelector<HTMLButtonElement>('#btn-empty-import-file')?.addEventListener('click', handlers.onRequestImport)
       return
     }
 
@@ -497,11 +578,11 @@ async function renderGenericFileList(
 
     let summaryText = ''
     if (dirCount > 0 && fileCount > 0) {
-      summaryText = `${fileCount} Datei${fileCount === 1 ? '' : 'en'}, ${dirCount} Ordner`
+      summaryText = `${fileCount} ${fileCount === 1 ? 'Datei' : 'Dateien'}, ${dirCount} ${dirCount === 1 ? 'Ordner' : 'Ordner'}`
     } else if (fileCount > 0) {
-      summaryText = `${fileCount} Datei${fileCount === 1 ? '' : 'en'}`
+      summaryText = `${fileCount} ${fileCount === 1 ? 'Datei' : 'Dateien'}`
     } else {
-      summaryText = `${dirCount} Ordner`
+      summaryText = `${dirCount} ${dirCount === 1 ? 'Ordner' : 'Ordner'}`
     }
 
     const rows = entries
@@ -516,29 +597,25 @@ async function renderGenericFileList(
             : '—'
 
         return `
-          <tr class="file-row ${isDir ? 'is-directory' : 'is-file'}">
+          <tr class="file-row ${isDir ? 'is-directory' : 'is-file'}" data-entry="${encodeURIComponent(
+            entry.name
+          )}" data-kind="${entry.kind}" title="${isDir ? 'Ordner öffnen' : 'Datei öffnen'}">
             <td class="file-name-cell">
-              <span class="file-icon" aria-hidden="true">${icon}</span>
-              <span class="file-name" title="${entry.name}">${entry.name}</span>
+              <span class="file-name-inner">
+                <span class="file-icon" aria-hidden="true">${icon}</span>
+                <span class="file-name" title="${entry.name}">${entry.name}</span>
+              </span>
             </td>
-            <td class="file-size-cell">${sizeDisplay}</td>
-            <td class="file-date-cell">${dateDisplay}</td>
+            <td class="file-size-cell" data-label="Größe">${sizeDisplay}</td>
+            <td class="file-date-cell" data-label="Zuletzt geändert" data-label-short="Geändert">${dateDisplay}</td>
             <td class="files-actions-cell">
-              ${
-                isDir
-                  ? `<button type="button" class="btn btn-primary btn-sm btn-open-folder" data-entry="${encodeURIComponent(entry.name)}" title="Ordner öffnen">
-                      📂 Öffnen
-                    </button>`
-                  : `<button type="button" class="btn btn-primary btn-sm btn-open-entry" data-entry="${encodeURIComponent(entry.name)}" title="Datei öffnen">
-                      📂 Öffnen
-                    </button>
-                    <button type="button" class="btn btn-secondary btn-sm btn-edit-entry" data-entry="${encodeURIComponent(entry.name)}" title="Datei bearbeiten">
-                      ✏️ Bearbeiten
-                    </button>`
-              }
-              <button type="button" class="btn btn-danger btn-sm btn-delete-entry" data-entry="${encodeURIComponent(entry.name)}" title="Löschen">
-                🗑️ Löschen
-              </button>
+              <div class="files-actions-inner">
+                <button type="button" class="btn btn-secondary btn-sm btn-edit-entry" data-entry="${encodeURIComponent(
+                  entry.name
+                )}" title="${isDir ? 'Ordner bearbeiten' : 'Datei bearbeiten'}" aria-label="${isDir ? 'Ordner bearbeiten' : 'Datei bearbeiten'}">
+                  ✏️ <span class="btn-label">Bearbeiten</span>
+                </button>
+              </div>
             </td>
           </tr>
         `
@@ -546,20 +623,8 @@ async function renderGenericFileList(
       .join('')
 
     contentEl.innerHTML = `
-      ${
-        currentSubPath
-          ? `<div class="files-breadcrumb">
-              <button type="button" id="btn-navigate-up" class="btn btn-secondary btn-sm">
-                ⬅️ Übergeordneter Ordner
-              </button>
-              <span class="breadcrumb-path">${storage.name}</span>
-            </div>`
-          : ''
-      }
       <div class="files-summary">
-        <span>${summaryText}${
-          currentSubPath ? '' : ` in <strong>${storage.name}</strong>`
-        }</span>
+        <span>${summaryText}</span>
       </div>
       <div class="table-responsive">
         <table class="files-table">
@@ -568,7 +633,7 @@ async function renderGenericFileList(
               <th scope="col" class="th-name">Name</th>
               <th scope="col" class="th-size">Größe</th>
               <th scope="col" class="th-date">Zuletzt geändert</th>
-              <th scope="col" class="th-actions">Aktionen</th>
+              <th scope="col" class="th-actions"><span class="visually-hidden">Aktion</span></th>
             </tr>
           </thead>
           <tbody>
@@ -578,23 +643,16 @@ async function renderGenericFileList(
       </div>
     `
 
-    contentEl.querySelector<HTMLButtonElement>('#btn-navigate-up')?.addEventListener('click', handlers.onNavigateUp)
-
-    const openButtons = contentEl.querySelectorAll<HTMLButtonElement>('.btn-open-entry')
-    openButtons.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const target = e.currentTarget as HTMLButtonElement
-        const entryName = decodeURIComponent(target.dataset.entry || '')
-        if (entryName) handlers.onRequestOpen(entryName)
-      })
-    })
-
-    const openFolderButtons = contentEl.querySelectorAll<HTMLButtonElement>('.btn-open-folder')
-    openFolderButtons.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        const target = e.currentTarget as HTMLButtonElement
-        const entryName = decodeURIComponent(target.dataset.entry || '')
-        if (entryName) handlers.onRequestOpenFolder(entryName)
+    // Die ganze Zeile ist klickbar: Ordner oeffnen, Dateien laden. Die
+    // Aktionsbuttons liegen in derselben Zeile und muessen den Klick
+    // abfangen, damit Bearbeiten/Loeschen nicht zusaetzlich navigiert.
+    contentEl.querySelectorAll<HTMLTableRowElement>('.file-row').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if ((e.target as HTMLElement).closest('button')) return
+        const entryName = decodeURIComponent(row.dataset.entry || '')
+        if (!entryName) return
+        if (row.dataset.kind === 'directory') handlers.onRequestOpenFolder(entryName)
+        else handlers.onRequestOpen(entryName)
       })
     })
 
@@ -603,34 +661,8 @@ async function renderGenericFileList(
       btn.addEventListener('click', (e) => {
         const target = e.currentTarget as HTMLButtonElement
         const entryName = decodeURIComponent(target.dataset.entry || '')
-        if (entryName) handlers.onRequestEdit(entryName)
-      })
-    })
-
-    const deleteButtons = contentEl.querySelectorAll<HTMLButtonElement>('.btn-delete-entry')
-    deleteButtons.forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        const target = e.currentTarget as HTMLButtonElement
-        const entryName = decodeURIComponent(target.dataset.entry || '')
-        if (!entryName) return
-
-        try {
-          if (!(await storage.ensureWritePermission())) {
-            alert('Schreibzugriff erforderlich.')
-            return
-          }
-        } catch (err) {
-          console.error('Fehler bei der Berechtigungsprüfung:', err)
-        }
-
-        if (confirm(`Möchten Sie "${entryName}" wirklich löschen?`)) {
-          try {
-            await storage.deleteEntry(entryName)
-            handlers.onRefresh()
-          } catch (err: unknown) {
-            alert(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`)
-          }
-        }
+        const kind = target.closest('.file-row')?.getAttribute('data-kind')
+        if (entryName) handlers.onRequestEdit(entryName, kind === 'directory' ? 'directory' : 'file')
       })
     })
 
@@ -665,8 +697,7 @@ export function renderFilesView(container: HTMLElement): void {
 
       <div class="files-toolbar">
         <div class="folder-status-box" id="folder-status">
-          <span class="status-indicator" id="status-indicator"></span>
-          <span id="folder-name-display">Speicher wird überprüft...</span>
+          <nav id="folder-name-display" class="breadcrumbs" aria-label="Pfad">Speicher wird überprüft...</nav>
         </div>
         <div class="folder-actions" id="folder-actions"></div>
       </div>
@@ -683,14 +714,12 @@ export function renderFilesView(container: HTMLElement): void {
   `
 
   const alertArea = container.querySelector<HTMLDivElement>('#files-alert-area')!
-  const folderNameDisplay = container.querySelector<HTMLSpanElement>('#folder-name-display')!
-  const statusIndicator = container.querySelector<HTMLSpanElement>('#status-indicator')!
+  const folderNameDisplay = container.querySelector<HTMLElement>('#folder-name-display')!
   const folderActions = container.querySelector<HTMLDivElement>('#folder-actions')!
   const filesContent = container.querySelector<HTMLDivElement>('#files-content')!
   const fileImportInput = container.querySelector<HTMLInputElement>('#files-import-input')!
 
   if (!hasDirectoryPicker && !hasOPFS) {
-    statusIndicator.className = 'status-indicator status-error'
     folderNameDisplay.textContent = 'Dateisystem-APIs nicht unterstützt'
     alertArea.innerHTML = `
       <div class="alert alert-danger">
@@ -706,22 +735,23 @@ export function renderFilesView(container: HTMLElement): void {
   }
 
   let currentStorage: IFileStorage | null = null
+  /** Aufräumfunktion des Einstellungen-Menüs (Listener), falls es offen ist. */
+  let settingsMenuCleanup: (() => void) | null = null
 
   async function updateView(storage: IFileStorage | null) {
     currentStorage = storage
 
     if (!storage) {
-      statusIndicator.className = 'status-indicator status-neutral'
       folderNameDisplay.textContent = 'Kein Ordner ausgewählt'
 
       folderActions.innerHTML = `
         <button id="btn-select-folder" type="button" class="btn btn-primary">
-          📁 Ordner auswählen
+          📂 Ordner auswählen
         </button>
         ${
           hasOPFS
             ? `<button id="btn-use-opfs" type="button" class="btn btn-secondary">
-                OPFS nutzen
+                📦 Zu App-Speicher wechseln
               </button>`
             : ''
         }
@@ -736,12 +766,12 @@ export function renderFilesView(container: HTMLElement): void {
           <p>Wählen Sie einen lokalen Ordner aus, in dem Daten gespeichert sind, um die Dateien anzuzeigen.</p>
           <div class="empty-actions">
             <button id="btn-select-folder-hero" type="button" class="btn btn-primary">
-              Ordner wählen
+              📂 Ordner wählen
             </button>
             ${
               hasOPFS
                 ? `<button id="btn-use-opfs-hero" type="button" class="btn btn-secondary">
-                    OPFS-Speicher nutzen
+                    📦 Zu App-Speicher wechseln
                   </button>`
                 : ''
             }
@@ -753,55 +783,68 @@ export function renderFilesView(container: HTMLElement): void {
       return
     }
 
-    if (storage.type === 'opfs') {
-      statusIndicator.className = 'status-indicator status-warning'
-      folderNameDisplay.innerHTML = `
-        <span class="badge badge-warning">OPFS</span>
-        <span>${storage.name}</span>
-      `
-    } else {
-      statusIndicator.className = 'status-indicator status-success'
-      folderNameDisplay.innerHTML = `
-        <span class="badge badge-success">Lokal</span>
-        <span>Ordner: ${storage.name}</span>
-      `
+    // Den Pfad als Breadcrumb aufbauen: jeder Abschnitt ist anklickbar und
+    // springt direkt in den entsprechenden Ordner.
+    updateBreadcrumbs()
+
+    // Menüeinträge sammeln und den Zahnrad-Button nur zeigen, wenn es welche gibt.
+    const settingsItems: string[] = []
+
+    if (hasDirectoryPicker && storage.type === 'opfs') {
+      settingsItems.push(`<button id="btn-switch-picker" type="button" class="settings-menu-item">
+        📂 Zu lokalem Ordner wechseln
+      </button>`)
+    }
+
+    if (hasOPFS && storage.type === 'fsa') {
+      settingsItems.push(`<button id="btn-use-opfs" type="button" class="settings-menu-item">
+        📦 Zu App-Speicher wechseln
+      </button>`)
+    }
+
+    if (storage.canChangeFolder) {
+      settingsItems.push(`<button id="btn-change-folder" type="button" class="settings-menu-item">
+        📂 Ordner wechseln
+      </button>`)
+      settingsItems.push(`<button id="btn-disconnect-folder" type="button" class="settings-menu-item is-danger">
+        Trennen
+      </button>`)
     }
 
     folderActions.innerHTML = `
       <button id="btn-new-file" type="button" class="btn btn-primary">
-        ➕ Neue Datei
+        <!-- Kein Whitespace zwischen den beiden Spans: ein Textknoten im
+             Raster wird zu einer eigenen Zelle und schiebt die Zeichen
+             auseinander. -->
+        <span class="btn-icon-only" aria-hidden="true"><span class="btn-icon-sub">📄</span><span class="btn-icon-main">➕</span></span>
+        <span class="btn-label">Datei</span>
       </button>
       <button id="btn-new-folder" type="button" class="btn btn-primary">
-        📁 Neuer Ordner
+        <span class="btn-icon-only" aria-hidden="true"><span class="btn-icon-sub">📁</span><span class="btn-icon-main">➕</span></span>
+        <span class="btn-label">Ordner</span>
       </button>
       <button id="btn-import-file" type="button" class="btn btn-secondary">
-        📥 Dateien importieren
-      </button>
-      <button id="btn-refresh-folder" type="button" class="btn btn-secondary">
-        🔄 Aktualisieren
+        <span class="btn-icon-only" aria-hidden="true">📥</span>
+        <span class="btn-label">Hochladen</span>
       </button>
       ${
-        storage.canChangeFolder
-          ? `<button id="btn-change-folder" type="button" class="btn btn-secondary">
-              Ordner wechseln
-            </button>
-            <button id="btn-disconnect-folder" type="button" class="btn btn-danger">
-              Trennen
-            </button>`
-          : ''
-      }
-      ${
-        hasDirectoryPicker && storage.type === 'opfs'
-          ? `<button id="btn-switch-picker" type="button" class="btn btn-secondary">
-              📁 Zu lokalem Ordner wechseln
-            </button>`
-          : ''
-      }
-      ${
-        hasOPFS && storage.type === 'fsa'
-          ? `<button id="btn-use-opfs" type="button" class="btn btn-secondary">
-              OPFS nutzen
-            </button>`
+        settingsItems.length > 0
+          ? `<div class="settings-menu" id="settings-menu">
+              <button
+                id="btn-settings"
+                type="button"
+                class="btn btn-secondary btn-icon"
+                aria-haspopup="true"
+                aria-expanded="false"
+                aria-label="Einstellungen"
+                title="Einstellungen"
+              >
+                ⚙️
+              </button>
+              <div class="settings-menu-list" id="settings-menu-list" hidden>
+                ${settingsItems.join('')}
+              </div>
+            </div>`
           : ''
       }
     `
@@ -809,27 +852,103 @@ export function renderFilesView(container: HTMLElement): void {
     container.querySelector<HTMLButtonElement>('#btn-new-file')?.addEventListener('click', handleCreateFile)
     container.querySelector<HTMLButtonElement>('#btn-new-folder')?.addEventListener('click', handleCreateFolder)
     container.querySelector<HTMLButtonElement>('#btn-import-file')?.addEventListener('click', handleImportFiles)
-    container.querySelector<HTMLButtonElement>('#btn-refresh-folder')?.addEventListener('click', () => refreshCurrentList())
-    container.querySelector<HTMLButtonElement>('#btn-change-folder')?.addEventListener('click', handleSelectFolder)
-    container.querySelector<HTMLButtonElement>('#btn-disconnect-folder')?.addEventListener('click', handleDisconnectFolder)
-    container.querySelector<HTMLButtonElement>('#btn-switch-picker')?.addEventListener('click', handleSwitchToLocalFolder)
-    container.querySelector<HTMLButtonElement>('#btn-use-opfs')?.addEventListener('click', handleUseOPFS)
+
+    // Breadcrumb-Klicks: über data-segment steuert jeder Eintrag sein Ziel an.
+    container.querySelector<HTMLButtonElement>('#btn-change-folder')?.addEventListener('click', () => {
+      closeSettingsMenu()
+      void handleSelectFolder()
+    })
+    container.querySelector<HTMLButtonElement>('#btn-disconnect-folder')?.addEventListener('click', () => {
+      closeSettingsMenu()
+      void handleDisconnectFolder()
+    })
+    container.querySelector<HTMLButtonElement>('#btn-switch-picker')?.addEventListener('click', () => {
+      closeSettingsMenu()
+      void handleSwitchToLocalFolder()
+    })
+    container.querySelector<HTMLButtonElement>('#btn-use-opfs')?.addEventListener('click', () => {
+      closeSettingsMenu()
+      void handleUseOPFS()
+    })
+
+    setupSettingsMenu(container)
 
     await refreshCurrentList()
   }
 
+  /**
+   * Verdrahtet das Einstellungen-Menü (Zahnrad): öffnet/schließt beim Klick,
+   * schließt bei Klick außerhalb und bei Escape.
+   */
+  function setupSettingsMenu(scope: HTMLElement) {
+    const menu = scope.querySelector<HTMLDivElement>('#settings-menu')
+    const toggle = scope.querySelector<HTMLButtonElement>('#btn-settings')
+    const list = scope.querySelector<HTMLDivElement>('#settings-menu-list')
+    if (!menu || !toggle || !list) return
+
+    const setOpen = (open: boolean) => {
+      list.hidden = !open
+      toggle.setAttribute('aria-expanded', String(open))
+      menu.classList.toggle('is-open', open)
+    }
+
+    toggle.addEventListener('click', (e) => {
+      e.stopPropagation()
+      setOpen(!menu.classList.contains('is-open'))
+    })
+
+    // Klick außerhalb schließt das Menü.
+    const onDocumentClick = (e: MouseEvent) => {
+      if (!menu.contains(e.target as Node)) closeSettingsMenu()
+    }
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeSettingsMenu()
+    }
+
+    settingsMenuCleanup = () => {
+      document.removeEventListener('click', onDocumentClick)
+      document.removeEventListener('keydown', onKeydown)
+      setOpen(false)
+    }
+
+    document.addEventListener('click', onDocumentClick)
+    document.addEventListener('keydown', onKeydown)
+  }
+
+  function closeSettingsMenu() {
+    settingsMenuCleanup?.()
+    settingsMenuCleanup = null
+  }
+
+  /**
+   * Aktualisiert den Breadcrumb in der Toolbar. Muss nach jedem Wechsel des
+   * aktuellen Ordners aufgerufen werden, weil `refreshCurrentList` nur den
+   * Listenbereich neu rendert.
+   */
+  function updateBreadcrumbs() {
+    const storage = currentStorage
+    folderNameDisplay.innerHTML =
+      storage instanceof FileSystemHandleStorage ? buildBreadcrumbs(storage) : storage ? escapeHtml(storage.name) : ''
+
+    // Klick-Handler nach jedem Neuaufbau erneut binden -- die Buttons werden
+    // komplett ersetzt, bestehende Listener verschwinden mit ihnen.
+    folderNameDisplay.querySelectorAll<HTMLButtonElement>('.breadcrumb-item').forEach((crumb) => {
+      crumb.addEventListener('click', () => {
+        void navigateToSegment(crumb.dataset.segment ?? '')
+      })
+    })
+  }
+
   async function refreshCurrentList() {
     if (!currentStorage) return
+    updateBreadcrumbs()
 
     await renderGenericFileList(filesContent, currentStorage, {
       onRefresh: refreshCurrentList,
-      onNavigateUp: () => {
-        void navigateUp()
-      },
       onRequestNewFile: handleCreateFile,
       onRequestNewFolder: handleCreateFolder,
       onRequestImport: handleImportFiles,
-      onRequestEdit: handleEditFile,
+      onRequestEdit: handleEditEntry,
       onRequestOpen: (name) => {
         // Echte Browser-Navigation (kein SPA-Routing), damit der Service
         // Worker unter /<pfad> die gespeicherte Datei ausliefern kann. Der
@@ -869,41 +988,41 @@ export function renderFilesView(container: HTMLElement): void {
     }
   }
 
-  /** Geht eine Ebene nach oben (nur innerhalb eines geöffneten Ordners). */
-  async function navigateUp() {
+  /**
+   * Wechselt zu einem beliebigen Punkt im aktuellen Pfad. Ein leerer Zielpfad
+   * steht fuer die Wurzel. Der Pfad wird vom Wurzel-Handle aus neu aufgebaut,
+   * damit auch mehrere Ebenen auf einmal moeglich sind.
+   */
+  async function navigateToSegment(targetPath: string) {
     if (!currentStorage) return
     const storage = currentStorage
-    if (!(storage instanceof FileSystemHandleStorage) || !storage.subPath) return
-
-    const parentPath = storage.subPath.includes('/')
-      ? storage.subPath.slice(0, storage.subPath.lastIndexOf('/'))
-      : ''
+    if (!(storage instanceof FileSystemHandleStorage)) return
+    if (targetPath === storage.subPath) return
 
     try {
       let handle = storage.rootHandle
-      if (parentPath) {
-        for (const segment of parentPath.split('/')) {
-          handle = await handle.getDirectoryHandle(segment)
-        }
+      for (const segment of targetPath ? targetPath.split('/') : []) {
+        handle = await handle.getDirectoryHandle(segment)
       }
       currentStorage = new FileSystemHandleStorage(
         handle,
         storage.type,
         storage.isFallback,
-        parentPath,
+        targetPath,
         storage.rootName,
         storage.rootHandle
       )
       await refreshCurrentList()
     } catch (err: unknown) {
-      alert(`Übergeordneter Ordner konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`)
+      alert(`Ordner konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
   function handleCreateFile() {
     if (!currentStorage) return
     const storage = currentStorage
-    openFileEditorModal({
+    openEditorModal({
+      kind: 'file',
       mode: 'create',
       onSave: async (fileName, content) => {
         await storage.createFile(fileName, content)
@@ -915,7 +1034,9 @@ export function renderFilesView(container: HTMLElement): void {
   function handleCreateFolder() {
     if (!currentStorage) return
     const storage = currentStorage
-    openFolderNameModal({
+    openEditorModal({
+      kind: 'folder',
+      mode: 'create',
       onSave: async (folderName) => {
         await storage.createDirectory(folderName)
         await refreshCurrentList()
@@ -923,22 +1044,50 @@ export function renderFilesView(container: HTMLElement): void {
     })
   }
 
-  async function handleEditFile(fileName: string) {
+  /**
+   * Öffnet das Bearbeiten-Fenster. Dateien werden vorher gelesen, damit der
+   * Inhalt im Feld steht; das Umbenennen ist in beiden Fällen möglich. Der
+   * Löschen-Button ruft dieselbe Logik wie bisher die Aktionsspalte auf.
+   */
+  async function handleEditEntry(name: string, kind: 'file' | 'directory') {
     if (!currentStorage) return
     const storage = currentStorage
+
+    const removeEntry = async () => {
+      try {
+        if (!(await storage.ensureWritePermission())) {
+          throw new Error('Schreibzugriff erforderlich.')
+        }
+      } catch (err) {
+        console.error('Fehler bei der Berechtigungsprüfung:', err)
+      }
+      await storage.deleteEntry(name)
+      await refreshCurrentList()
+    }
+
+    const saveEntry = async (newName: string, content: string) => {
+      if (newName !== name) await storage.renameEntry(name, newName)
+      if (kind === 'file') await storage.writeFile(newName, content)
+      await refreshCurrentList()
+    }
+
+    if (kind === 'directory') {
+      openEditorModal({ kind: 'folder', mode: 'edit', name, onSave: saveEntry, onDelete: removeEntry })
+      return
+    }
+
     try {
-      const content = await storage.readFile(fileName)
-      openFileEditorModal({
+      const content = await storage.readFile(name)
+      openEditorModal({
+        kind: 'file',
         mode: 'edit',
-        fileName,
+        name,
         initialContent: content,
-        onSave: async (name, newContent) => {
-          await storage.writeFile(name, newContent)
-          await refreshCurrentList()
-        },
+        onSave: saveEntry,
+        onDelete: removeEntry,
       })
     } catch (err: unknown) {
-      alert(`Datei "${fileName}" konnte nicht gelesen werden: ${err instanceof Error ? err.message : String(err)}`)
+      alert(`Datei "${name}" konnte nicht gelesen werden: ${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -1027,15 +1176,11 @@ export function renderFilesView(container: HTMLElement): void {
 
   // Hilfsfunktion: Bereitet die UI so vor, dass der Klick direkt in requestPermission resultiert.
   function showReopenButtonUI(storedHandle: FileSystemDirectoryHandle) {
-    statusIndicator.className = 'status-indicator status-warning'
-    folderNameDisplay.textContent = `Ordner: ${storedHandle.name} (Zugriff erforderlich)`
+    folderNameDisplay.innerHTML = `<span class="breadcrumb-current">💻 ${escapeHtml(storedHandle.name)} (Zugriff erforderlich)</span>`
 
     folderActions.innerHTML = `
       <button id="btn-grant-permission" type="button" class="btn btn-primary">
         🔓 Zugriff erlauben
-      </button>
-      <button id="btn-change-folder" type="button" class="btn btn-secondary">
-        Ordner wechseln
       </button>
     `
 
@@ -1071,7 +1216,6 @@ export function renderFilesView(container: HTMLElement): void {
 
     container.querySelector<HTMLButtonElement>('#btn-grant-permission')?.addEventListener('click', handleUserClickToUnlock)
     container.querySelector<HTMLButtonElement>('#btn-grant-permission-hero')?.addEventListener('click', handleUserClickToUnlock)
-    container.querySelector<HTMLButtonElement>('#btn-change-folder')?.addEventListener('click', handleSelectFolder)
   }
 
   // 1. Beim App-Start NUR prüfen, ob das Recht noch da ist

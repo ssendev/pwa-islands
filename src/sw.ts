@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching'
 import { clientsClaim } from 'workbox-core'
-import { registerRoute, NavigationRoute } from 'workbox-routing'
+import { registerRoute } from 'workbox-routing'
 import { findSavedFile, getMimeType } from './storage.ts'
 
 declare let self: ServiceWorkerGlobalScope & {
@@ -26,35 +26,26 @@ cleanupOutdatedCaches()
 // die Pfade werden in isInternalPath() ausgenommen (siehe unten),
 // dedizierte Routen sind nicht nötig.
 
-// App-Shell nur noch für die App-Route /files. / wird von der Datei-Route
-// unten behandelt (gespeicherte index.html); fehlt sie, greift der Catch-all
-// und liefert die App-Shell aus dem Precache.
-// WICHTIG: Handler erst zur Laufzeit erzeugen. In Dev ist das Precaching-Manifest
-// leer, dann wirft createHandlerBoundToURL('index.html') einen non-precached-url-
-// Fehler und die SW-Evaluation schlägt fehl.
-registerRoute(
-  new NavigationRoute(
-    ({ request, url, event }) => appShell(request, url, event),
-    { allowlist: [/^\/files\/?$/] }
-  )
-)
-
 // Intercept requests for saved files directly at the root (z. B. /foo.html,
-// /script.js). Der Pfad ist der Pfad der gespeicherten Datei; / steht dabei
-// für index.html. Die App-Route /files wird vorher von der NavigationRoute
-// abgefangen, daher ist hier kein /files-Ausschluss nötig.
+// /script.js). Der Pfad ist der Pfad der gespeicherten Datei. Falls unter dem
+// Pfad keine Datei liegt – oder ?pwaislands gesetzt ist – wird die App-Shell
+// ausgeliefert. Damit sind auch / und /files ohne gespeicherte index.html
+// automatisch die App.
+// WICHTIG: Der Handler wird erst zur Laufzeit erzeugt (appShell). In Dev ist das
+// Precaching-Manifest leer, dann wirft createHandlerBoundToURL('index.html')
+// einen non-precached-url-Fehler und die SW-Evaluation schlägt fehl.
 registerRoute(
   ({ request, sameOrigin }) => sameOrigin && request.mode === 'navigate',
   async ({ request, url, event }) => {
-    // Mit ?editisland wird immer die App-Shell ausgeliefert – auch wenn unter
+    // Mit ?pwaislands wird immer die App-Shell ausgeliefert – auch wenn unter
     // dem Pfad eine gespeicherte Datei liegt. Damit lässt sich eine Island
     // aufrufen und bearbeiten, statt sie zu rendern.
-    if (url.searchParams.has('editisland')) {
+    if (url.searchParams.has('pwaislands')) {
       return appShell(request, url, event)
     }
 
-    // /foo.html -> gespeicherte Datei foo.html; / -> index.html;
-    // /foo -> foo/index.html (wie bei einem Webserver mit Index-Datei).
+    // /foo.html -> gespeicherte Datei foo.html; / -> index.html; /foo ->
+    // foo/index.html (wie bei einem Webserver mit Index-Datei).
     const relativePath = resolveRequestPath(url.pathname)
 
     try {
@@ -138,7 +129,6 @@ function resolveRequestPath(pathname: string): string {
   const decoded = decodeURIComponent(pathname)
   const trimmed = decoded.replace(/^\/+|\/+$/g, '')
   if (!trimmed) return 'index.html'
-
   const lastSegment = trimmed.slice(trimmed.lastIndexOf('/') + 1)
   if (lastSegment.includes('.')) return trimmed
 
