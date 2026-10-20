@@ -227,6 +227,23 @@ export default defineConfig({
 
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico,d.ts}"],
+
+        // Vite 8 hat `inlineDynamicImports` durch `codeSplitting: false` ersetzt;
+        // das Plugin setzt im Service-Worker-Build noch die alte Option.
+        buildPlugins: {
+          rollup: [
+            {
+              name: "pwa-islands:code-splitting",
+              outputOptions: <T extends object>(outputOptions: T): T => ({
+                ...outputOptions,
+                codeSplitting: false,
+                // Rolldown meldet sonst „inlineDynamicImports wird wegen
+                // codeSplitting: false ignoriert“.
+                inlineDynamicImports: undefined,
+              }),
+            },
+          ],
+        },
       },
 
       devOptions: {

@@ -10,6 +10,11 @@ Dies ist eine minimale PWA in der kleine .html projekte mit FS API gespeichert w
 
 aller UI text MUSS in Deutsch geschrieben werden
 
+# Befehle
+
+`npm run -s build` prüft Formatierung und Lint und baut dann.
+`npm run -s fix` Code Formatieren und Linten.
+
 # Islands-API
 
 die .html projekte können die öffentliche API für Islands verwenden. Sie ist in `src/api-types.ts` definiert und wird per `<script type="module" src="/api.js">` eingebunden.
