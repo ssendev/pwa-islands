@@ -1838,5 +1838,5 @@ export function renderFilesView(container: HTMLElement): void {
     }
   }
 
-  initStorage()
+  void initStorage()
 }

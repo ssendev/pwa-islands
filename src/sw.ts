@@ -12,7 +12,7 @@ declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>
 }
 
-self.skipWaiting()
+void self.skipWaiting()
 clientsClaim()
 
 // Nur EINE Referenz auf self.__WB_MANIFEST erlaubt (vite-plugin-pwa ersetzt
@@ -188,6 +188,6 @@ async function appShell(request: Request, url: URL, event: ExtendableEvent): Pro
 
 self.addEventListener("message", (event) => {
   if (event.data && event.data.type === "SKIP_WAITING") {
-    self.skipWaiting()
+    void self.skipWaiting()
   }
 })
