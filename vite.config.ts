@@ -1,4 +1,5 @@
 import { VitePWA } from "vite-plugin-pwa"
+import oxlint from "vite-plugin-oxlint"
 import { defineConfig, build, type Plugin } from "vite"
 import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -203,6 +204,7 @@ export default defineConfig({
   },
 
   plugins: [
+    oxlint(),
     ...islandsApiPlugin(),
     VitePWA({
       strategies: "injectManifest",

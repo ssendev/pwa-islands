@@ -6,7 +6,8 @@
   },
   "options": {
     "typeAware": true,
-    "typeCheck": true
+    "typeCheck": true,
+    "denyWarnings": true
   },
   "rules": {},
   "env": {
