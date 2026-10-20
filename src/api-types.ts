@@ -31,12 +31,21 @@ export interface RemoveOptions {
   recursive?: boolean
 }
 
+export interface ReadOptions {
+  /**
+   * Nur lesen, wenn die Datei sich verlustfrei als Text darstellen lässt:
+   * Rundlauf über `TextEncoder`. sonst wird ein Fehler geworfen.
+   * Standard: false.
+   */
+  ensureText?: boolean
+}
+
 export interface IslandsApi {
   /** Listet den Inhalt eines Verzeichnisses auf (Standard: Wurzel). Sortiert: Ordner zuerst, dann alphabetisch. */
   list(path?: string): Promise<IslandEntry[]>
 
-  /** Liest den Inhalt einer Datei als Text. */
-  read(path: string): Promise<string>
+  /** Liest den Inhalt einer Datei als Text (Mit `ensureText: true` wird geprüft, ob die Datei verlustfrei Text ist). */
+  read(path: string, options?: ReadOptions): Promise<string>
 
   /** Liest den Inhalt einer Datei als Blob (für Binärdaten, Bilder, Downloads …). */
   readBlob(path: string): Promise<Blob>

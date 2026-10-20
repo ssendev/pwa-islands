@@ -10,6 +10,7 @@ import {
   ISLAND_PARAM,
   OPFS_APP_FOLDER,
 } from "./storage.ts"
+import { checkTextBlob } from "./text.ts"
 import rootIconUrl from "./assets/pwa-islands.svg"
 
 export interface FileEntry {
@@ -446,28 +447,18 @@ const TEXT_EXTENSIONS = new Set([
  * Grosse Dateien werden nie als Text geoeffnet: das Dekodieren im Browser
  * blockiert die Oberflaeche. Sie gelten ab {@link MAX_EDITABLE_TEXT_BYTES} als
  * Blob (nur umbenennen/loeschen).
+ *
+ * Der Rundlauf selbst steht in `checkTextBlob` (`src/text.ts`) -- dieselbe
+ * Pruefung nutzt die Islands-API fuer `read(..., { ensureText: true })`.
  */
 async function isEditableTextFile(file: Blob, name: string): Promise<boolean> {
   const ext = getExtension(name)
   if (!TEXT_EXTENSIONS.has(ext)) return false
   if (file.size > MAX_EDITABLE_TEXT_BYTES) return false
 
-  try {
-    const bytes = new Uint8Array(await file.arrayBuffer())
-    // `ignoreBOM: true` behaelt die Bytefolge bei -- sonst wuerde ein fuehrendes
-    // BOM beim Speichern verloren gehen und der Vergleich scheitern.
-    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
-    if (text.includes("\uFFFD")) return false
-    const roundtrip = new TextEncoder().encode(text)
-    if (roundtrip.length !== bytes.length) return false
-    for (let i = 0; i < bytes.length; i++) {
-      if (roundtrip[i] !== bytes[i]) return false
-    }
-    return true
-  } catch {
-    // `fatal: true` wirft bei ungueltigem UTF-8 -- genau der Binaerfall.
-    return false
-  }
+  // `binary` ist der einzige Ablehnungsgrund; `empty` ist ein gueltiger leerer
+  // Text und damit editierbar.
+  return (await checkTextBlob(file)).kind !== "binary"
 }
 
 /** Endung ohne Punkt, klein geschrieben; leer, wenn keine vorhanden ist. */

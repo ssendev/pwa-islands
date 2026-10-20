@@ -21,12 +21,14 @@
  */
 
 import { findActiveStorage, normalizePath, splitPath, getDirectory } from "./storage.ts"
+import { readTextOrThrow } from "./text.ts"
 import type { IslandEntry, IslandsApi } from "./api-types.ts"
 
 export type {
   IslandEntry,
   IslandInput,
   IslandsApi,
+  ReadOptions,
   WriteOptions,
   RemoveOptions,
 } from "./api-types.ts"
@@ -94,8 +96,12 @@ const api: IslandsApi = {
     return entries
   },
 
-  async read(path) {
-    return (await resolveFile(path)).getFile().then((file) => file.text())
+  async read(path, options) {
+    const file = await (await resolveFile(path)).getFile()
+    // Ohne `ensureText` bleibt es beim direkten Weg: `file.text()` ist
+    // schneller als ArrayBuffer plus Prüfung und ersetzt kaputte Sequenzen
+    // genauso durch U+FFFD.
+    return options?.ensureText ? readTextOrThrow(file, path) : file.text()
   },
 
   async readBlob(path) {
