@@ -8,6 +8,7 @@ import {
   clearStoredStorageType,
   getOPFSDirectoryHandle,
 } from './storage.ts'
+import rootIconUrl from './assets/pwa-islands.svg'
 
 export interface FileEntry {
   name: string
@@ -484,18 +485,16 @@ function escapeHtml(value: string): string {
 /**
  * Baut den Pfad als Breadcrumb. Jeder Abschnitt ist ein Button mit seinem
  * Zielpfad in `data-segment`; der letzte Eintrag ist der aktuelle Ordner und
- * daher nicht anklickbar. Die Wurzel traegt je nach Speicherart ein Icon
- * (💻 fuer einen lokalen Ordner, 📦 fuer den App-Speicher).
+ * daher nicht anklickbar. Die Wurzel ist immer "PWA Islands" -- unabhaengig
+ * davon, ob lokal (FS API) oder im App-Speicher (OPFS) gearbeitet wird. Das
+ * App-Icon gehoert NICHT zum Pfad: es steht als eigenes Element ("Item 1")
+ * neben den Buttons in der Toolbar.
  */
 function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
-  const isOpfs = storage.type === 'opfs'
-  const rootIcon = isOpfs ? '📦' : '💻'
-  // Der API-Name "Origin Private File System" ist fuer den Breadcrumb zu lang.
-  const rootLabel = isOpfs ? 'PWA Islands' : storage.rootName
+  const rootLabel = 'PWA Islands'
   const segments = storage.subPath ? storage.subPath.split('/') : []
 
   const parts: string[] = []
-  parts.push(`<span class="breadcrumb-root-icon" aria-hidden="true">${rootIcon}</span>`)
   parts.push(
     segments.length === 0
       ? `<span class="breadcrumb-current">${escapeHtml(rootLabel)}</span>`
@@ -1039,10 +1038,13 @@ export function renderFilesView(container: HTMLElement): void {
       <div id="files-alert-area"></div>
 
       <div class="files-toolbar">
+        <div class="folder-icon" aria-hidden="true">
+          <img class="breadcrumb-root-icon" src="${rootIconUrl}" alt="" />
+        </div>
+        <div class="folder-actions" id="folder-actions"></div>
         <div class="folder-status-box" id="folder-status">
           <nav id="folder-name-display" class="breadcrumbs" aria-label="Pfad">Speicher wird überprüft...</nav>
         </div>
-        <div class="folder-actions" id="folder-actions"></div>
       </div>
 
       <div id="files-content" class="files-content">
@@ -1320,6 +1322,10 @@ export function renderFilesView(container: HTMLElement): void {
     const storage = currentStorage
     folderNameDisplay.innerHTML =
       storage instanceof FileSystemHandleStorage ? buildBreadcrumbs(storage) : storage ? escapeHtml(storage.name) : ''
+
+    // Der Pfad darf horizontal scrollen -- der aktuelle Ordner muss aber ohne
+    // Zutun sichtbar sein, deshalb ans rechte Ende springen.
+    folderNameDisplay.scrollLeft = folderNameDisplay.scrollWidth
 
     // Klick-Handler nach jedem Neuaufbau erneut binden -- die Buttons werden
     // komplett ersetzt, bestehende Listener verschwinden mit ihnen.
