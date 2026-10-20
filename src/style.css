@@ -256,6 +256,21 @@ code {
   border-radius: 8px;
   padding: 12px 16px;
   margin-bottom: 24px;
+
+  /*
+   * EINE Variable fuer alle Elemente der Zeile: App-Icon, Zahnrad, Buttons,
+   * Pfad und Breadcrumb-Bild. Sie steht an der Zeile und NICHT an
+   * `.folder-actions` -- eine Custom Property wird nur nach unten vererbt, Icon
+   * und Pfadblock sitzen aber NEBEN der Button-Gruppe. Dort fielen sie auf den
+   * Startwert zurueck und blieben bei 38px, waehrend die Buttons im
+   * Media-Query umschalteten.
+   *
+   * `--toolbar-btn-inset` ist der Abstand eines Buttons um seine Beschriftung
+   * (1px Rand + 7px Padding); die gemeinsame Mitte der Zeile liegt damit bei
+   * `height + inset`.
+   */
+  --toolbar-btn-height: 38px;
+  --toolbar-btn-inset: 11px;
 }
 
 /* Clearfix: der Container erkennt die Hoehe der gefloateten Elemente. */
@@ -280,22 +295,25 @@ code {
    */
   display: block;
   overflow: hidden;
-  min-width: 180px;
+  min-width: 0;
   max-width: 100%;
-  /* align text with icon */
-  padding-top: 4px;
+  /* Kein eigenes Padding: die Mitte setzt `.files-toolbar .folder-status-box`. */
+  padding: 0;
 }
 
-/*
- * "Item 1": App-Icon, floats nach links -- steht damit in derselben Zeile wie
- * die rechts gefloateten Buttons und bleibt beim Scrollen des Pfads stehen.
- */
 .folder-icon {
   float: left;
   display: flex;
   align-items: center;
+  justify-content: center;
   margin-right: 12px;
-  height: var(--toolbar-btn-height, 38px);
+  /*
+   * Quadratisch und so hoch wie die Buttons -- ohne deren Rand: der Rand
+   * polsterte nur und liess das Bild 2px groesser stehen als den Knopf daneben.
+   */
+  width: var(--toolbar-btn-height);
+  height: var(--toolbar-btn-height);
+  box-sizing: border-box;
 }
 
 .status-indicator {
@@ -352,13 +370,6 @@ code {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  /*
-   * Alle Toolbar-Buttons (Datei, Ordner, Hochladen, Zahnrad) bekommen eine
-   * gemeinsame, feste Hoehe. Ohne das waechst die Leiste minimal, sobald die
-   * Text-Buttons dazukommen -- und das Zahnrad (ohne Beschriftung) wirkt
-   * dann kleiner als die uebrigen Buttons.
-   */
-  --toolbar-btn-height: 38px;
   align-items: center;
 }
 
@@ -669,15 +680,23 @@ code {
   color: var(--text-h);
 }
 
+/* Quadratisch wie die Knoepfe der Fusszeile, statt aus Schrift + Padding. */
 .modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
-  border: none;
+  border: 1px solid transparent;
   font-size: 22px;
   cursor: pointer;
   color: var(--text);
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 0;
+  border-radius: 6px;
   line-height: 1;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  box-sizing: border-box;
   transition: all 0.2s;
 }
 
@@ -828,6 +847,20 @@ code {
   gap: 10px;
 }
 
+/* Wie der Schliessen-Knopf im Kopf: gleiche Hoehe in beiden Leisten. */
+.modal-footer .btn {
+  height: 38px;
+  box-sizing: border-box;
+}
+
+/* Nur das Symbol zu sehen: quadratisch, sonst waere der Knopf ein Strich. */
+@media (max-width: 520px) {
+  .modal-footer .btn {
+    width: 38px;
+    padding: 0;
+  }
+}
+
 /*
  * Buttons mit Icon + Beschriftung. Auf schmalen Bildschirmen bleibt nur das
  * Icon uebrig; der zugaengliche Name kommt dann aus aria-label/title.
@@ -874,10 +907,16 @@ code {
   }
 
   .icon-label-btn {
-    width: var(--toolbar-btn-height, 34px);
-    height: var(--toolbar-btn-height, 34px);
+    width: var(--toolbar-btn-height);
+    height: var(--toolbar-btn-height);
     padding: 0;
     justify-content: center;
+  }
+
+  /* In Fenstern gilt die Dialoghoehe, nicht die kleinere Toolbarhoehe. */
+  .modal-footer .icon-label-btn {
+    width: 38px;
+    height: 38px;
   }
 }
 
@@ -1188,8 +1227,8 @@ button#pwa-refresh {
    * das Kartenlayout aufgehoben.
    */
   .folder-actions .btn {
-    width: 34px;
-    height: 34px;
+    width: var(--toolbar-btn-height);
+    height: var(--toolbar-btn-height);
     padding: 0;
     display: inline-flex;
     align-items: center;
@@ -1211,16 +1250,17 @@ button#pwa-refresh {
    * Zeilen in einem Raster, damit sie wirklich uebereinander stehen und sich
    * nicht ueberlappen.
    */
-  .settings-menu .btn-icon {
-    width: 34px;
-    height: 34px;
+  .settings-menu-list .btn-icon {
+    width: var(--toolbar-btn-height);
+    height: var(--toolbar-btn-height);
     padding: 0;
     font-size: 16px;
   }
 
-  /* Mobil gilt die kompakte Groesse auch fuer die uebrigen Toolbar-Buttons. */
-  .folder-actions {
+  /* Kompakte Hoehe fuer die ganze Zeile -- Icon, Buttons, Zahnrad und Bild. */
+  .files-toolbar {
     --toolbar-btn-height: 34px;
+    --toolbar-btn-inset: 8px;
   }
 
   /*
@@ -1459,16 +1499,36 @@ button#pwa-refresh {
 
 /*
  * Umbruch statt Quetschen: Ein einzeiliger Pfad ist hoechstens so breit wie
- * sein Inhalt (`max-content`, durch die Float-Umgebung begrenzt), damit die
- * Zeile nach unten rutscht, sobald er nicht mehr neben die Buttons passt. Auf
- * der zweiten Zeile steht die volle Breite zur Verfuegung -- dort scrollt der
- * Breadcrumb (siehe `.breadcrumbs`).
+ * sein Inhalt (`max-content`), damit die Zeile nach unten rutscht, sobald er
+ * nicht mehr neben die Buttons passt. Auf der zweiten Zeile steht die volle
+ * Breite zur Verfuegung -- dort scrollt der Breadcrumb (siehe `.breadcrumbs`).
  */
 .files-toolbar .folder-status-box {
   width: max-content;
   max-width: 100%;
   /* Float-Umgebung ist links vom Icon eingeengt -- kein Ueberlauf nach links. */
   margin-left: 0;
+  /*
+   * So hoch wie das Icon bzw. die Buttons der Zeile, Text darin mittig. Das ist
+   * die Hoehe, auf der die Knopfreihe sitzt: ihr Inhalt plus eigener Rand.
+   * Deshalb kein Padding hier -- ein eigenes Padding zaehlte zu dieser Hoehe
+   * dazu und schob den Text nach unten.
+   */
+  height: var(--toolbar-btn-height);
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0;
+  /*
+   * Der Pfad steht im normalen Fluss, das Icon floatet -- seine Oberkante
+   * liegt aber `--toolbar-btn-inset` (1px Rand + 7px Padding) TIEFER als die
+   * Box, weil es diese Innenabstaende selbst mitbringt. Ohne Ausgleich saesse
+   * der Text hoeher als das Icon und unter der Box bliebe mehr Luft als
+   * darueber. Der negative Rand nimmt genau diesen Versatz weg.
+   */
+  margin-bottom: calc(-1 * var(--toolbar-btn-inset));
 }
 
 .breadcrumbs > * {
@@ -1476,8 +1536,10 @@ button#pwa-refresh {
 }
 
 .breadcrumb-root-icon {
-  width: 36px;
-  flex-shrink: 0;
+  /* Genau so gross wie die Buttons der Zeile. */
+  height: 100%;
+  width: var(--toolbar-btn-height);
+  flex: none;
   object-fit: contain;
   display: block;
 }
@@ -1492,9 +1554,13 @@ button#pwa-refresh {
   color: var(--accent);
   cursor: pointer;
   border-radius: 4px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /*
+   * Kein `text-overflow: ellipsis`: der Pfad scrollt (siehe `.breadcrumbs`),
+   * die Abschnitte bleiben in voller Laenge lesbar. Eine Auslassung waere hier
+   * irrefuehrend -- der Rest ist per Scrollen erreichbar, nicht abgeschnitten.
+   * `white-space: nowrap` bleibt, damit ein Abschnitt nie mitten im Namen
+   * umbricht.
+   */
   white-space: nowrap;
 }
 
@@ -1513,9 +1579,7 @@ button#pwa-refresh {
   font-weight: 600;
   color: var(--text-h);
   padding: 2px 4px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Wie `.breadcrumb-item`: voller Name, der Pfad scrollt statt zu kuerzen. */
   white-space: nowrap;
 }
 
@@ -1543,8 +1607,8 @@ button#pwa-refresh {
   align-items: center;
   justify-content: center;
   /* Quadratisch und genauso hoch wie die beschrifteten Buttons daneben. */
-  width: var(--toolbar-btn-height, 38px);
-  height: var(--toolbar-btn-height, 38px);
+  width: var(--toolbar-btn-height);
+  height: var(--toolbar-btn-height);
   padding: 0;
   font-size: 17px;
   line-height: 1;
