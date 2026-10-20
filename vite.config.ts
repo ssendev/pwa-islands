@@ -204,7 +204,7 @@ export default defineConfig({
   },
 
   plugins: [
-    oxlint(),
+    oxlint({ lintOnStart: process.env.npm_lifecycle_event === "dev" }),
     ...islandsApiPlugin(),
     VitePWA({
       strategies: "injectManifest",
