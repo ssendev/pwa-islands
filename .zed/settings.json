@@ -1,0 +1,11 @@
+{
+  "lsp": {
+    "vtsls": {
+      "settings": {
+        "typescript": {
+          "tsdk": "~/.local/share/zed/languages/vtsls/node_modules/typescript/lib"
+        }
+      }
+    }
+  }
+}
