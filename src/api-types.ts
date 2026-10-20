@@ -4,7 +4,7 @@ export interface IslandEntry {
   /** Pfad relativ zur ausgewählten Wurzel, z. B. "notizen/ideen.md". */
   path: string
   /** Art des Eintrags. */
-  kind: 'file' | 'directory'
+  kind: "file" | "directory"
   /** Dateigröße in Bytes (nur bei kind === 'file'). */
   size?: number
   /** Zeitpunkt der letzten Änderung als Unix-Timestamp (nur bei kind === 'file'). */

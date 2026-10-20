@@ -1,20 +1,14 @@
-import { VitePWA } from 'vite-plugin-pwa'
-import { defineConfig, build, type Plugin } from 'vite'
-import { execFileSync } from 'node:child_process'
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { VitePWA } from "vite-plugin-pwa"
+import { defineConfig, build, type Plugin } from "vite"
+import { execFileSync } from "node:child_process"
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 
-const root = fileURLToPath(new URL('.', import.meta.url))
-const apiTypesEntry = join(root, 'src', 'api-types.ts')
-const apiDtsFile = join(root, '.generated', 'api.d.ts')
+const root = fileURLToPath(new URL(".", import.meta.url))
+const apiTypesEntry = join(root, "src", "api-types.ts")
+const apiDtsFile = join(root, ".generated", "api.d.ts")
 
 const dtsHeader = `/**
  * PWA Islands – Typdeklarationen für die API.
@@ -45,43 +39,43 @@ declare module '*/api.js' {
  * hier der TypeScript-Compiler aufgerufen. Das Ergebnis wird gecacht.
  */
 function buildApiDts(): string {
-  const tmp = mkdtempSync(join(tmpdir(), 'islands-dts-'))
+  const tmp = mkdtempSync(join(tmpdir(), "islands-dts-"))
   try {
     execFileSync(
       process.execPath,
       [
-        join(root, 'node_modules', 'typescript', 'bin', 'tsc'),
+        join(root, "node_modules", "typescript", "bin", "tsc"),
         apiTypesEntry,
-        '--ignoreConfig',
-        '--declaration',
-        '--emitDeclarationOnly',
-        '--outDir',
+        "--ignoreConfig",
+        "--declaration",
+        "--emitDeclarationOnly",
+        "--outDir",
         tmp,
-        '--module',
-        'esnext',
-        '--target',
-        'es2023',
-        '--lib',
-        'es2023,dom',
-        '--strict',
-        '--skipLibCheck',
+        "--module",
+        "esnext",
+        "--target",
+        "es2023",
+        "--lib",
+        "es2023,dom",
+        "--strict",
+        "--skipLibCheck",
       ],
-      { stdio: 'inherit' }
+      { stdio: "inherit" },
     )
 
-    const emitted = readFileSync(join(tmp, 'api-types.d.ts'), 'utf8').trim()
+    const emitted = readFileSync(join(tmp, "api-types.d.ts"), "utf8").trim()
     // Ambient machen: `export` entfernen, damit die Typen ohne Import global
     // verfügbar sind (Nutzung über `/// <reference path="/api.d.ts" />`).
     // Zusätzlich zwischen aufeinanderfolgenden Deklarationen eine Leerzeile
     // einfügen (tsc gibt sie ohne aus) und Mehrfach-Leerzeilen reduzieren.
     const flattened = emitted
-      .replace(/^export /gm, '')
+      .replace(/^export /gm, "")
       // tsc gibt aufeinanderfolgende Deklarationen ohne Leerzeile aus.
-      .replace(/([;}])\n(?=(?:type|interface|declare) )/g, '$1\n\n')
-      .replace(/^\/\*\*\n/gm, '/**\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .replace(/\n+(?=\/(?:\*\*|\/))/g, '\n\n')
-    return dtsHeader + flattened + '\n' + dtsFooter
+      .replace(/([;}])\n(?=(?:type|interface|declare) )/g, "$1\n\n")
+      .replace(/^\/\*\*\n/gm, "/**\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/\n+(?=\/(?:\*\*|\/))/g, "\n\n")
+    return dtsHeader + flattened + "\n" + dtsFooter
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }
@@ -93,12 +87,12 @@ function buildApiDts(): string {
  * Wird in Dev und Build gleich verwendet, damit beide dasselbe liefern.
  */
 async function buildApiJs(): Promise<string> {
-  const tmp = mkdtempSync(join(tmpdir(), 'islands-api-'))
+  const tmp = mkdtempSync(join(tmpdir(), "islands-api-"))
   try {
     await build({
       root,
       configFile: false,
-      logLevel: 'warn',
+      logLevel: "warn",
       publicDir: false,
       build: {
         outDir: tmp,
@@ -106,15 +100,15 @@ async function buildApiJs(): Promise<string> {
         write: true,
         // Vite 8 (rolldown) minifiziert ES-Lib-Builds mit `minify: true`/`'oxc'`
         // nicht (codegen bleibt aus). Terser liefert hier das erwartete Ergebnis.
-        minify: 'terser',
+        minify: "terser",
         lib: {
-          entry: join(root, 'src', 'api.ts'),
-          formats: ['es'],
-          fileName: () => 'api.js',
+          entry: join(root, "src", "api.ts"),
+          formats: ["es"],
+          fileName: () => "api.js",
         },
       },
     })
-    return readFileSync(join(tmp, 'api.js'), 'utf8')
+    return readFileSync(join(tmp, "api.js"), "utf8")
   } finally {
     rmSync(tmp, { recursive: true, force: true })
   }
@@ -137,33 +131,34 @@ function islandsApiPlugin(): Plugin[] {
 
   // api.ts einmalig bündeln und das Ergebnis cachen (Dev und Build).
   let apiJsCache: Promise<string> | null = null
-  const getApiJs = () => (apiJsCache ??= buildApiJs().catch((err) => {
-    apiJsCache = null
-    throw err
-  }))
+  const getApiJs = () =>
+    (apiJsCache ??= buildApiJs().catch((err) => {
+      apiJsCache = null
+      throw err
+    }))
 
   return [
     {
-      name: 'pwa-islands:api-serve',
-      apply: 'serve',
+      name: "pwa-islands:api-serve",
+      apply: "serve",
       configureServer(server) {
         // In Dev gibt es keinen Build-Schritt, der api.ts bündelt. Damit /api.js
         // trotzdem ein eigenständiges Skript ist (wie in Produktion, ohne
         // offene Imports), wird es hier gebündelt und zwischengespeichert.
         server.middlewares.use(async (req, res, next) => {
-          const path = (req.url ?? '').split('?')[0]
-          if (path === '/api.d.ts') {
+          const path = (req.url ?? "").split("?")[0]
+          if (path === "/api.d.ts") {
             const dts = getDts()
             mkdirSync(dirname(apiDtsFile), { recursive: true })
-            writeFileSync(apiDtsFile, dts, 'utf8')
-            res.setHeader('Content-Type', 'application/typescript; charset=utf-8')
+            writeFileSync(apiDtsFile, dts, "utf8")
+            res.setHeader("Content-Type", "application/typescript; charset=utf-8")
             res.end(dts)
             return
           }
-          if (path === '/api.js') {
+          if (path === "/api.js") {
             try {
               const code = await getApiJs()
-              res.setHeader('Content-Type', 'text/javascript; charset=utf-8')
+              res.setHeader("Content-Type", "text/javascript; charset=utf-8")
               res.end(code)
             } catch (err) {
               apiJsCache = null
@@ -176,17 +171,17 @@ function islandsApiPlugin(): Plugin[] {
       },
     },
     {
-      name: 'pwa-islands:api-assets',
-      apply: 'build',
+      name: "pwa-islands:api-assets",
+      apply: "build",
       async generateBundle() {
         this.emitFile({
-          type: 'asset',
-          fileName: 'api.d.ts',
+          type: "asset",
+          fileName: "api.d.ts",
           source: getDts(),
         })
         this.emitFile({
-          type: 'asset',
-          fileName: 'api.js',
+          type: "asset",
+          fileName: "api.js",
           source: await getApiJs(),
         })
       },
@@ -196,45 +191,48 @@ function islandsApiPlugin(): Plugin[] {
 
 export default defineConfig({
   server: {
-    host: 'pwaislands.localhost',
+    host: "pwaislands.localhost",
   },
 
   build: {
     rollupOptions: {
       input: {
-        main: fileURLToPath(new URL('index.html', import.meta.url)),
+        main: fileURLToPath(new URL("index.html", import.meta.url)),
       },
     },
   },
 
-  plugins: [...islandsApiPlugin(), VitePWA({
-    strategies: 'injectManifest',
-    srcDir: 'src',
-    filename: 'sw.ts',
-    registerType: 'autoUpdate',
-    injectRegister: false,
+  plugins: [
+    ...islandsApiPlugin(),
+    VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
+      registerType: "autoUpdate",
+      injectRegister: false,
 
-    pwaAssets: {
-      disabled: false,
-      config: true,
-    },
+      pwaAssets: {
+        disabled: false,
+        config: true,
+      },
 
-    manifest: {
-      name: 'PWA Islands',
-      short_name: 'PWA Islands',
-      description: 'Offline-capable progressive web application islands',
-      theme_color: '#2e69c9',
-      background_color: '#2e69c9',
-      display: "fullscreen"
-    },
+      manifest: {
+        name: "PWA Islands",
+        short_name: "PWA Islands",
+        description: "Offline-capable progressive web application islands",
+        theme_color: "#2e69c9",
+        background_color: "#2e69c9",
+        display: "fullscreen",
+      },
 
-    injectManifest: {
-      globPatterns: ['**/*.{js,css,html,svg,png,ico,d.ts}'],
-    },
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,svg,png,ico,d.ts}"],
+      },
 
-    devOptions: {
-      enabled: true,
-      type: 'module',
-    },
-  })],
+      devOptions: {
+        enabled: true,
+        type: "module",
+      },
+    }),
+  ],
 })

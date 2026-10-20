@@ -7,12 +7,12 @@ import {
   storeStorageType,
   clearStoredStorageType,
   getOPFSDirectoryHandle,
-} from './storage.ts'
-import rootIconUrl from './assets/pwa-islands.svg'
+} from "./storage.ts"
+import rootIconUrl from "./assets/pwa-islands.svg"
 
 export interface FileEntry {
   name: string
-  kind: 'file' | 'directory'
+  kind: "file" | "directory"
   size?: number
   lastModified?: number
 }
@@ -21,7 +21,7 @@ export interface FileEntry {
  * Generische Abstraktion über Dateisystem-Backends (File System Access API & OPFS).
  */
 export interface IFileStorage {
-  readonly type: 'fsa' | 'opfs'
+  readonly type: "fsa" | "opfs"
   readonly name: string
   /** Anzeigename des Wurzelordners ohne Unterpfad. */
   readonly rootName: string
@@ -50,7 +50,7 @@ export interface IFileStorage {
  */
 export class FileSystemHandleStorage implements IFileStorage {
   private readonly handle: FileSystemDirectoryHandle
-  readonly type: 'fsa' | 'opfs'
+  readonly type: "fsa" | "opfs"
   readonly isFallback: boolean
   /**
    * Anzeigename (z. B. "Origin Private File System" oder der Ordnername), damit
@@ -65,18 +65,18 @@ export class FileSystemHandleStorage implements IFileStorage {
 
   constructor(
     handle: FileSystemDirectoryHandle,
-    type: 'fsa' | 'opfs',
+    type: "fsa" | "opfs",
     isFallback: boolean = false,
-    subPath: string = '',
+    subPath: string = "",
     displayName?: string,
-    rootHandle?: FileSystemDirectoryHandle
+    rootHandle?: FileSystemDirectoryHandle,
   ) {
     this.handle = handle
     this.type = type
     this.isFallback = isFallback
     this.subPath = subPath
     this.rootHandle = rootHandle ?? handle
-    this.displayName = displayName ?? (type === 'opfs' ? 'Origin Private File System' : handle.name)
+    this.displayName = displayName ?? (type === "opfs" ? "Origin Private File System" : handle.name)
   }
 
   get name(): string {
@@ -89,7 +89,7 @@ export class FileSystemHandleStorage implements IFileStorage {
   }
 
   get canChangeFolder(): boolean {
-    return this.type === 'fsa'
+    return this.type === "fsa"
   }
 
   get rawHandle(): FileSystemDirectoryHandle {
@@ -106,7 +106,7 @@ export class FileSystemHandleStorage implements IFileStorage {
       this.isFallback,
       nextPath,
       this.displayName,
-      this.rootHandle
+      this.rootHandle,
     )
   }
 
@@ -114,34 +114,34 @@ export class FileSystemHandleStorage implements IFileStorage {
     const entries: FileEntry[] = []
 
     for await (const entry of this.handle.values()) {
-      if (entry.kind === 'file') {
+      if (entry.kind === "file") {
         try {
           const file = await entry.getFile()
           entries.push({
             name: entry.name,
-            kind: 'file',
+            kind: "file",
             size: file.size,
             lastModified: file.lastModified,
           })
         } catch {
           entries.push({
             name: entry.name,
-            kind: 'file',
+            kind: "file",
           })
         }
-      } else if (entry.kind === 'directory') {
+      } else if (entry.kind === "directory") {
         entries.push({
           name: entry.name,
-          kind: 'directory',
+          kind: "directory",
         })
       }
     }
 
     entries.sort((a, b) => {
       if (a.kind !== b.kind) {
-        return a.kind === 'directory' ? -1 : 1
+        return a.kind === "directory" ? -1 : 1
       }
-      return a.name.localeCompare(b.name, 'de', { sensitivity: 'base', numeric: true })
+      return a.name.localeCompare(b.name, "de", { sensitivity: "base", numeric: true })
     })
 
     return entries
@@ -169,19 +169,19 @@ export class FileSystemHandleStorage implements IFileStorage {
   }
 
   async ensureWritePermission(): Promise<boolean> {
-    if (this.type !== 'fsa') return true
+    if (this.type !== "fsa") return true
     if (!this.handle.queryPermission || !this.handle.requestPermission) return true
 
-    let perm = await this.handle.queryPermission({ mode: 'readwrite' })
-    if (perm === 'granted') return true
+    let perm = await this.handle.queryPermission({ mode: "readwrite" })
+    if (perm === "granted") return true
 
-    perm = await this.handle.requestPermission({ mode: 'readwrite' })
-    return perm === 'granted'
+    perm = await this.handle.requestPermission({ mode: "readwrite" })
+    return perm === "granted"
   }
 
   async createFile(name: string, content: string | Blob): Promise<void> {
     if (!(await this.ensureWritePermission())) {
-      throw new Error('Schreibzugriff verweigert.')
+      throw new Error("Schreibzugriff verweigert.")
     }
     // Vorhandene Dateien nicht ueberschreiben -- auch nicht, wenn der Name
     // bereits als Ordner existiert (dann meldet der Browser TypeMismatchError).
@@ -200,7 +200,7 @@ export class FileSystemHandleStorage implements IFileStorage {
    */
   async writeFile(name: string, content: string | Blob): Promise<void> {
     if (!(await this.ensureWritePermission())) {
-      throw new Error('Schreibzugriff verweigert.')
+      throw new Error("Schreibzugriff verweigert.")
     }
     const fileHandle = await this.handle.getFileHandle(name, { create: true })
     const writable = await fileHandle.createWritable()
@@ -210,14 +210,14 @@ export class FileSystemHandleStorage implements IFileStorage {
 
   async createDirectory(name: string): Promise<void> {
     if (!(await this.ensureWritePermission())) {
-      throw new Error('Schreibzugriff verweigert.')
+      throw new Error("Schreibzugriff verweigert.")
     }
     await this.handle.getDirectoryHandle(name, { create: true })
   }
 
   async deleteEntry(name: string): Promise<void> {
     if (!(await this.ensureWritePermission())) {
-      throw new Error('Schreibzugriff verweigert.')
+      throw new Error("Schreibzugriff verweigert.")
     }
     await this.handle.removeEntry(name, { recursive: true })
   }
@@ -229,11 +229,11 @@ export class FileSystemHandleStorage implements IFileStorage {
    */
   async renameEntry(oldName: string, newName: string): Promise<void> {
     if (oldName === newName) return
-    if (oldName.includes('/') || newName.includes('/')) {
-      throw new Error('Name darf keinen Schraegstrich enthalten.')
+    if (oldName.includes("/") || newName.includes("/")) {
+      throw new Error("Name darf keinen Schraegstrich enthalten.")
     }
     if (!(await this.ensureWritePermission())) {
-      throw new Error('Schreibzugriff verweigert.')
+      throw new Error("Schreibzugriff verweigert.")
     }
 
     // Kollision vorab pruefen: `getFileHandle`/`getDirectoryHandle` liefern
@@ -246,13 +246,18 @@ export class FileSystemHandleStorage implements IFileStorage {
     try {
       kind = (await this.handle.getFileHandle(oldName)).kind
     } catch (err) {
-      if (!(err instanceof DOMException && (err.name === 'NotFoundError' || err.name === 'TypeMismatchError'))) {
+      if (
+        !(
+          err instanceof DOMException &&
+          (err.name === "NotFoundError" || err.name === "TypeMismatchError")
+        )
+      ) {
         throw err
       }
       kind = (await this.handle.getDirectoryHandle(oldName)).kind
     }
 
-    if (kind === 'file') {
+    if (kind === "file") {
       const source = await this.handle.getFileHandle(oldName)
       const target = await this.handle.getFileHandle(newName, { create: true })
       const writable = await target.createWritable()
@@ -275,7 +280,12 @@ export class FileSystemHandleStorage implements IFileStorage {
       await this.handle.getFileHandle(name)
       return true
     } catch (err) {
-      if (!(err instanceof DOMException && (err.name === 'NotFoundError' || err.name === 'TypeMismatchError'))) {
+      if (
+        !(
+          err instanceof DOMException &&
+          (err.name === "NotFoundError" || err.name === "TypeMismatchError")
+        )
+      ) {
         throw err
       }
     }
@@ -283,7 +293,12 @@ export class FileSystemHandleStorage implements IFileStorage {
       await this.handle.getDirectoryHandle(name)
       return true
     } catch (err) {
-      if (!(err instanceof DOMException && (err.name === 'NotFoundError' || err.name === 'TypeMismatchError'))) {
+      if (
+        !(
+          err instanceof DOMException &&
+          (err.name === "NotFoundError" || err.name === "TypeMismatchError")
+        )
+      ) {
         throw err
       }
     }
@@ -296,7 +311,7 @@ export class FileSystemHandleStorage implements IFileStorage {
     const target = await this.handle.getDirectoryHandle(targetName, { create: true })
 
     for await (const entry of source.values()) {
-      if (entry.kind === 'file') {
+      if (entry.kind === "file") {
         const file = await (entry as FileSystemFileHandle).getFile()
         const targetFile = await target.getFileHandle(entry.name, { create: true })
         const writable = await targetFile.createWritable()
@@ -311,11 +326,11 @@ export class FileSystemHandleStorage implements IFileStorage {
   /** Rekursionshelfer: kopiert `source` inklusive Inhalt nach `target`. */
   private async copyDirectoryInto(
     source: FileSystemDirectoryHandle,
-    target: FileSystemDirectoryHandle
+    target: FileSystemDirectoryHandle,
   ): Promise<void> {
     const nested = await target.getDirectoryHandle(source.name, { create: true })
     for await (const entry of source.values()) {
-      if (entry.kind === 'file') {
+      if (entry.kind === "file") {
         const file = await (entry as FileSystemFileHandle).getFile()
         const targetFile = await nested.getFileHandle(entry.name, { create: true })
         const writable = await targetFile.createWritable()
@@ -329,20 +344,20 @@ export class FileSystemHandleStorage implements IFileStorage {
 }
 
 function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 B'
+  if (bytes === 0) return "0 B"
   const k = 1024
-  const sizes = ['B', 'KB', 'MB', 'GB', 'TB']
+  const sizes = ["B", "KB", "MB", "GB", "TB"]
   const i = Math.floor(Math.log(bytes) / Math.log(k))
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`
 }
 
 function formatDate(timestamp: number): string {
-  return new Intl.DateTimeFormat('de-DE', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
+  return new Intl.DateTimeFormat("de-DE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
   }).format(new Date(timestamp))
 }
 
@@ -351,15 +366,15 @@ function formatDate(timestamp: number): string {
  * `previewUrl` ist eine Object-URL und muss beim Schliessen freigegeben werden.
  */
 interface ContentPreview {
-  kind: 'image'
+  kind: "image"
   previewUrl: string
 }
 
 interface EditorModalOptions {
   /** 'file' zeigt zusaetzlich den Inhalt, 'folder' nur den Namen. */
-  kind: 'file' | 'folder'
+  kind: "file" | "folder"
   /** 'create' legt neu an, 'edit' aendert Name und/oder Inhalt. */
-  mode: 'create' | 'edit'
+  mode: "create" | "edit"
   name?: string
   initialContent?: string
   /**
@@ -387,42 +402,42 @@ interface EditorModalOptions {
  */
 function buildImagePreview(blob: Blob): ContentPreview {
   return {
-    kind: 'image',
+    kind: "image",
     previewUrl: URL.createObjectURL(blob),
   }
 }
 
 /** Dateiendungen, die als Bild angezeigt werden koennen (Browser-Standard). */
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'svg', 'ico'])
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg", "ico"])
 
 /** Obergrenze fuer Dateien, die der Editor als Text laedt (10 MB). */
 const MAX_EDITABLE_TEXT_BYTES = 10 * 1024 * 1024
 
 /** Dateiendungen, die der Editor als Text oeffnen und speichern darf. */
 const TEXT_EXTENSIONS = new Set([
-  'html',
-  'htm',
-  'xhtml',
-  'js',
-  'mjs',
-  'cjs',
-  'jsx',
-  'ts',
-  'tsx',
-  'css',
-  'json',
-  'webmanifest',
-  'txt',
-  'md',
-  'csv',
-  'svg',
-  'xml',
-  'yml',
-  'yaml',
-  'sh',
-  'toml',
-  'ini',
-  'map',
+  "html",
+  "htm",
+  "xhtml",
+  "js",
+  "mjs",
+  "cjs",
+  "jsx",
+  "ts",
+  "tsx",
+  "css",
+  "json",
+  "webmanifest",
+  "txt",
+  "md",
+  "csv",
+  "svg",
+  "xml",
+  "yml",
+  "yaml",
+  "sh",
+  "toml",
+  "ini",
+  "map",
 ])
 
 /**
@@ -447,8 +462,8 @@ async function isEditableTextFile(file: Blob, name: string): Promise<boolean> {
     const bytes = new Uint8Array(await file.arrayBuffer())
     // `ignoreBOM: true` behaelt die Bytefolge bei -- sonst wuerde ein fuehrendes
     // BOM beim Speichern verloren gehen und der Vergleich scheitern.
-    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
-    if (text.includes('\uFFFD')) return false
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
+    if (text.includes("\uFFFD")) return false
     const roundtrip = new TextEncoder().encode(text)
     if (roundtrip.length !== bytes.length) return false
     for (let i = 0; i < bytes.length; i++) {
@@ -463,9 +478,9 @@ async function isEditableTextFile(file: Blob, name: string): Promise<boolean> {
 
 /** Endung ohne Punkt, klein geschrieben; leer, wenn keine vorhanden ist. */
 function getExtension(name: string): string {
-  const dotIndex = name.lastIndexOf('.')
+  const dotIndex = name.lastIndexOf(".")
   return dotIndex === -1 || dotIndex === name.length - 1
-    ? ''
+    ? ""
     : name.slice(dotIndex + 1).toLowerCase()
 }
 
@@ -475,11 +490,11 @@ function getExtension(name: string): string {
  */
 function escapeHtml(value: string): string {
   return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
 }
 
 /**
@@ -491,19 +506,19 @@ function escapeHtml(value: string): string {
  * neben den Buttons in der Toolbar.
  */
 function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
-  const rootLabel = 'PWA Islands'
-  const segments = storage.subPath ? storage.subPath.split('/') : []
+  const rootLabel = "PWA Islands"
+  const segments = storage.subPath ? storage.subPath.split("/") : []
 
   const parts: string[] = []
   parts.push(
     segments.length === 0
       ? `<span class="breadcrumb-current">${escapeHtml(rootLabel)}</span>`
       : `<button type="button" class="breadcrumb-item" data-segment="" title="${escapeHtml(
-          rootLabel
-        )}">${escapeHtml(rootLabel)}</button>`
+          rootLabel,
+        )}">${escapeHtml(rootLabel)}</button>`,
   )
 
-  let accumulated = ''
+  let accumulated = ""
   segments.forEach((segment, index) => {
     accumulated = accumulated ? `${accumulated}/${segment}` : segment
     const isLast = index === segments.length - 1
@@ -512,12 +527,12 @@ function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
       isLast
         ? `<span class="breadcrumb-current">${escapeHtml(segment)}</span>`
         : `<button type="button" class="breadcrumb-item" data-segment="${escapeHtml(
-            accumulated
-          )}" title="${escapeHtml(segment)}">${escapeHtml(segment)}</button>`
+            accumulated,
+          )}" title="${escapeHtml(segment)}">${escapeHtml(segment)}</button>`,
     )
   })
 
-  return parts.join('')
+  return parts.join("")
 }
 
 /**
@@ -526,12 +541,12 @@ function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
  * damit nicht versehentlich eine kaputte Datei gespeichert wird.
  */
 function base64ToBlob(base64: string): Blob {
-  const cleaned = base64.replace(/\s+/g, '')
+  const cleaned = base64.replace(/\s+/g, "")
   let binary: string
   try {
     binary = atob(cleaned)
   } catch {
-    throw new Error('Der Base64-Inhalt ist ungültig.')
+    throw new Error("Der Base64-Inhalt ist ungültig.")
   }
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) {
@@ -545,7 +560,7 @@ function base64ToBlob(base64: string): Blob {
  */
 async function blobToBase64(blob: Blob): Promise<string> {
   const bytes = new Uint8Array(await blob.arrayBuffer())
-  let binary = ''
+  let binary = ""
   const chunkSize = 0x8000
   for (let i = 0; i < bytes.length; i += chunkSize) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
@@ -575,7 +590,7 @@ function renderFileContent(options: {
   if (!options.locked) return editorHtml
 
   const previewHtml =
-    options.preview?.kind === 'image'
+    options.preview?.kind === "image"
       ? `<figure id="modal-file-preview" class="file-preview">
           <img
             src="${escapeHtml(options.preview.previewUrl)}"
@@ -583,7 +598,7 @@ function renderFileContent(options: {
             class="file-preview-image"
           />
         </figure>`
-      : ''
+      : ""
 
   const base64Html = options.base64Editable
     ? `<label class="form-check">
@@ -599,7 +614,7 @@ function renderFileContent(options: {
           placeholder="Base64-Daten dieser Datei"
         ></textarea>
       </div>`
-    : ''
+    : ""
 
   return `<div class="form-group">
     ${base64Html}
@@ -612,27 +627,25 @@ function renderFileContent(options: {
  * oder ueberspringen. Die Option "fuer alle" wird separat gefragt (siehe
  * {@link askApplyToAll}).
  */
-function askImportCollision(name: string): 'replace' | 'rename' | 'skip' {
+function askImportCollision(name: string): "replace" | "rename" | "skip" {
   if (confirm(`"${name}"\n\nexistiert bereits. überschreiben?`)) {
-    return 'replace'
+    return "replace"
   }
   // Zweite Frage: umbenennen, wenn nicht ersetzt werden soll.
   if (confirm(`"${name}"\n\numbenennen?`)) {
-    return 'rename'
+    return "rename"
   }
-  return 'skip'
+  return "skip"
 }
 
 /**
  * Nach der ersten Entscheidung einmalig fragen, ob sie fuer alle weiteren
  * Konflikte gelten soll. `count` sind die noch offenen Konflikte.
  */
-function askApplyToAll(decision: 'replace' | 'rename' | 'skip', count: number): boolean {
+function askApplyToAll(decision: "replace" | "rename" | "skip", count: number): boolean {
   const label =
-    decision === 'replace' ? 'überschreiben' : decision === 'rename' ? 'umbenennen' : 'überspringen'
-  return confirm(
-    `Alle weiteren ${count} Konflikte auch ${label}?`
-  )
+    decision === "replace" ? "überschreiben" : decision === "rename" ? "umbenennen" : "überspringen"
+  return confirm(`Alle weiteren ${count} Konflikte auch ${label}?`)
 }
 
 /**
@@ -642,7 +655,7 @@ function askApplyToAll(decision: 'replace' | 'rename' | 'skip', count: number): 
 async function countRemainingCollisions(
   storage: IFileStorage,
   files: File[],
-  fromIndex: number
+  fromIndex: number,
 ): Promise<number> {
   let count = 0
   const seen = new Set<string>()
@@ -666,9 +679,9 @@ async function countRemainingCollisions(
 async function findFreeName(storage: IFileStorage, name: string): Promise<string> {
   if (!(await storage.hasEntry(name))) return name
 
-  const dotIndex = name.lastIndexOf('.')
+  const dotIndex = name.lastIndexOf(".")
   let base = dotIndex > 0 ? name.slice(0, dotIndex) : name
-  const ext = dotIndex > 0 ? name.slice(dotIndex) : ''
+  const ext = dotIndex > 0 ? name.slice(dotIndex) : ""
 
   // Bereits vorhandene Nummerierung aufgreifen: "foto (2)" -> Basis "foto", Start 3.
   let startIndex = 1
@@ -691,18 +704,16 @@ async function findFreeName(storage: IFileStorage, name: string): Promise<string
  * Dateien kommt das Inhaltsfeld hinzu.
  */
 function openEditorModal(options: EditorModalOptions): void {
-  const existingModal = document.querySelector('.modal-overlay')
+  const existingModal = document.querySelector(".modal-overlay")
   if (existingModal) existingModal.remove()
 
-  const isCreate = options.mode === 'create'
-  const isFolder = options.kind === 'folder'
-  const noun = isFolder ? 'Ordner' : 'Datei'
-  const title = isCreate
-    ? `Neuen ${noun} erstellen`
-    : `${noun} bearbeiten: ${options.name}`
+  const isCreate = options.mode === "create"
+  const isFolder = options.kind === "folder"
+  const noun = isFolder ? "Ordner" : "Datei"
+  const title = isCreate ? `Neuen ${noun} erstellen` : `${noun} bearbeiten: ${options.name}`
 
-  const modalOverlay = document.createElement('div')
-  modalOverlay.className = 'modal-overlay'
+  const modalOverlay = document.createElement("div")
+  modalOverlay.className = "modal-overlay"
 
   modalOverlay.innerHTML = `
     <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="modal-title">
@@ -718,14 +729,14 @@ function openEditorModal(options: EditorModalOptions): void {
               type="text"
               id="modal-file-name"
               class="form-input"
-              value="${escapeHtml(options.name ?? (isFolder ? 'Neuer Ordner' : 'notiz.txt'))}"
+              value="${escapeHtml(options.name ?? (isFolder ? "Neuer Ordner" : "notiz.txt"))}"
               required
-              placeholder="${isFolder ? 'z. B. projekte' : 'z. B. index.html, daten.json'}"
+              placeholder="${isFolder ? "z. B. projekte" : "z. B. index.html, daten.json"}"
             />
           </div>
           ${
             isFolder
-              ? ''
+              ? ""
               : renderFileContent({
                   locked: Boolean(options.contentLocked),
                   preview: options.preview,
@@ -741,7 +752,7 @@ function openEditorModal(options: EditorModalOptions): void {
                     <span class="icon-label-btn-icon" aria-hidden="true">🗑️</span>
                     <span class="icon-label-btn-text">Löschen</span>
                   </button>`
-                : ''
+                : ""
             }
           </div>
           <div class="modal-footer-right">
@@ -750,10 +761,10 @@ function openEditorModal(options: EditorModalOptions): void {
               <span class="icon-label-btn-text">Abbrechen</span>
             </button>
             <button type="submit" id="modal-btn-save" class="btn btn-primary icon-label-btn" aria-label="${
-              isCreate ? 'Erstellen' : 'Speichern'
-            }" data-tip="${isCreate ? 'Erstellen' : 'Speichern'}">
+              isCreate ? "Erstellen" : "Speichern"
+            }" data-tip="${isCreate ? "Erstellen" : "Speichern"}">
               <span class="icon-label-btn-icon" aria-hidden="true">💾</span>
-              <span class="icon-label-btn-text">${isCreate ? 'Erstellen' : 'Speichern'}</span>
+              <span class="icon-label-btn-text">${isCreate ? "Erstellen" : "Speichern"}</span>
             </button>
           </div>
         </footer>
@@ -763,35 +774,35 @@ function openEditorModal(options: EditorModalOptions): void {
 
   document.body.appendChild(modalOverlay)
 
-  const nameInput = modalOverlay.querySelector<HTMLInputElement>('#modal-file-name')!
-  const contentTextarea = modalOverlay.querySelector<HTMLTextAreaElement>('#modal-file-content')
-  const base64Checkbox = modalOverlay.querySelector<HTMLInputElement>('#modal-use-base64')
-  const base64Wrapper = modalOverlay.querySelector<HTMLDivElement>('#modal-base64-editor')
-  const base64Textarea = modalOverlay.querySelector<HTMLTextAreaElement>('#modal-file-content-b64')
-  const form = modalOverlay.querySelector<HTMLFormElement>('#modal-form')!
-  const closeBtn = modalOverlay.querySelector<HTMLButtonElement>('.modal-close-btn')!
-  const cancelBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-cancel')!
-  const saveBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-save')!
-  const deleteBtn = modalOverlay.querySelector<HTMLButtonElement>('#modal-btn-delete')
+  const nameInput = modalOverlay.querySelector<HTMLInputElement>("#modal-file-name")!
+  const contentTextarea = modalOverlay.querySelector<HTMLTextAreaElement>("#modal-file-content")
+  const base64Checkbox = modalOverlay.querySelector<HTMLInputElement>("#modal-use-base64")
+  const base64Wrapper = modalOverlay.querySelector<HTMLDivElement>("#modal-base64-editor")
+  const base64Textarea = modalOverlay.querySelector<HTMLTextAreaElement>("#modal-file-content-b64")
+  const form = modalOverlay.querySelector<HTMLFormElement>("#modal-form")!
+  const closeBtn = modalOverlay.querySelector<HTMLButtonElement>(".modal-close-btn")!
+  const cancelBtn = modalOverlay.querySelector<HTMLButtonElement>("#modal-btn-cancel")!
+  const saveBtn = modalOverlay.querySelector<HTMLButtonElement>("#modal-btn-save")!
+  const deleteBtn = modalOverlay.querySelector<HTMLButtonElement>("#modal-btn-delete")
 
   if (contentTextarea) {
-    contentTextarea.value = options.initialContent ?? ''
+    contentTextarea.value = options.initialContent ?? ""
     if (options.contentLocked) contentTextarea.readOnly = true
   }
 
-  if (base64Textarea) base64Textarea.value = options.base64 ?? ''
+  if (base64Textarea) base64Textarea.value = options.base64 ?? ""
 
   // Ohne Haken bleibt die Datei unangetastet und die Vorschau sichtbar. Mit Haken
   // wird der Base64-Text zur einzigen Inhaltsquelle und die Vorschau weicht dem
   // Feld.
-  const previewFigure = modalOverlay.querySelector<HTMLElement>('#modal-file-preview')
+  const previewFigure = modalOverlay.querySelector<HTMLElement>("#modal-file-preview")
   const syncBase64State = () => {
     const active = Boolean(base64Checkbox?.checked)
     if (base64Wrapper) base64Wrapper.hidden = !active
     if (previewFigure) previewFigure.hidden = active
     if (active) base64Textarea?.focus()
   }
-  base64Checkbox?.addEventListener('change', syncBase64State)
+  base64Checkbox?.addEventListener("change", syncBase64State)
   if (isCreate) {
     nameInput.focus()
     nameInput.select()
@@ -803,23 +814,23 @@ function openEditorModal(options: EditorModalOptions): void {
   }
 
   function closeModal() {
-    document.removeEventListener('keydown', handleKeydown)
+    document.removeEventListener("keydown", handleKeydown)
     // Object-URLs belegen Speicher, bis sie freigegeben werden.
     if (options.preview?.previewUrl) URL.revokeObjectURL(options.preview.previewUrl)
     modalOverlay.remove()
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       closeModal()
     }
   }
 
-  document.addEventListener('keydown', handleKeydown)
-  closeBtn.addEventListener('click', closeModal)
-  cancelBtn.addEventListener('click', closeModal)
+  document.addEventListener("keydown", handleKeydown)
+  closeBtn.addEventListener("click", closeModal)
+  cancelBtn.addEventListener("click", closeModal)
 
-  form.addEventListener('submit', async (e) => {
+  form.addEventListener("submit", async (e) => {
     e.preventDefault()
     const name = nameInput.value.trim()
     if (!name) {
@@ -828,7 +839,7 @@ function openEditorModal(options: EditorModalOptions): void {
     }
 
     saveBtn.disabled = true
-    saveBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = 'Wird gespeichert...'
+    saveBtn.querySelector<HTMLElement>(".icon-label-btn-text")!.textContent = "Wird gespeichert..."
 
     try {
       // Bei gesperrtem Inhalt (Binaerdatei) ist der Inhalt nur dann eine Quelle,
@@ -836,7 +847,7 @@ function openEditorModal(options: EditorModalOptions): void {
       // die Datei bleibt byte-identisch.
       let payload: string | Blob | null
       if (!options.contentLocked) {
-        payload = contentTextarea?.value ?? ''
+        payload = contentTextarea?.value ?? ""
       } else if (base64Checkbox?.checked && base64Textarea) {
         payload = base64ToBlob(base64Textarea.value)
       } else {
@@ -846,26 +857,26 @@ function openEditorModal(options: EditorModalOptions): void {
       closeModal()
     } catch (err: unknown) {
       saveBtn.disabled = false
-      saveBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = isCreate
-        ? 'Erstellen'
-        : 'Speichern'
+      saveBtn.querySelector<HTMLElement>(".icon-label-btn-text")!.textContent = isCreate
+        ? "Erstellen"
+        : "Speichern"
       alert(`Fehler beim Speichern: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
 
-  deleteBtn?.addEventListener('click', async () => {
+  deleteBtn?.addEventListener("click", async () => {
     if (!options.onDelete) return
     if (!confirm(`Möchten Sie "${options.name}" wirklich löschen?`)) return
 
     deleteBtn.disabled = true
-    deleteBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = 'Wird gelöscht...'
+    deleteBtn.querySelector<HTMLElement>(".icon-label-btn-text")!.textContent = "Wird gelöscht..."
 
     try {
       await options.onDelete()
       closeModal()
     } catch (err: unknown) {
       deleteBtn.disabled = false
-      deleteBtn.querySelector<HTMLElement>('.icon-label-btn-text')!.textContent = 'Löschen'
+      deleteBtn.querySelector<HTMLElement>(".icon-label-btn-text")!.textContent = "Löschen"
       alert(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
@@ -890,10 +901,10 @@ async function renderGenericFileList(
     onRequestNewFile: () => void
     onRequestNewFolder: () => void
     onRequestImport: () => void
-    onRequestEdit: (name: string, kind: 'file' | 'directory') => void
+    onRequestEdit: (name: string, kind: "file" | "directory") => void
     onRequestOpen: (name: string) => void
     onRequestOpenFolder: (name: string) => void
-  }
+  },
 ): Promise<void> {
   contentEl.innerHTML = `
     <div class="loading-state">
@@ -915,33 +926,33 @@ async function renderGenericFileList(
       return
     }
 
-    const fileCount = entries.filter((e) => e.kind === 'file').length
-    const dirCount = entries.filter((e) => e.kind === 'directory').length
+    const fileCount = entries.filter((e) => e.kind === "file").length
+    const dirCount = entries.filter((e) => e.kind === "directory").length
 
-    let summaryText = ''
+    let summaryText = ""
     if (dirCount > 0 && fileCount > 0) {
-      summaryText = `${fileCount} ${fileCount === 1 ? 'Datei' : 'Dateien'}, ${dirCount} ${dirCount === 1 ? 'Ordner' : 'Ordner'}`
+      summaryText = `${fileCount} ${fileCount === 1 ? "Datei" : "Dateien"}, ${dirCount} ${dirCount === 1 ? "Ordner" : "Ordner"}`
     } else if (fileCount > 0) {
-      summaryText = `${fileCount} ${fileCount === 1 ? 'Datei' : 'Dateien'}`
+      summaryText = `${fileCount} ${fileCount === 1 ? "Datei" : "Dateien"}`
     } else {
-      summaryText = `${dirCount} ${dirCount === 1 ? 'Ordner' : 'Ordner'}`
+      summaryText = `${dirCount} ${dirCount === 1 ? "Ordner" : "Ordner"}`
     }
 
     const rows = entries
       .map((entry) => {
-        const isDir = entry.kind === 'directory'
-        const icon = isDir ? '📁' : '📄'
-        const sizeDisplay = isDir ? '—' : entry.size !== undefined ? formatBytes(entry.size) : '—'
+        const isDir = entry.kind === "directory"
+        const icon = isDir ? "📁" : "📄"
+        const sizeDisplay = isDir ? "—" : entry.size !== undefined ? formatBytes(entry.size) : "—"
         const dateDisplay = isDir
-          ? '—'
+          ? "—"
           : entry.lastModified !== undefined
             ? formatDate(entry.lastModified)
-            : '—'
+            : "—"
 
         return `
-          <tr class="file-row ${isDir ? 'is-directory' : 'is-file'}" data-entry="${encodeURIComponent(
-            entry.name
-          )}" data-kind="${entry.kind}" title="${isDir ? 'Ordner öffnen' : 'Datei öffnen'}">
+          <tr class="file-row ${isDir ? "is-directory" : "is-file"}" data-entry="${encodeURIComponent(
+            entry.name,
+          )}" data-kind="${entry.kind}" title="${isDir ? "Ordner öffnen" : "Datei öffnen"}">
             <td class="file-name-cell">
               <span class="file-name-inner">
                 <span class="file-icon" aria-hidden="true">${icon}</span>
@@ -953,8 +964,8 @@ async function renderGenericFileList(
             <td class="files-actions-cell">
               <div class="files-actions-inner">
                 <button type="button" class="btn btn-secondary btn-sm btn-edit-entry" data-entry="${encodeURIComponent(
-                  entry.name
-                )}" title="${isDir ? 'Ordner bearbeiten' : 'Datei bearbeiten'}" aria-label="${isDir ? 'Ordner bearbeiten' : 'Datei bearbeiten'}">
+                  entry.name,
+                )}" title="${isDir ? "Ordner bearbeiten" : "Datei bearbeiten"}" aria-label="${isDir ? "Ordner bearbeiten" : "Datei bearbeiten"}">
                   ✏️ <span class="btn-label">Bearbeiten</span>
                 </button>
               </div>
@@ -962,7 +973,7 @@ async function renderGenericFileList(
           </tr>
         `
       })
-      .join('')
+      .join("")
 
     contentEl.innerHTML = `
       <div class="files-summary">
@@ -988,48 +999,50 @@ async function renderGenericFileList(
     // Die ganze Zeile ist klickbar: Ordner oeffnen, Dateien laden. Die
     // Aktionsbuttons liegen in derselben Zeile und muessen den Klick
     // abfangen, damit Bearbeiten/Loeschen nicht zusaetzlich navigiert.
-    contentEl.querySelectorAll<HTMLTableRowElement>('.file-row').forEach((row) => {
-      row.addEventListener('click', (e) => {
-        if ((e.target as HTMLElement).closest('button')) return
-        const entryName = decodeURIComponent(row.dataset.entry || '')
+    contentEl.querySelectorAll<HTMLTableRowElement>(".file-row").forEach((row) => {
+      row.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest("button")) return
+        const entryName = decodeURIComponent(row.dataset.entry || "")
         if (!entryName) return
-        if (row.dataset.kind === 'directory') handlers.onRequestOpenFolder(entryName)
+        if (row.dataset.kind === "directory") handlers.onRequestOpenFolder(entryName)
         else handlers.onRequestOpen(entryName)
       })
     })
 
-    const editButtons = contentEl.querySelectorAll<HTMLButtonElement>('.btn-edit-entry')
+    const editButtons = contentEl.querySelectorAll<HTMLButtonElement>(".btn-edit-entry")
     editButtons.forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+      btn.addEventListener("click", (e) => {
         const target = e.currentTarget as HTMLButtonElement
-        const entryName = decodeURIComponent(target.dataset.entry || '')
-        const kind = target.closest('.file-row')?.getAttribute('data-kind')
-        if (entryName) handlers.onRequestEdit(entryName, kind === 'directory' ? 'directory' : 'file')
+        const entryName = decodeURIComponent(target.dataset.entry || "")
+        const kind = target.closest(".file-row")?.getAttribute("data-kind")
+        if (entryName)
+          handlers.onRequestEdit(entryName, kind === "directory" ? "directory" : "file")
       })
     })
-
   } catch (err: unknown) {
-    console.error('Fehler beim Laden der Dateiliste:', err)
+    console.error("Fehler beim Laden der Dateiliste:", err)
     contentEl.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">⚠️</div>
         <h3>Fehler beim Lesen der Dateien</h3>
-        <p>${err instanceof Error ? err.message : 'Unbekannter Fehler aufgetreten.'}</p>
+        <p>${err instanceof Error ? err.message : "Unbekannter Fehler aufgetreten."}</p>
         <button id="btn-retry-list" type="button" class="btn btn-primary">
           Erneut versuchen
         </button>
       </div>
     `
-    contentEl.querySelector<HTMLButtonElement>('#btn-retry-list')?.addEventListener('click', handlers.onRefresh)
+    contentEl
+      .querySelector<HTMLButtonElement>("#btn-retry-list")
+      ?.addEventListener("click", handlers.onRefresh)
   }
 }
 
 export function renderFilesView(container: HTMLElement): void {
-  const hasDirectoryPicker = typeof window !== 'undefined' && 'showDirectoryPicker' in window
+  const hasDirectoryPicker = typeof window !== "undefined" && "showDirectoryPicker" in window
   const hasOPFS =
-    typeof navigator !== 'undefined' &&
-    'storage' in navigator &&
-    typeof navigator.storage.getDirectory === 'function'
+    typeof navigator !== "undefined" &&
+    "storage" in navigator &&
+    typeof navigator.storage.getDirectory === "function"
 
   const isFallbackToOPFS = !hasDirectoryPicker && hasOPFS
 
@@ -1058,14 +1071,14 @@ export function renderFilesView(container: HTMLElement): void {
     </div>
   `
 
-  const alertArea = container.querySelector<HTMLDivElement>('#files-alert-area')!
-  const folderNameDisplay = container.querySelector<HTMLElement>('#folder-name-display')!
-  const folderActions = container.querySelector<HTMLDivElement>('#folder-actions')!
-  const filesContent = container.querySelector<HTMLDivElement>('#files-content')!
-  const fileImportInput = container.querySelector<HTMLInputElement>('#files-import-input')!
+  const alertArea = container.querySelector<HTMLDivElement>("#files-alert-area")!
+  const folderNameDisplay = container.querySelector<HTMLElement>("#folder-name-display")!
+  const folderActions = container.querySelector<HTMLDivElement>("#folder-actions")!
+  const filesContent = container.querySelector<HTMLDivElement>("#files-content")!
+  const fileImportInput = container.querySelector<HTMLInputElement>("#files-import-input")!
 
   if (!hasDirectoryPicker && !hasOPFS) {
-    folderNameDisplay.textContent = 'Dateisystem-APIs nicht unterstützt'
+    folderNameDisplay.textContent = "Dateisystem-APIs nicht unterstützt"
     alertArea.innerHTML = `
       <div class="alert alert-danger">
         <strong>Browser wird nicht unterstützt:</strong> Weder die File System Access API noch OPFS sind in diesem Browser verfügbar.
@@ -1085,7 +1098,7 @@ export function renderFilesView(container: HTMLElement): void {
    * kein Ordner offen ist -- so bietet das Zahnrad-Menue im Leerzustand nur
    * den Wechsel in die *andere* Speicherart an.
    */
-  let currentStorageType: 'fsa' | 'opfs' | null = null
+  let currentStorageType: "fsa" | "opfs" | null = null
 
   /** Sammelt die Menüeinträge des Zahnrads -- eine einzige Quelle der Wahrheit. */
   interface SettingsAction {
@@ -1106,33 +1119,33 @@ export function renderFilesView(container: HTMLElement): void {
   function buildSettingsActions(): SettingsAction[] {
     const actions: SettingsAction[] = []
 
-    if (currentStorageType !== 'opfs' && hasOPFS) {
+    if (currentStorageType !== "opfs" && hasOPFS) {
       actions.push({
-        id: 'btn-use-opfs',
-        html: '📦 Zu App-Speicher wechseln',
-        hint: 'App-Speicher (OPFS): liegt versteckt im Browser, funktioniert ohne Ordnerauswahl und ohne Berechtigung. Die Dateien sind aber an diesen Browser gebunden.',
+        id: "btn-use-opfs",
+        html: "📦 Zu App-Speicher wechseln",
+        hint: "App-Speicher (OPFS): liegt versteckt im Browser, funktioniert ohne Ordnerauswahl und ohne Berechtigung. Die Dateien sind aber an diesen Browser gebunden.",
         run: () => void handleUseOPFS(),
       })
     }
 
-    if (currentStorageType !== 'fsa' && hasDirectoryPicker) {
+    if (currentStorageType !== "fsa" && hasDirectoryPicker) {
       actions.push({
-        id: 'btn-select-folder',
-        html: '💻 Zu lokalem Ordner wechseln',
-        hint: 'Lokaler Ordner (FS API): ein normaler Ordner auf dem Gerät, jederzeit mit anderen Programmen bearbeitbar. Der Browser fragt nach Zugriff.',
+        id: "btn-select-folder",
+        html: "💻 Zu lokalem Ordner wechseln",
+        hint: "Lokaler Ordner (FS API): ein normaler Ordner auf dem Gerät, jederzeit mit anderen Programmen bearbeitbar. Der Browser fragt nach Zugriff.",
         run: () => void handleSwitchToLocalFolder(),
       })
     }
 
     if (currentStorage?.canChangeFolder) {
       actions.push({
-        id: 'btn-change-folder',
-        html: '📂 Ordner wechseln',
+        id: "btn-change-folder",
+        html: "📂 Ordner wechseln",
         run: () => void handleSelectFolder(),
       })
       actions.push({
-        id: 'btn-disconnect-folder',
-        html: '🔌 Trennen',
+        id: "btn-disconnect-folder",
+        html: "🔌 Trennen",
         danger: true,
         run: () => void handleDisconnectFolder(),
       })
@@ -1144,7 +1157,7 @@ export function renderFilesView(container: HTMLElement): void {
   /** Baut das komplette Zahnrad-Menü; leer, wenn es nichts anzubieten gibt. */
   function renderSettingsMenu(): string {
     const actions = buildSettingsActions()
-    if (actions.length === 0) return ''
+    if (actions.length === 0) return ""
 
     return `
       <div class="settings-menu" id="settings-menu">
@@ -1162,13 +1175,15 @@ export function renderFilesView(container: HTMLElement): void {
         <div class="settings-menu-list" id="settings-menu-list" hidden>
           ${actions
             .map((a) => {
-              const classes = `settings-menu-item${a.danger ? ' is-danger' : ''}`
+              const classes = `settings-menu-item${a.danger ? " is-danger" : ""}`
               // Der Erklaertext erscheint als Tooltip (data-tooltip), nicht
               // dauerhaft im Eintrag -- das Menue soll schlank bleiben.
-              const tip = a.hint ? ` data-tooltip="${escapeHtml(a.hint)}" aria-description="${escapeHtml(a.hint)}"` : ''
+              const tip = a.hint
+                ? ` data-tooltip="${escapeHtml(a.hint)}" aria-description="${escapeHtml(a.hint)}"`
+                : ""
               return `<button id="${a.id}" type="button" class="${classes}"${tip}>${a.html}</button>`
             })
-            .join('')}
+            .join("")}
         </div>
       </div>
     `
@@ -1177,7 +1192,7 @@ export function renderFilesView(container: HTMLElement): void {
   /** Verdrahtet die Aktionen des zuletzt gerenderten Menüs mit ihren Handlern. */
   function bindSettingsActions(scope: HTMLElement) {
     for (const action of buildSettingsActions()) {
-      scope.querySelector<HTMLButtonElement>(`#${action.id}`)?.addEventListener('click', () => {
+      scope.querySelector<HTMLButtonElement>(`#${action.id}`)?.addEventListener("click", () => {
         closeSettingsMenu()
         action.run()
       })
@@ -1192,7 +1207,7 @@ export function renderFilesView(container: HTMLElement): void {
     if (currentStorageType) return
     void getStoredStorageType().then((stored) => {
       if (!currentStorageType && !currentStorage) {
-        currentStorageType = stored ?? (hasDirectoryPicker ? 'fsa' : null)
+        currentStorageType = stored ?? (hasDirectoryPicker ? "fsa" : null)
         void updateView(null)
       }
     })
@@ -1211,8 +1226,8 @@ export function renderFilesView(container: HTMLElement): void {
        * klar, in welcher Art gearbeitet wird. Den Ordnernamen gibt es hier
        * noch nicht, der Hinweis steht im Leerzustand darunter.
        */
-      folderNameDisplay.innerHTML = currentStorageType === 'fsa' ?
-        '<span class="breadcrumb-current">💻 PWA Islands</span>' : ''
+      folderNameDisplay.innerHTML =
+        currentStorageType === "fsa" ? '<span class="breadcrumb-current">💻 PWA Islands</span>' : ""
 
       folderActions.innerHTML = renderSettingsMenu()
       bindSettingsActions(container)
@@ -1229,7 +1244,9 @@ export function renderFilesView(container: HTMLElement): void {
           </div>
         </div>
       `
-      container.querySelector<HTMLButtonElement>('#btn-select-folder-hero')?.addEventListener('click', handleSelectFolder)
+      container
+        .querySelector<HTMLButtonElement>("#btn-select-folder-hero")
+        ?.addEventListener("click", handleSelectFolder)
 
       setupSettingsMenu(container)
       ensureStorageTypeKnown()
@@ -1259,9 +1276,15 @@ export function renderFilesView(container: HTMLElement): void {
       ${renderSettingsMenu()}
     `
 
-    container.querySelector<HTMLButtonElement>('#btn-new-file')?.addEventListener('click', handleCreateFile)
-    container.querySelector<HTMLButtonElement>('#btn-new-folder')?.addEventListener('click', handleCreateFolder)
-    container.querySelector<HTMLButtonElement>('#btn-import-file')?.addEventListener('click', handleImportFiles)
+    container
+      .querySelector<HTMLButtonElement>("#btn-new-file")
+      ?.addEventListener("click", handleCreateFile)
+    container
+      .querySelector<HTMLButtonElement>("#btn-new-folder")
+      ?.addEventListener("click", handleCreateFolder)
+    container
+      .querySelector<HTMLButtonElement>("#btn-import-file")
+      ?.addEventListener("click", handleImportFiles)
 
     bindSettingsActions(container)
     setupSettingsMenu(container)
@@ -1274,20 +1297,20 @@ export function renderFilesView(container: HTMLElement): void {
    * schließt bei Klick außerhalb und bei Escape.
    */
   function setupSettingsMenu(scope: HTMLElement) {
-    const menu = scope.querySelector<HTMLDivElement>('#settings-menu')
-    const toggle = scope.querySelector<HTMLButtonElement>('#btn-settings')
-    const list = scope.querySelector<HTMLDivElement>('#settings-menu-list')
+    const menu = scope.querySelector<HTMLDivElement>("#settings-menu")
+    const toggle = scope.querySelector<HTMLButtonElement>("#btn-settings")
+    const list = scope.querySelector<HTMLDivElement>("#settings-menu-list")
     if (!menu || !toggle || !list) return
 
     const setOpen = (open: boolean) => {
       list.hidden = !open
-      toggle.setAttribute('aria-expanded', String(open))
-      menu.classList.toggle('is-open', open)
+      toggle.setAttribute("aria-expanded", String(open))
+      menu.classList.toggle("is-open", open)
     }
 
-    toggle.addEventListener('click', (e) => {
+    toggle.addEventListener("click", (e) => {
       e.stopPropagation()
-      setOpen(!menu.classList.contains('is-open'))
+      setOpen(!menu.classList.contains("is-open"))
     })
 
     // Klick außerhalb schließt das Menü.
@@ -1295,17 +1318,17 @@ export function renderFilesView(container: HTMLElement): void {
       if (!menu.contains(e.target as Node)) closeSettingsMenu()
     }
     const onKeydown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') closeSettingsMenu()
+      if (e.key === "Escape") closeSettingsMenu()
     }
 
     settingsMenuCleanup = () => {
-      document.removeEventListener('click', onDocumentClick)
-      document.removeEventListener('keydown', onKeydown)
+      document.removeEventListener("click", onDocumentClick)
+      document.removeEventListener("keydown", onKeydown)
       setOpen(false)
     }
 
-    document.addEventListener('click', onDocumentClick)
-    document.addEventListener('keydown', onKeydown)
+    document.addEventListener("click", onDocumentClick)
+    document.addEventListener("keydown", onKeydown)
   }
 
   function closeSettingsMenu() {
@@ -1321,7 +1344,11 @@ export function renderFilesView(container: HTMLElement): void {
   function updateBreadcrumbs() {
     const storage = currentStorage
     folderNameDisplay.innerHTML =
-      storage instanceof FileSystemHandleStorage ? buildBreadcrumbs(storage) : storage ? escapeHtml(storage.name) : ''
+      storage instanceof FileSystemHandleStorage
+        ? buildBreadcrumbs(storage)
+        : storage
+          ? escapeHtml(storage.name)
+          : ""
 
     // Der Pfad darf horizontal scrollen -- der aktuelle Ordner muss aber ohne
     // Zutun sichtbar sein, deshalb ans rechte Ende springen.
@@ -1329,9 +1356,9 @@ export function renderFilesView(container: HTMLElement): void {
 
     // Klick-Handler nach jedem Neuaufbau erneut binden -- die Buttons werden
     // komplett ersetzt, bestehende Listener verschwinden mit ihnen.
-    folderNameDisplay.querySelectorAll<HTMLButtonElement>('.breadcrumb-item').forEach((crumb) => {
-      crumb.addEventListener('click', () => {
-        void navigateToSegment(crumb.dataset.segment ?? '')
+    folderNameDisplay.querySelectorAll<HTMLButtonElement>(".breadcrumb-item").forEach((crumb) => {
+      crumb.addEventListener("click", () => {
+        void navigateToSegment(crumb.dataset.segment ?? "")
       })
     })
   }
@@ -1353,7 +1380,10 @@ export function renderFilesView(container: HTMLElement): void {
         // unter /<ordner>/<name> geladen werden.
         const path = relativePathOf(currentStorage!, name)
         window.location.assign(
-          `/${path.split('/').map((segment) => encodeURIComponent(segment)).join('/')}`
+          `/${path
+            .split("/")
+            .map((segment) => encodeURIComponent(segment))
+            .join("/")}`,
         )
       },
       onRequestOpenFolder: (name) => {
@@ -1370,10 +1400,10 @@ export function renderFilesView(container: HTMLElement): void {
 
     try {
       if (!(await storage.ensureWritePermission())) {
-        console.warn('Kein Schreibzugriff auf den Ordner; Inhalt wird nur gelesen.')
+        console.warn("Kein Schreibzugriff auf den Ordner; Inhalt wird nur gelesen.")
       }
     } catch (err) {
-      console.error('Fehler bei der Berechtigungsprüfung:', err)
+      console.error("Fehler bei der Berechtigungsprüfung:", err)
     }
 
     try {
@@ -1381,7 +1411,9 @@ export function renderFilesView(container: HTMLElement): void {
       currentStorage = next
       await refreshCurrentList()
     } catch (err: unknown) {
-      alert(`Ordner "${name}" konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`)
+      alert(
+        `Ordner "${name}" konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
@@ -1398,7 +1430,7 @@ export function renderFilesView(container: HTMLElement): void {
 
     try {
       let handle = storage.rootHandle
-      for (const segment of targetPath ? targetPath.split('/') : []) {
+      for (const segment of targetPath ? targetPath.split("/") : []) {
         handle = await handle.getDirectoryHandle(segment)
       }
       currentStorage = new FileSystemHandleStorage(
@@ -1407,11 +1439,13 @@ export function renderFilesView(container: HTMLElement): void {
         storage.isFallback,
         targetPath,
         storage.rootName,
-        storage.rootHandle
+        storage.rootHandle,
       )
       await refreshCurrentList()
     } catch (err: unknown) {
-      alert(`Ordner konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`)
+      alert(
+        `Ordner konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
@@ -1419,10 +1453,10 @@ export function renderFilesView(container: HTMLElement): void {
     if (!currentStorage) return
     const storage = currentStorage
     openEditorModal({
-      kind: 'file',
-      mode: 'create',
+      kind: "file",
+      mode: "create",
       onSave: async (fileName, content) => {
-        await storage.createFile(fileName, content instanceof Blob ? content : (content ?? ''))
+        await storage.createFile(fileName, content instanceof Blob ? content : (content ?? ""))
         await refreshCurrentList()
       },
     })
@@ -1432,8 +1466,8 @@ export function renderFilesView(container: HTMLElement): void {
     if (!currentStorage) return
     const storage = currentStorage
     openEditorModal({
-      kind: 'folder',
-      mode: 'create',
+      kind: "folder",
+      mode: "create",
       onSave: async (folderName) => {
         await storage.createDirectory(folderName)
         await refreshCurrentList()
@@ -1446,17 +1480,17 @@ export function renderFilesView(container: HTMLElement): void {
    * Inhalt im Feld steht; das Umbenennen ist in beiden Fällen möglich. Der
    * Löschen-Button ruft dieselbe Logik wie bisher die Aktionsspalte auf.
    */
-  async function handleEditEntry(name: string, kind: 'file' | 'directory') {
+  async function handleEditEntry(name: string, kind: "file" | "directory") {
     if (!currentStorage) return
     const storage = currentStorage
 
     const removeEntry = async () => {
       try {
         if (!(await storage.ensureWritePermission())) {
-          throw new Error('Schreibzugriff erforderlich.')
+          throw new Error("Schreibzugriff erforderlich.")
         }
       } catch (err) {
-        console.error('Fehler bei der Berechtigungsprüfung:', err)
+        console.error("Fehler bei der Berechtigungsprüfung:", err)
       }
       await storage.deleteEntry(name)
       await refreshCurrentList()
@@ -1465,12 +1499,18 @@ export function renderFilesView(container: HTMLElement): void {
     const saveEntry = async (newName: string, content: string | Blob | null) => {
       if (newName !== name) await storage.renameEntry(name, newName)
       // content === null bedeutet: Binaerdatei, Inhalt bleibt unveraendert.
-      if (kind === 'file' && content !== null) await storage.writeFile(newName, content)
+      if (kind === "file" && content !== null) await storage.writeFile(newName, content)
       await refreshCurrentList()
     }
 
-    if (kind === 'directory') {
-      openEditorModal({ kind: 'folder', mode: 'edit', name, onSave: saveEntry, onDelete: removeEntry })
+    if (kind === "directory") {
+      openEditorModal({
+        kind: "folder",
+        mode: "edit",
+        name,
+        onSave: saveEntry,
+        onDelete: removeEntry,
+      })
       return
     }
 
@@ -1483,8 +1523,8 @@ export function renderFilesView(container: HTMLElement): void {
           ? await storage.readFileBlob(name)
           : null
         openEditorModal({
-          kind: 'file',
-          mode: 'edit',
+          kind: "file",
+          mode: "edit",
           name,
           contentLocked: true,
           preview: tooLargeBlob ? buildImagePreview(tooLargeBlob) : undefined,
@@ -1497,23 +1537,29 @@ export function renderFilesView(container: HTMLElement): void {
       const blob = await storage.readFileBlob(name)
       const editable = await isEditableTextFile(blob, name)
       openEditorModal({
-        kind: 'file',
-        mode: 'edit',
+        kind: "file",
+        mode: "edit",
         name,
         // Nur Textdateien werden dekodiert; bei Binaerdateien waere die
         // Textdarstellung verlustbehaftet und ein Speichern wuerde die Datei
         // zerstoeren.
-        initialContent: editable ? await blob.text() : '',
+        initialContent: editable ? await blob.text() : "",
         contentLocked: !editable,
-        preview: !editable && IMAGE_EXTENSIONS.has(getExtension(name)) ? buildImagePreview(blob) : undefined,
+        preview:
+          !editable && IMAGE_EXTENSIONS.has(getExtension(name))
+            ? buildImagePreview(blob)
+            : undefined,
         // Bis zur Groessengrenze laesst sich jede Datei als Base64 bearbeiten.
         base64Editable: !editable && blob.size <= MAX_EDITABLE_TEXT_BYTES,
-        base64: !editable && blob.size <= MAX_EDITABLE_TEXT_BYTES ? await blobToBase64(blob) : undefined,
+        base64:
+          !editable && blob.size <= MAX_EDITABLE_TEXT_BYTES ? await blobToBase64(blob) : undefined,
         onSave: saveEntry,
         onDelete: removeEntry,
       })
     } catch (err: unknown) {
-      alert(`Datei "${name}" konnte nicht gelesen werden: ${err instanceof Error ? err.message : String(err)}`)
+      alert(
+        `Datei "${name}" konnte nicht gelesen werden: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
@@ -1522,14 +1568,14 @@ export function renderFilesView(container: HTMLElement): void {
 
     try {
       if (!(await currentStorage.ensureWritePermission())) {
-        alert('Schreibzugriff erforderlich, um Dateien zu importieren.')
+        alert("Schreibzugriff erforderlich, um Dateien zu importieren.")
         return
       }
     } catch (err) {
-      console.error('Fehler bei der Berechtigungsprüfung:', err)
+      console.error("Fehler bei der Berechtigungsprüfung:", err)
     }
 
-    fileImportInput.value = ''
+    fileImportInput.value = ""
     fileImportInput.onchange = async () => {
       if (!fileImportInput.files || fileImportInput.files.length === 0 || !currentStorage) return
       const storage = currentStorage
@@ -1538,12 +1584,12 @@ export function renderFilesView(container: HTMLElement): void {
       let skipped = 0
       // Merkt sich die Antwort des ersten Konflikts und wendet sie auf alle
       // weiteren an -- sonst waere der Hinweis im Dialog gelogen.
-      let applyToAll: 'replace' | 'rename' | 'skip' | null = null
+      let applyToAll: "replace" | "rename" | "skip" | null = null
 
       try {
         for (let index = 0; index < files.length; index++) {
           const file = files[index]
-          let decision: 'replace' | 'rename' | 'skip' = 'rename'
+          let decision: "replace" | "rename" | "skip" = "rename"
           const collision = await storage.hasEntry(file.name)
 
           if (collision) {
@@ -1557,16 +1603,16 @@ export function renderFilesView(container: HTMLElement): void {
               }
             }
 
-            if (decision === 'skip') {
+            if (decision === "skip") {
               skipped++
               continue
             }
           }
 
           const targetName =
-            decision === 'replace' ? file.name : await findFreeName(storage, file.name)
+            decision === "replace" ? file.name : await findFreeName(storage, file.name)
 
-          if (decision === 'replace') {
+          if (decision === "replace") {
             await storage.writeFile(targetName, file)
           } else {
             await storage.createFile(targetName, file)
@@ -1577,13 +1623,13 @@ export function renderFilesView(container: HTMLElement): void {
         await refreshCurrentList()
 
         if (skipped > 0) {
-          alert(
-            `${imported} Datei(en) importiert, ${skipped} übersprungen.`
-          )
+          alert(`${imported} Datei(en) importiert, ${skipped} übersprungen.`)
         }
       } catch (err: unknown) {
         await refreshCurrentList()
-        alert(`Dateien konnten nicht importiert werden: ${err instanceof Error ? err.message : String(err)}`)
+        alert(
+          `Dateien konnten nicht importiert werden: ${err instanceof Error ? err.message : String(err)}`,
+        )
       }
     }
     fileImportInput.click()
@@ -1596,12 +1642,12 @@ export function renderFilesView(container: HTMLElement): void {
    * Öffnen eines Ordners oder ein Neuladen soll die Wahl nicht ändern.
    * Fehler werden nur geloggt, damit sie den Aufbau der Ansicht nicht stoppen.
    */
-  async function persistStorageChoice(type: 'fsa' | 'opfs') {
+  async function persistStorageChoice(type: "fsa" | "opfs") {
     currentStorageType = type
     try {
       await storeStorageType(type)
     } catch (err) {
-      console.warn('Speicherart konnte nicht gespeichert werden:', err)
+      console.warn("Speicherart konnte nicht gespeichert werden:", err)
     }
   }
 
@@ -1612,29 +1658,29 @@ export function renderFilesView(container: HTMLElement): void {
           await handleUseOPFS()
           return
         }
-        alert('Die File System Access API wird von diesem Browser nicht unterstützt.')
+        alert("Die File System Access API wird von diesem Browser nicht unterstützt.")
         return
       }
 
       // showDirectoryPicker erzeugt die User Gesture automatisch
       const handle = await window.showDirectoryPicker({
-        mode: 'readwrite',
+        mode: "readwrite",
       })
 
       // Speicherart ZUERST schreiben: das Ablegen eines FileSystemDirectoryHandle
       // kann fehlschlagen (DataCloneError). Dann soll die Wahl trotzdem stehen.
-      await persistStorageChoice('fsa')
+      await persistStorageChoice("fsa")
       await storeDirectoryHandle(handle)
-      const storage = new FileSystemHandleStorage(handle, 'fsa', false)
+      const storage = new FileSystemHandleStorage(handle, "fsa", false)
       await updateView(storage)
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (err instanceof DOMException && err.name === "AbortError") {
         return
       }
-      console.error('Fehler bei der Ordnerauswahl:', err)
+      console.error("Fehler bei der Ordnerauswahl:", err)
       alertArea.innerHTML = `
         <div class="alert alert-danger">
-          <strong>Auswahlfehler:</strong> ${err instanceof Error ? err.message : 'Ordner konnte nicht ausgewählt werden'}
+          <strong>Auswahlfehler:</strong> ${err instanceof Error ? err.message : "Ordner konnte nicht ausgewählt werden"}
         </div>
       `
     }
@@ -1647,7 +1693,7 @@ export function renderFilesView(container: HTMLElement): void {
    * Aufgerufen aus dem Zahnrad-Menü (`buildSettingsActions`).
    */
   async function handleSwitchToLocalFolder() {
-    await persistStorageChoice('fsa')
+    await persistStorageChoice("fsa")
     // Init ohne die gespeicherte Wahl auszulesen: der lokale Ordner soll
     // Vorrang haben, auch wenn in der Datenbank noch 'opfs' stehen sollte.
     await initStorage(true)
@@ -1656,11 +1702,11 @@ export function renderFilesView(container: HTMLElement): void {
   async function handleUseOPFS() {
     const opfsHandle = await getOPFSDirectoryHandle()
     if (opfsHandle) {
-      await persistStorageChoice('opfs')
-      const storage = new FileSystemHandleStorage(opfsHandle, 'opfs', isFallbackToOPFS)
+      await persistStorageChoice("opfs")
+      const storage = new FileSystemHandleStorage(opfsHandle, "opfs", isFallbackToOPFS)
       await updateView(storage)
     } else {
-      alert('Zugriff auf das Origin Private File System fehlgeschlagen.')
+      alert("Zugriff auf das Origin Private File System fehlgeschlagen.")
     }
   }
 
@@ -1672,7 +1718,7 @@ export function renderFilesView(container: HTMLElement): void {
      * verfuegbar). Mit `null` wuerde das Zahnrad beide Wechsel gleichzeitig
      * anbieten -- es gaebe also zwei Wege zum selben Ziel.
      */
-    currentStorageType = hasDirectoryPicker ? 'fsa' : null
+    currentStorageType = hasDirectoryPicker ? "fsa" : null
     await updateView(null)
   }
 
@@ -1701,24 +1747,26 @@ export function renderFilesView(container: HTMLElement): void {
       try {
         if (storedHandle.requestPermission) {
           // WICHTIG: Erster Aufruf in diesem Click-Handler (keine IDB-Ladezeiten dazwischen!)
-          const permission = await storedHandle.requestPermission({ mode: 'readwrite' })
+          const permission = await storedHandle.requestPermission({ mode: "readwrite" })
 
-          if (permission === 'granted') {
+          if (permission === "granted") {
             // Der Nutzer hat den Zugriff gerade bestätigt -- das ist eine
             // bewusste Wahl der lokalen Speicherart.
-            await persistStorageChoice('fsa')
-            const storage = new FileSystemHandleStorage(storedHandle, 'fsa', false)
+            await persistStorageChoice("fsa")
+            const storage = new FileSystemHandleStorage(storedHandle, "fsa", false)
             await updateView(storage)
           } else {
-            alert('Zugriff verweigert.')
+            alert("Zugriff verweigert.")
           }
         }
       } catch (err) {
-        console.error('requestPermission Fehler:', err)
+        console.error("requestPermission Fehler:", err)
       }
     }
 
-    container.querySelector<HTMLButtonElement>('#btn-grant-permission-hero')?.addEventListener('click', handleUserClickToUnlock)
+    container
+      .querySelector<HTMLButtonElement>("#btn-grant-permission-hero")
+      ?.addEventListener("click", handleUserClickToUnlock)
 
     bindSettingsActions(container)
     setupSettingsMenu(container)
@@ -1733,7 +1781,7 @@ export function renderFilesView(container: HTMLElement): void {
     }
 
     // Die gespeicherte Wahl, falls ueberhaupt eine vorliegt.
-    let storedType: 'fsa' | 'opfs' | null = null
+    let storedType: "fsa" | "opfs" | null = null
 
     try {
       // Wenn OPFS zuvor ausdruecklich gewaehlt wurde, diese Wahl beibehalten.
@@ -1742,12 +1790,12 @@ export function renderFilesView(container: HTMLElement): void {
       if (!forceLocal) {
         storedType = await getStoredStorageType()
         currentStorageType = storedType
-        if (storedType === 'opfs' && hasOPFS) {
+        if (storedType === "opfs" && hasOPFS) {
           await handleUseOPFS()
           return
         }
       } else {
-        currentStorageType = 'fsa'
+        currentStorageType = "fsa"
       }
 
       // Async-Ladevorgang (Datenbank) isolieren von requestPermission
@@ -1759,25 +1807,25 @@ export function renderFilesView(container: HTMLElement): void {
          * -- die Wahl entsteht erst durch einen aktiven Wechsel bzw. das
          * Auswaehlen eines Ordners.
          */
-        currentStorageType = forceLocal ? 'fsa' : storedType
-        if (!currentStorageType && hasDirectoryPicker) currentStorageType = 'fsa'
+        currentStorageType = forceLocal ? "fsa" : storedType
+        if (!currentStorageType && hasDirectoryPicker) currentStorageType = "fsa"
         await updateView(null)
         return
       }
-      let permission: PermissionState = 'prompt'
+      let permission: PermissionState = "prompt"
       if (storedHandle.queryPermission) {
         try {
-          permission = await storedHandle.queryPermission({ mode: 'readwrite' })
+          permission = await storedHandle.queryPermission({ mode: "readwrite" })
         } catch (err) {
-          console.warn('queryPermission fehlgeschlagen:', err)
+          console.warn("queryPermission fehlgeschlagen:", err)
         }
       }
 
       // Ab hier steht fest, dass der lokale Ordner verwendet wird.
-      if (permission === 'granted') {
-        currentStorageType = 'fsa'
+      if (permission === "granted") {
+        currentStorageType = "fsa"
         // Perfekt, Browser/Android hat es sich (im Hintergrund) gemerkt
-        const storage = new FileSystemHandleStorage(storedHandle, 'fsa', false)
+        const storage = new FileSystemHandleStorage(storedHandle, "fsa", false)
         await updateView(storage)
       } else {
         // WICHTIG: Jetzt NICHT sofort requestPermission() aufrufen!
@@ -1785,7 +1833,7 @@ export function renderFilesView(container: HTMLElement): void {
         showReopenButtonUI(storedHandle)
       }
     } catch (err) {
-      console.error('Fehler beim Initialisieren des gespeicherten Ordners:', err)
+      console.error("Fehler beim Initialisieren des gespeicherten Ordners:", err)
       await updateView(null)
     }
   }

@@ -20,21 +20,19 @@
  *   </script>
  */
 
-import {
-  findActiveStorage,
-  normalizePath,
-  splitPath,
-  getDirectory,
-} from './storage.ts'
-import type { IslandEntry, IslandsApi } from './api-types.ts'
+import { findActiveStorage, normalizePath, splitPath, getDirectory } from "./storage.ts"
+import type { IslandEntry, IslandsApi } from "./api-types.ts"
 
-export type { IslandEntry, IslandInput, IslandsApi, WriteOptions, RemoveOptions } from './api-types.ts'
+export type {
+  IslandEntry,
+  IslandInput,
+  IslandsApi,
+  WriteOptions,
+  RemoveOptions,
+} from "./api-types.ts"
 
 /** Liest eine Datei-Handle über die aktive Speicher-Wurzel auf. */
-async function resolveFile(
-  path: string,
-  createParents = false
-): Promise<FileSystemFileHandle> {
+async function resolveFile(path: string, createParents = false): Promise<FileSystemFileHandle> {
   const root = await requireRoot()
   const { dirs, name } = splitEntryPath(path)
   const dir = createParents ? await getDirectory(root, dirs, true) : await getDirectory(root, dirs)
@@ -42,10 +40,7 @@ async function resolveFile(
 }
 
 /** Liest eine Verzeichnis-Handle über die aktive Speicher-Wurzel auf. */
-async function resolveDirectory(
-  path: string,
-  create = false
-): Promise<FileSystemDirectoryHandle> {
+async function resolveDirectory(path: string, create = false): Promise<FileSystemDirectoryHandle> {
   const root = await requireRoot()
   const dirs = splitPath(normalizePath(path))
   return getDirectory(root, dirs, create)
@@ -54,7 +49,7 @@ async function resolveDirectory(
 async function requireRoot(): Promise<FileSystemDirectoryHandle> {
   const root = await findActiveStorage()
   if (!root) {
-    throw new Error('Kein Speicher ausgewählt. Bitte zuerst einen Ordner auswählen.')
+    throw new Error("Kein Speicher ausgewählt. Bitte zuerst einen Ordner auswählen.")
   }
   return root
 }
@@ -63,19 +58,19 @@ function splitEntryPath(path: string): { dirs: string[]; name: string } {
   const parts = splitPath(normalizePath(path))
   const name = parts.pop()
   if (!name) {
-    throw new Error('Ungültiger Pfad: Datei- oder Ordnername fehlt.')
+    throw new Error("Ungültiger Pfad: Datei- oder Ordnername fehlt.")
   }
   return { dirs: parts, name }
 }
 
 const api: IslandsApi = {
-  async list(path = '') {
+  async list(path = "") {
     const dir = await resolveDirectory(path)
     const entries: IslandEntry[] = []
 
     for await (const entry of dir.values()) {
       const entryPath = path ? `${normalizePath(path)}/${entry.name}` : entry.name
-      if (entry.kind === 'file') {
+      if (entry.kind === "file") {
         let size: number | undefined
         let lastModified: number | undefined
         try {
@@ -85,15 +80,15 @@ const api: IslandsApi = {
         } catch {
           // Größe/Änderungsdatum nicht ermittelbar – Eintrag trotzdem liefern.
         }
-        entries.push({ name: entry.name, path: entryPath, kind: 'file', size, lastModified })
+        entries.push({ name: entry.name, path: entryPath, kind: "file", size, lastModified })
       } else {
-        entries.push({ name: entry.name, path: entryPath, kind: 'directory' })
+        entries.push({ name: entry.name, path: entryPath, kind: "directory" })
       }
     }
 
     entries.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1
-      return a.name.localeCompare(b.name, 'de', { sensitivity: 'base', numeric: true })
+      if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1
+      return a.name.localeCompare(b.name, "de", { sensitivity: "base", numeric: true })
     })
 
     return entries
@@ -134,7 +129,7 @@ const api: IslandsApi = {
       await writable.write(
         content instanceof Uint8Array || content instanceof ArrayBuffer
           ? new Blob([content as BlobPart])
-          : content
+          : content,
       )
     } finally {
       await writable.close()
@@ -162,14 +157,14 @@ const api: IslandsApi = {
     const source = await resolveDirectory(from).catch(() => null)
     if (source) {
       const { dirs: toDirs, name: toName } = splitEntryPath(to)
-      const target = await resolveDirectory(toDirs.join('/'), true)
+      const target = await resolveDirectory(toDirs.join("/"), true)
       await copyDirectory(source, target, toName)
       return
     }
 
     const file = await resolveFile(from)
     const { dirs: toDirs, name: toName } = splitEntryPath(to)
-    const target = await resolveDirectory(toDirs.join('/'), true)
+    const target = await resolveDirectory(toDirs.join("/"), true)
     const blob = await file.getFile()
     const dest = await target.getFileHandle(toName, { create: true })
     const writable = await dest.createWritable()
@@ -185,11 +180,11 @@ const api: IslandsApi = {
 async function copyDirectory(
   source: FileSystemDirectoryHandle,
   target: FileSystemDirectoryHandle,
-  name: string
+  name: string,
 ): Promise<void> {
   const destDir = await target.getDirectoryHandle(name, { create: true })
   for await (const entry of source.values()) {
-    if (entry.kind === 'file') {
+    if (entry.kind === "file") {
       const blob = await entry.getFile()
       const fileHandle = await destDir.getFileHandle(entry.name, { create: true })
       const writable = await fileHandle.createWritable()

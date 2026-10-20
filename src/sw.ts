@@ -1,8 +1,12 @@
 /// <reference lib="webworker" />
-import { precacheAndRoute, cleanupOutdatedCaches, createHandlerBoundToURL } from 'workbox-precaching'
-import { clientsClaim } from 'workbox-core'
-import { registerRoute } from 'workbox-routing'
-import { findSavedFile, getMimeType } from './storage.ts'
+import {
+  precacheAndRoute,
+  cleanupOutdatedCaches,
+  createHandlerBoundToURL,
+} from "workbox-precaching"
+import { clientsClaim } from "workbox-core"
+import { registerRoute } from "workbox-routing"
+import { findSavedFile, getMimeType } from "./storage.ts"
 
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>
@@ -35,12 +39,12 @@ cleanupOutdatedCaches()
 // Precaching-Manifest leer, dann wirft createHandlerBoundToURL('index.html')
 // einen non-precached-url-Fehler und die SW-Evaluation schlägt fehl.
 registerRoute(
-  ({ request, sameOrigin }) => sameOrigin && request.mode === 'navigate',
+  ({ request, sameOrigin }) => sameOrigin && request.mode === "navigate",
   async ({ request, url, event }) => {
     // Mit ?pwaislands wird immer die App-Shell ausgeliefert – auch wenn unter
     // dem Pfad eine gespeicherte Datei liegt. Damit lässt sich eine Island
     // aufrufen und bearbeiten, statt sie zu rendern.
-    if (url.searchParams.has('pwaislands')) {
+    if (url.searchParams.has("pwaislands")) {
       return appShell(request, url, event)
     }
 
@@ -55,20 +59,20 @@ registerRoute(
         return new Response(file, {
           status: 200,
           headers: {
-            'Content-Type': mimeType,
-            'Content-Length': file.size.toString(),
-            'Cache-Control': 'no-cache',
+            "Content-Type": mimeType,
+            "Content-Length": file.size.toString(),
+            "Cache-Control": "no-cache",
           },
         })
       }
     } catch (err) {
-      console.error('SW: Fehler beim Laden der Datei:', err)
+      console.error("SW: Fehler beim Laden der Datei:", err)
     }
 
     // Datei nicht gefunden: App-Shell ausliefern, damit die App eine deutsche
     // 404-/„Ordner wählen"-Meldung zeigen kann.
     return appShell(request, url, event)
-  }
+  },
 )
 
 // Sub-Ressourcen gespeicherter Dateien (nicht-navigationale Requests, z. B. CSS,
@@ -78,11 +82,11 @@ registerRoute(
 registerRoute(
   ({ request, url, sameOrigin }) =>
     sameOrigin &&
-    url.pathname !== '/' &&
+    url.pathname !== "/" &&
     !isInternalPath(url.pathname) &&
-    request.mode !== 'navigate',
+    request.mode !== "navigate",
   async ({ request, url }) => {
-    const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ''))
+    const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ""))
     try {
       const file = relativePath ? await findSavedFile(relativePath) : null
       if (file) {
@@ -90,18 +94,18 @@ registerRoute(
         return new Response(file, {
           status: 200,
           headers: {
-            'Content-Type': mimeType,
-            'Content-Length': file.size.toString(),
-            'Cache-Control': 'no-cache',
+            "Content-Type": mimeType,
+            "Content-Length": file.size.toString(),
+            "Cache-Control": "no-cache",
           },
         })
       }
     } catch (err) {
-      console.error('SW: Fehler beim Laden der Datei:', err)
+      console.error("SW: Fehler beim Laden der Datei:", err)
     }
 
     return fetch(request)
-  }
+  },
 )
 
 // Catch-all für alle übrigen Navigationen (z. B. /irgendwas).
@@ -109,8 +113,8 @@ registerRoute(
 // Muss NACH den Datei-Routen registriert sein, greift aber ohnehin nur für
 // nicht bereits erfasste Navigationen.
 registerRoute(
-  ({ request }) => request.mode === 'navigate',
-  ({ request, url, event }) => appShell(request, url, event)
+  ({ request }) => request.mode === "navigate",
+  ({ request, url, event }) => appShell(request, url, event),
 )
 
 /**
@@ -127,10 +131,10 @@ registerRoute(
  */
 function resolveRequestPath(pathname: string): string {
   const decoded = decodeURIComponent(pathname)
-  const trimmed = decoded.replace(/^\/+|\/+$/g, '')
-  if (!trimmed) return 'index.html'
-  const lastSegment = trimmed.slice(trimmed.lastIndexOf('/') + 1)
-  if (lastSegment.includes('.')) return trimmed
+  const trimmed = decoded.replace(/^\/+|\/+$/g, "")
+  if (!trimmed) return "index.html"
+  const lastSegment = trimmed.slice(trimmed.lastIndexOf("/") + 1)
+  if (lastSegment.includes(".")) return trimmed
 
   return `${trimmed}/index.html`
 }
@@ -147,12 +151,12 @@ function resolveRequestPath(pathname: string): string {
 function isInternalPath(pathname: string): boolean {
   // Immer ausgenommen: Dateien der App selbst.
   if (
-    pathname === '/api.js' ||
-    pathname === '/api.d.ts' ||
-    pathname.startsWith('/assets/') ||
-    pathname.startsWith('/manifest.webmanifest') ||
-    pathname === '/sw.js' ||
-    pathname === '/registerSW.js'
+    pathname === "/api.js" ||
+    pathname === "/api.d.ts" ||
+    pathname.startsWith("/assets/") ||
+    pathname.startsWith("/manifest.webmanifest") ||
+    pathname === "/sw.js" ||
+    pathname === "/registerSW.js"
   ) {
     return true
   }
@@ -160,34 +164,30 @@ function isInternalPath(pathname: string): boolean {
   // Nur im Entwicklungsmodus vorhanden (Vite-Modulgraph).
   if (import.meta.env.DEV) {
     return (
-      pathname.startsWith('/src/') ||
-      pathname.startsWith('/@vite/') ||
-      pathname.startsWith('/@fs/') ||
-      pathname.startsWith('/@id/') ||
-      pathname.startsWith('/node_modules/') ||
-      pathname.startsWith('/dev-sw.js')
+      pathname.startsWith("/src/") ||
+      pathname.startsWith("/@vite/") ||
+      pathname.startsWith("/@fs/") ||
+      pathname.startsWith("/@id/") ||
+      pathname.startsWith("/node_modules/") ||
+      pathname.startsWith("/dev-sw.js")
     )
   }
 
   return false
 }
 
-async function appShell(
-  request: Request,
-  url: URL,
-  event: ExtendableEvent
-): Promise<Response> {
+async function appShell(request: Request, url: URL, event: ExtendableEvent): Promise<Response> {
   try {
-    const handler = createHandlerBoundToURL('index.html')
+    const handler = createHandlerBoundToURL("index.html")
     return await handler({ request, url, event, params: {} })
   } catch (err) {
-    console.error('SW: App-Shell konnte nicht geladen werden:', err)
+    console.error("SW: App-Shell konnte nicht geladen werden:", err)
     return fetch(request)
   }
 }
 
-self.addEventListener('message', (event) => {
-  if (event.data && event.data.type === 'SKIP_WAITING') {
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") {
     self.skipWaiting()
   }
 })

@@ -1,14 +1,14 @@
-export const DB_NAME = 'pwa-islands-db'
+export const DB_NAME = "pwa-islands-db"
 export const DB_VERSION = 1
-export const STORE_NAME = 'handles'
-export const HANDLE_KEY = 'selected_folder'
-export const STORAGE_TYPE_KEY = 'selected_storage_type'
+export const STORE_NAME = "handles"
+export const HANDLE_KEY = "selected_folder"
+export const STORAGE_TYPE_KEY = "selected_storage_type"
 /**
  * OPFS hat pro Origin nur EINE Wurzel -- eine zweite Wurzel laesst sich nicht
  * waehlen. Damit die App nicht direkt im Origin-Wurzelverzeichnis schreibt,
  * liegen alle Dateien in diesem Unterordner.
  */
-export const OPFS_APP_FOLDER = 'PWA Islands'
+export const OPFS_APP_FOLDER = "PWA Islands"
 
 export function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -30,7 +30,7 @@ export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHan
   try {
     const db = await openDB()
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
+      const tx = db.transaction(STORE_NAME, "readonly")
       const store = tx.objectStore(STORE_NAME)
       const req = store.get(HANDLE_KEY)
 
@@ -38,7 +38,7 @@ export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHan
       req.onerror = () => reject(req.error)
     })
   } catch (error) {
-    console.error('Fehler beim Abrufen des gespeicherten Ordners:', error)
+    console.error("Fehler beim Abrufen des gespeicherten Ordners:", error)
     return null
   }
 }
@@ -46,7 +46,7 @@ export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHan
 export async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const tx = db.transaction(STORE_NAME, "readwrite")
     const store = tx.objectStore(STORE_NAME)
     const req = store.put(handle, HANDLE_KEY)
 
@@ -58,7 +58,7 @@ export async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): P
 export async function clearStoredDirectoryHandle(): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const tx = db.transaction(STORE_NAME, "readwrite")
     const store = tx.objectStore(STORE_NAME)
     const req = store.delete(HANDLE_KEY)
 
@@ -68,28 +68,28 @@ export async function clearStoredDirectoryHandle(): Promise<void> {
 }
 
 /** Liest die zuletzt gewählte Speicherart ('fsa' oder 'opfs'). */
-export async function getStoredStorageType(): Promise<'fsa' | 'opfs' | null> {
+export async function getStoredStorageType(): Promise<"fsa" | "opfs" | null> {
   try {
     const db = await openDB()
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, 'readonly')
+      const tx = db.transaction(STORE_NAME, "readonly")
       const store = tx.objectStore(STORE_NAME)
       const req = store.get(STORAGE_TYPE_KEY)
 
-      req.onsuccess = () => resolve((req.result as 'fsa' | 'opfs') ?? null)
+      req.onsuccess = () => resolve((req.result as "fsa" | "opfs") ?? null)
       req.onerror = () => reject(req.error)
     })
   } catch (error) {
-    console.error('Fehler beim Abrufen der gespeicherten Speicherart:', error)
+    console.error("Fehler beim Abrufen der gespeicherten Speicherart:", error)
     return null
   }
 }
 
 /** Speichert die zuletzt gewählte Speicherart. */
-export async function storeStorageType(type: 'fsa' | 'opfs'): Promise<void> {
+export async function storeStorageType(type: "fsa" | "opfs"): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const tx = db.transaction(STORE_NAME, "readwrite")
     const store = tx.objectStore(STORE_NAME)
     const req = store.put(type, STORAGE_TYPE_KEY)
 
@@ -101,7 +101,7 @@ export async function storeStorageType(type: 'fsa' | 'opfs'): Promise<void> {
 export async function clearStoredStorageType(): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, 'readwrite')
+    const tx = db.transaction(STORE_NAME, "readwrite")
     const store = tx.objectStore(STORE_NAME)
     const req = store.delete(STORAGE_TYPE_KEY)
 
@@ -112,15 +112,15 @@ export async function clearStoredStorageType(): Promise<void> {
 
 export async function getOPFSDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
   if (
-    typeof navigator !== 'undefined' &&
-    'storage' in navigator &&
-    typeof navigator.storage.getDirectory === 'function'
+    typeof navigator !== "undefined" &&
+    "storage" in navigator &&
+    typeof navigator.storage.getDirectory === "function"
   ) {
     try {
       const root = await navigator.storage.getDirectory()
       return await root.getDirectoryHandle(OPFS_APP_FOLDER, { create: true })
     } catch (err) {
-      console.error('Fehler beim Abrufen des OPFS-Handles:', err)
+      console.error("Fehler beim Abrufen des OPFS-Handles:", err)
       return null
     }
   }
@@ -129,12 +129,12 @@ export async function getOPFSDirectoryHandle(): Promise<FileSystemDirectoryHandl
 
 export async function getFileFromDirectory(
   root: FileSystemDirectoryHandle,
-  relativePath: string
+  relativePath: string,
 ): Promise<File | null> {
-  const cleanPath = relativePath.replace(/^\/+|\/+$/g, '')
+  const cleanPath = relativePath.replace(/^\/+|\/+$/g, "")
   if (!cleanPath) return null
 
-  const parts = cleanPath.split('/').filter(Boolean)
+  const parts = cleanPath.split("/").filter(Boolean)
   if (parts.length === 0) return null
 
   // 1. Try walking nested directories
@@ -161,28 +161,28 @@ export async function getFileFromDirectory(
 }
 
 export async function findSavedFile(relativePath: string): Promise<File | null> {
-  const cleanPath = relativePath.replace(/^\/+|\/+$/g, '')
+  const cleanPath = relativePath.replace(/^\/+|\/+$/g, "")
   if (!cleanPath) return null
 
   // 1. Try FSA handle stored in IndexedDB
   try {
     const storedHandle = await getStoredDirectoryHandle()
     if (storedHandle) {
-      let perm: PermissionState = 'granted'
+      let perm: PermissionState = "granted"
       if (storedHandle.queryPermission) {
         try {
-          perm = await storedHandle.queryPermission({ mode: 'read' })
+          perm = await storedHandle.queryPermission({ mode: "read" })
         } catch {
-          perm = 'prompt'
+          perm = "prompt"
         }
       }
-      if (perm === 'granted') {
+      if (perm === "granted") {
         const file = await getFileFromDirectory(storedHandle, relativePath)
         if (file) return file
       }
     }
   } catch (err) {
-    console.warn('findSavedFile FSA Fehler:', err)
+    console.warn("findSavedFile FSA Fehler:", err)
   }
 
   // 2. Try OPFS
@@ -193,47 +193,47 @@ export async function findSavedFile(relativePath: string): Promise<File | null> 
       if (file) return file
     }
   } catch (err) {
-    console.warn('findSavedFile OPFS Fehler:', err)
+    console.warn("findSavedFile OPFS Fehler:", err)
   }
 
   return null
 }
 
 const MIME_TYPES: Record<string, string> = {
-  html: 'text/html; charset=utf-8',
-  htm: 'text/html; charset=utf-8',
-  js: 'text/javascript; charset=utf-8',
-  mjs: 'text/javascript; charset=utf-8',
-  ts: 'text/plain; charset=utf-8',
-  css: 'text/css; charset=utf-8',
-  json: 'application/json; charset=utf-8',
-  webmanifest: 'application/manifest+json; charset=utf-8',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  svg: 'image/svg+xml',
-  webp: 'image/webp',
-  avif: 'image/avif',
-  ico: 'image/x-icon',
-  txt: 'text/plain; charset=utf-8',
-  md: 'text/markdown; charset=utf-8',
-  wasm: 'application/wasm',
-  pdf: 'application/pdf',
-  mp3: 'audio/mpeg',
-  mp4: 'video/mp4',
-  wav: 'audio/wav',
-  ogg: 'audio/ogg',
-  zip: 'application/zip',
+  html: "text/html; charset=utf-8",
+  htm: "text/html; charset=utf-8",
+  js: "text/javascript; charset=utf-8",
+  mjs: "text/javascript; charset=utf-8",
+  ts: "text/plain; charset=utf-8",
+  css: "text/css; charset=utf-8",
+  json: "application/json; charset=utf-8",
+  webmanifest: "application/manifest+json; charset=utf-8",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  svg: "image/svg+xml",
+  webp: "image/webp",
+  avif: "image/avif",
+  ico: "image/x-icon",
+  txt: "text/plain; charset=utf-8",
+  md: "text/markdown; charset=utf-8",
+  wasm: "application/wasm",
+  pdf: "application/pdf",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  wav: "audio/wav",
+  ogg: "audio/ogg",
+  zip: "application/zip",
 }
 
 export function normalizePath(path: string): string {
-  return (path ?? '').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/')
+  return (path ?? "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/")
 }
 
 export function splitPath(path: string): string[] {
   const clean = normalizePath(path)
-  return clean ? clean.split('/').filter(Boolean) : []
+  return clean ? clean.split("/").filter(Boolean) : []
 }
 
 /**
@@ -245,24 +245,24 @@ export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | n
   try {
     const storedHandle = await getStoredDirectoryHandle()
     if (storedHandle) {
-      let perm: PermissionState = 'granted'
+      let perm: PermissionState = "granted"
       if (storedHandle.queryPermission) {
         try {
-          perm = await storedHandle.queryPermission({ mode: 'readwrite' })
+          perm = await storedHandle.queryPermission({ mode: "readwrite" })
         } catch {
-          perm = 'prompt'
+          perm = "prompt"
         }
       }
-      if (perm === 'granted') return storedHandle
+      if (perm === "granted") return storedHandle
     }
   } catch (err) {
-    console.warn('findActiveStorage FSA Fehler:', err)
+    console.warn("findActiveStorage FSA Fehler:", err)
   }
 
   try {
     return await getOPFSDirectoryHandle()
   } catch (err) {
-    console.warn('findActiveStorage OPFS Fehler:', err)
+    console.warn("findActiveStorage OPFS Fehler:", err)
     return null
   }
 }
@@ -274,7 +274,7 @@ export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | n
 export async function getDirectory(
   root: FileSystemDirectoryHandle,
   dirs: string[],
-  create = false
+  create = false,
 ): Promise<FileSystemDirectoryHandle> {
   let current = root
   for (const segment of dirs) {
@@ -284,12 +284,12 @@ export async function getDirectory(
 }
 
 export function getMimeType(filename: string, fallback?: string): string {
-  const dotIndex = filename.lastIndexOf('.')
+  const dotIndex = filename.lastIndexOf(".")
   if (dotIndex !== -1) {
     const ext = filename.slice(dotIndex + 1).toLowerCase()
     if (ext in MIME_TYPES) {
       return MIME_TYPES[ext]
     }
   }
-  return fallback && fallback.length > 0 ? fallback : 'application/octet-stream'
+  return fallback && fallback.length > 0 ? fallback : "application/octet-stream"
 }

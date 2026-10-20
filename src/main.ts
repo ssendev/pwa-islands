@@ -1,8 +1,8 @@
-import './style.css'
-import { initPWA } from './pwa.ts'
-import { renderFilesView } from './files.ts'
+import "./style.css"
+import { initPWA } from "./pwa.ts"
+import { renderFilesView } from "./files.ts"
 
-const app = document.querySelector<HTMLDivElement>('#app')!
+const app = document.querySelector<HTMLDivElement>("#app")!
 
 app.innerHTML = `
   <main id="router-view" class="router-view"></main>
@@ -26,7 +26,7 @@ app.innerHTML = `
   </div>
 `
 
-const routerView = app.querySelector<HTMLElement>('#router-view')!
+const routerView = app.querySelector<HTMLElement>("#router-view")!
 
 // Es gibt nur noch eine Ansicht: die Dateiverwaltung. Gespeicherte Dateien
 // liegen direkt unter /<name> und werden vom Service Worker ausgeliefert,
