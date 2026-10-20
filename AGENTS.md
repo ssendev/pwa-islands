@@ -17,4 +17,4 @@ aller UI text MUSS in Deutsch geschrieben werden
 
 # Islands-API
 
-die .html projekte können die öffentliche API für Islands verwenden. Sie ist in `src/api-types.ts` definiert und wird per `<script type="module" src="/api.js">` eingebunden.
+die .html projekte können die öffentliche API für Islands verwenden. Sie ist in `src/api-types.ts` definiert und wird mit `import islands from '/api.js'` eingebunden.

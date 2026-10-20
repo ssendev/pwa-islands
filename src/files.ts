@@ -8,6 +8,7 @@ import {
   clearStoredStorageType,
   getOPFSDirectoryHandle,
   ISLAND_PARAM,
+  OPFS_APP_FOLDER,
 } from "./storage.ts"
 import rootIconUrl from "./assets/pwa-islands.svg"
 
@@ -948,6 +949,380 @@ function openEditorModal(options: EditorModalOptions): void {
 }
 
 /**
+ * Zwischenspeicher fuer den Inhalt von `/api.d.ts`. In der Entwicklung wird die
+ * Datei beim ersten Abruf vom TypeScript-Compiler erzeugt, was spuerbar dauert;
+ * der zweite Klick soll sofort gehen.
+ */
+let apiDtsCache: string | null = null
+
+/** Liest `/api.d.ts` (die Typdatei der Islands-API), einmal pro Seitenaufruf. */
+async function readApiDts(): Promise<string> {
+  if (apiDtsCache !== null) return apiDtsCache
+  const response = await fetch("/api.d.ts", { cache: "no-cache" })
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  apiDtsCache = await response.text()
+  return apiDtsCache
+}
+
+/**
+ * Legt einen Text in die Zwischenablage. Liefert false, wenn der Browser es
+ * nicht erlaubt.
+ *
+ * `navigator.clipboard` fehlt in unsicheren Kontexten (z. B. http auf einer
+ * LAN-Adresse) und kann ohne Berechtigung ablehnen. Der Ruckfall ueber ein
+ * verstecktes Textfeld wirkt innerhalb der Klick-Geste und deckt diese Faelle
+ * ab -- ohne ihn waere der Kopier-Knopf des Hilfe-Fensters in genau den
+ * Browsern stumm, in denen die App sonst auch mit Rueckfallebenen arbeitet.
+ */
+async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // Weiter mit dem Rueckfall: Berechtigung verweigert oder kein Fokus.
+    }
+  }
+
+  try {
+    const textarea = document.createElement("textarea")
+    textarea.value = text
+    textarea.setAttribute("readonly", "")
+    textarea.style.position = "fixed"
+    textarea.style.opacity = "0"
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand("copy")
+    textarea.remove()
+    return copied
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Die Kapitel des Hilfe-Fensters. Bestimmen seinen Aufbau und die Adresse
+ * (`/foo?pwaislands=help-api`) -- so lassen sich einzelne Kapitel direkt
+ * verlinken, statt immer oben anfangen zu muessen.
+ */
+type HelpTopic = "api" | "fs"
+
+/** Welche der beiden Speicherarten der laufende Browser anbietet. */
+interface StorageSupport {
+  fsa: boolean
+  opfs: boolean
+}
+
+/** Titel, unter dem ein Kapitel im Tab und im Fenster steht. */
+const HELP_TOPIC_LABEL: Record<HelpTopic, string> = {
+  api: "PWA Islands bauen",
+  fs: "Speicher: FS API und OPFS",
+}
+
+/**
+ * Schreibt in die Zeile "In diesem Browser", ob die jeweilige Speicherart hier
+ * zur Verfuegung steht.
+ *
+ * Framebuster und aeltere Browser sperren einzelne Zellen: dann bleibt "…"
+ * stehen -- besser als eine falsche Auskunft.
+ */
+function fillSupportCells(root: HTMLElement, support: StorageSupport): void {
+  // Firefox und Safari liefern die Zellen ohne Unterstuetzung nicht aus --
+  // dieser Zweig ist die Absicherung gegen einen falsch aufgebauten Dialog.
+  for (const key of ["fsa", "opfs"] as const) {
+    const cell = root.querySelector<HTMLElement>(`td[data-support="${key}"]`)
+    if (!cell) continue
+    const available = support[key]
+    cell.dataset.supported = available ? "yes" : "no"
+    cell.innerHTML = `<span class="help-supported" data-supported="${available ? "yes" : "no"}">${
+      available ? "✅ verfügbar" : "❌ nicht verfügbar"
+    }</span>`
+  }
+}
+
+/**
+ * Öffnet das Hilfe-Fenster: eine kurze Anleitung, wie eine Island aufgebaut
+ * ist, und ein Knopf, der die Typdatei `/api.d.ts` in die Zwischenablage legt.
+ *
+ * `initialTopic` bestimmt, welches Kapitel aufgeklappt ist (und damit welche
+ * Adresse das Fenster hatte); `support` fuellt die Zeile "In diesem Browser".
+ *
+ * Bewusst eine eigene Funktion statt einer Erweiterung von `openEditorModal`:
+ * das Bearbeiten-Fenster haengt an einem Formular mit Pflichtfeld, Speichern-
+ * und Loeschen-Knopf. Ein Nur-Lese-Dialog wuerde dort nur Attrappen erzeugen.
+ * Geteilt werden die CSS-Klassen -- und `.modal-close-btn`, weil
+ * `closeOpenEditor` (Zurueck-Button) genau diesen Knopf klickt.
+ */
+function openHelpModal(
+  options: {
+    initialTopic?: HelpTopic
+    /**
+     * Welche Speicherarten dieser Browser anbietet. Bestimmt die Zeile
+     * "In diesem Browser" in der Vergleichstabelle.
+     */
+    support?: StorageSupport
+    onClose?: () => void
+    onTopicChange?: (topic: HelpTopic) => void
+  } = {},
+): void {
+  // Schon offen (z. B. zweiter Popstate auf dieselbe Adresse): nichts tun.
+  if (document.querySelector(".help-modal-overlay")) return
+  // Ein Bearbeiten-Fenster davor sauber schliessen, damit nicht zwei Overlays
+  // uebereinanderliegen und dessen `onClose` noch laeuft.
+  closeOpenEditor()
+
+  const modalOverlay = document.createElement("div")
+  modalOverlay.className = "modal-overlay help-modal-overlay"
+
+  modalOverlay.innerHTML = `
+    <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+      <header class="modal-header">
+        <h3 id="help-modal-title"><span class="help-title-icon" aria-hidden="true">❓</span> Hilfe</h3>
+        <button type="button" class="modal-close-btn" aria-label="Schließen">&times;</button>
+      </header>
+      <div class="modal-body">
+        <div class="help-accordion">
+          <!--
+            Zwei Themen in einem Akkordeon statt untereinander: die Anleitung
+            ist lang, und wer nur die Speicherarten nachlesen will, soll nicht
+            erst an der halben Seite vorbeiscrollen. Das erste Kapitel ist
+            offen, weil es der Einstieg fuer neue Islands ist.
+          -->
+          <details class="help-topic" data-topic="api" open>
+            <summary class="help-topic-summary">
+              <span class="help-topic-marker" aria-hidden="true">🧩</span>
+              <span class="help-topic-title">PWA Islands bauen</span>
+            </summary>
+            <div class="help-topic-body">
+              <div class="help-section">
+                <h4 class="help-heading">Was ist eine Island?</h4>
+                <p class="help-text">
+                  Eine Island ist eine einzelne HTML-Datei, die in dieser App liegt. Sie läuft im
+                  Browser wie eine kleine eigene App und kann über die Islands-API Dateien lesen,
+                  schreiben und löschen.
+                </p>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">So entsteht eine Island</h4>
+                <ol class="help-list">
+                  <li>Über <strong>+ Datei</strong> eine neue <code class="help-path">.html</code>-Datei anlegen (zum Beispiel <code class="help-path">uhr.html</code>) oder eine fertige HTML-Datei importieren.</li>
+                  <li>Die API im eigenen Modul einbinden: <code class="help-path">import islands from '/api.js'</code>. Das muss in einem <code class="help-path">&lt;script type="module"&gt;</code> stehen.</li>
+                  <li>Die Datei in der Liste antippen. Sie wird unter ihrem eigenen Pfad geöffnet.</li>
+                </ol>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">Beispiel</h4>
+                <pre class="help-code"><code>&lt;script type="module"&gt;
+  import islands from '/api.js'
+
+  const eintraege = await islands.list()
+  await islands.write('notizen/idee.txt', 'Hallo Welt')
+  const inhalt = await islands.read('notizen/idee.txt')
+&lt;/script&gt;</code></pre>
+                <p class="help-hint">
+                  Alle Pfade sind relativ zur Wurzel des gewählten Ordners.
+                </p>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">Typen für Werkzeuge und Agenten</h4>
+                <p class="help-text">
+                  Die Datei <code class="help-path">/api.d.ts</code> beschreibt die komplette API mit
+                  allen Typen. Kopieren Sie sie in die Zwischenablage und geben Sie sie einem
+                  KI-Agenten als Kontext — damit kann er Islands schreiben, ohne die API zu raten.
+                </p>
+                <p class="help-hint">
+                  Klappt das Kopieren nicht, öffnen Sie
+                  <a class="help-link" href="/api.d.ts" target="_blank" rel="noopener">/api.d.ts</a>
+                  direkt im Browser und markieren Sie den Text von Hand.
+                </p>
+              </div>
+            </div>
+          </details>
+
+          <details class="help-topic" data-topic="fs">
+            <summary class="help-topic-summary">
+              <span class="help-topic-marker" aria-hidden="true">💾</span>
+              <span class="help-topic-title">Speicher: FS API und OPFS</span>
+            </summary>
+            <div class="help-topic-body">
+              <div class="help-section">
+                <p class="help-text">
+                  Beide Speicherarten beruhen auf derselben Browser-Schnittstelle, der
+                  <code class="help-path">File System Access API</code>. Sie liefern dasselbe
+                  <code class="help-path">FileSystemDirectoryHandle</code> — die Islands-API arbeitet
+                  in beiden Fällen ausschließlich mit Pfaden relativ zur Wurzel.
+                </p>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">📁 Lokaler Ordner (FS API)</h4>
+                <p class="help-text">
+                  Ein normaler Ordner auf dem Gerät, gewählt über
+                  <code class="help-path">showDirectoryPicker()</code>. Die Dateien lassen sich
+                  jederzeit mit anderen Programmen öffnen und liegen im Dateisystem, sind also
+                  mitsamt Ordnerstruktur leicht zu sichern.
+                </p>
+                <ul class="help-list">
+                  <li>Der Ordner-Handle wird in IndexedDB gemerkt. Nach einem Neustart fehlt aber die <strong>Berechtigung</strong>: der Browser braucht einen Klick, um sie erneut zu erteilen („Zugriff erlauben“).</li>
+                  <li>Ein Umbenennen oder Verschieben des Ordners außerhalb des Browsers macht das gemerkte Handle ungültig — dann neu auswählen.</li>
+                  <li>Nur in Browsern mit <code class="help-path">showDirectoryPicker</code> (Chromium-basiert).</li>
+                </ul>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">📦 App-Speicher (OPFS)</h4>
+                <p class="help-text">
+                  Das <em>Origin Private File System</em> ist ein privater Speicherbereich des
+                  Browsers, erreichbar über
+                  <code class="help-path">navigator.storage.getDirectory()</code>. Hier liegt alles
+                  unter dem Ordner <code class="help-path">${escapeHtml(OPFS_APP_FOLDER)}</code>.
+                </p>
+                <ul class="help-list">
+                  <li>Braucht <strong>keine Ordnerauswahl und keine Berechtigung</strong> — die App ist nach dem Start sofort einsatzbereit.</li>
+                  <li>Die Dateien sind <strong>an diesen Browser gebunden</strong>: in einem anderen Browser oder Profil sind sie nicht sichtbar, und mit dem Löschen der Websitedaten sind sie weg.</li>
+                  <li>Ein Export auf die Festplatte ist von Hand nötig (Datei herunterladen).</li>
+                  <li>Der Browser darf den Speicher bei Platzmangel räumen; eine dauerhafte Ablage ist es nicht.</li>
+                </ul>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">Welche Art wann?</h4>
+                <div class="help-table-wrap">
+                  <table class="help-table">
+                    <thead>
+                      <tr><th></th><th>📁 Lokaler Ordner</th><th>📦 App-Speicher</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>Berechtigung nötig</td><td>ja, bei jedem Start</td><td>nein</td></tr>
+                      <tr><td>Andere Programme</td><td>ja</td><td>nein</td></tr>
+                      <tr><td>Anderer Browser</td><td>ja, Ordner erneut wählen</td><td>nein</td></tr>
+                      <tr><td>Sicherung</td><td>Dateisystem-Backup</td><td>von Hand</td></tr>
+                      <tr><td>Verfügbar in</td><td>nur Chromium</td><td>allen modernen Browsern</td></tr>
+                      <tr class="help-supported-row">
+                        <td>In diesem Browser</td>
+                        <td data-support="fsa">…</td>
+                        <td data-support="opfs">…</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p class="help-hint">
+                  Wechseln lässt sich die Art jederzeit über das Zahnrad ⚙️. Die Wahl wird gemerkt,
+                  die Dateien der jeweils anderen Art bleiben dabei unangetastet.
+                </p>
+              </div>
+            </div>
+          </details>
+        </div>
+      </div>
+      <footer class="modal-footer">
+        <div class="modal-footer-left"></div>
+        <div class="modal-footer-right">
+          <button type="button" id="help-btn-copy-dts" class="btn btn-primary icon-label-btn" aria-label="/api.d.ts kopieren" data-tip="/api.d.ts kopieren">
+            <span class="icon-label-btn-icon" aria-hidden="true">📋</span>
+            <span class="icon-label-btn-text">/api.d.ts kopieren</span>
+          </button>
+          <button type="button" id="help-btn-close" class="btn btn-secondary icon-label-btn" aria-label="Schließen" data-tip="Schließen">
+            <span class="icon-label-btn-icon" aria-hidden="true">✕</span>
+            <span class="icon-label-btn-text">Schließen</span>
+          </button>
+        </div>
+      </footer>
+    </div>
+  `
+
+  document.body.appendChild(modalOverlay)
+
+  const closeBtn = modalOverlay.querySelector<HTMLButtonElement>(".modal-close-btn")!
+  const footerCloseBtn = modalOverlay.querySelector<HTMLButtonElement>("#help-btn-close")!
+  const copyBtn = modalOverlay.querySelector<HTMLButtonElement>("#help-btn-copy-dts")!
+  const copyLabel = copyBtn.querySelector<HTMLElement>(".icon-label-btn-text")!
+  const topics = modalOverlay.querySelectorAll<HTMLDetailsElement>(".help-topic")
+  let copiedTimer: ReturnType<typeof setTimeout> | null = null
+
+  // Nur das Kapitel aus der Adresse aufklappen. Ohne Kapitel bleibt es beim
+  // Einstieg im Markup.
+  if (options.initialTopic) {
+    for (const topic of topics) {
+      topic.open = topic.dataset.topic === options.initialTopic
+    }
+  }
+
+  // Die Zeile "In diesem Browser" ist der einzige Inhalt, den der Dialog nicht
+  // aus dem Markup kennt: sie haengt davon ab, was dieser Browser anbietet.
+  if (options.support) {
+    fillSupportCells(modalOverlay, options.support)
+  }
+
+  // Auf- und Zuklappen von Hand ist ebenfalls ein Kapitelwechsel: die Adresse
+  // soll das gerade gelesene Kapitel zeigen, und der Tab-Titel soll es nennen.
+  for (const topic of topics) {
+    topic.addEventListener("toggle", () => {
+      if (!topic.open) return
+      const name = topic.dataset.topic
+      if (name !== "api" && name !== "fs") return
+      options.onTopicChange?.(name)
+    })
+  }
+
+  function closeModal() {
+    document.removeEventListener("keydown", handleKeydown)
+    if (copiedTimer !== null) clearTimeout(copiedTimer)
+    modalOverlay.remove()
+    options.onClose?.()
+  }
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape") closeModal()
+  }
+
+  /** Setzt die Beschriftung des Kopier-Knopfes und den Tooltip dazu. */
+  function setCopyLabel(text: string) {
+    copyLabel.textContent = text
+    copyBtn.setAttribute("aria-label", text)
+    copyBtn.setAttribute("data-tip", text)
+  }
+
+  document.addEventListener("keydown", handleKeydown)
+  closeBtn.addEventListener("click", closeModal)
+  footerCloseBtn.addEventListener("click", closeModal)
+
+  copyBtn.addEventListener("click", async () => {
+    copyBtn.disabled = true
+    setCopyLabel("Wird kopiert …")
+
+    try {
+      const text = await readApiDts()
+      if (!(await copyTextToClipboard(text))) {
+        throw new Error("Die Zwischenablage ist nicht verfügbar.")
+      }
+      setCopyLabel("✅ Kopiert!")
+      copiedTimer = setTimeout(() => {
+        // Das Fenster kann inzwischen geschlossen sein -- dann nichts tun.
+        if (!copyBtn.isConnected) return
+        setCopyLabel("/api.d.ts kopieren")
+      }, 2000)
+    } catch (err) {
+      setCopyLabel("Kopieren fehlgeschlagen")
+      // Fehler sichtbar machen, statt den Knopf stumm zurueckzusetzen. Der
+      // Hinweis auf `/api.d.ts` steht ohnehin als Link im Text.
+      const body = modalOverlay.querySelector<HTMLElement>(".modal-body")
+      body?.querySelector("#help-copy-error")?.remove()
+      const errorBox = document.createElement("div")
+      errorBox.id = "help-copy-error"
+      errorBox.className = "alert alert-danger"
+      errorBox.textContent = `Kopieren hat nicht geklappt: ${err instanceof Error ? err.message : String(err)} Öffnen Sie /api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`
+      body?.appendChild(errorBox)
+    } finally {
+      copyBtn.disabled = false
+    }
+  })
+}
+
+/**
  * Deeplink aus der aktuellen Adresse, z. B. `/foo/bar.html?pwaislands=edit`.
  * Liefert null, wenn der Parameter fehlt (normale App-Adresse).
  */
@@ -1015,6 +1390,27 @@ function isEditMode(mode: string): boolean {
 }
 
 /**
+ * Liest aus dem Parameter-Wert das Hilfe-Kapitel.
+ *
+ * Anders als `=edit` bezieht sich die Hilfe nicht auf einen Eintrag im Pfad:
+ * sie beschreibt die App selbst. Der Pfad sagt dabei nur, in welchem Ordner die
+ * Liste darunter steht.
+ *
+ * Liefert null, wenn der Wert kein Hilfe-Kapitel ist. Das blosse `=help`
+ * bleibt gueltig und oeffnet den Einstieg.
+ */
+function readHelpTopic(mode: string): HelpTopic | null {
+  if (mode === "help-api" || mode === "hilfe-api") return "api"
+  if (mode === "help-fs" || mode === "hilfe-fs") return "fs"
+  return null
+}
+
+/** True, wenn der Parameter-Wert irgendein Hilfe-Kapitel oeffnen soll. */
+function isHelpMode(mode: string): boolean {
+  return mode === "help" || mode === "hilfe" || readHelpTopic(mode) !== null
+}
+
+/**
  * Zerlegt einen Pfad in Elternpfad und letzten Abschnitt:
  * "foo/sub" -> { parentPath: "foo", name: "sub" }, "sub" -> { parentPath: "", name: "sub" }.
  *
@@ -1065,6 +1461,18 @@ function folderUrl(folderPath: string): string {
  */
 function entryUrl(entryPath: string, mode: string): string {
   return `${encodePath(entryPath)}?${ISLAND_PARAM}=${encodeURIComponent(mode)}`
+}
+
+/**
+ * Baut die Adresse eines Hilfe-Kapitels: `foo` + "api" -> `/foo?pwaislands=help-api`.
+ *
+ * Der Ordner bleibt im Pfad. Die Hilfe ist zwar eine Eigenschaft der App und
+ * nicht eines Eintrags, aber der Pfad ist im bestehenden Schema die einzige
+ * Ortsangabe: ein Neuladen nach dem Schliessen soll wieder in `foo` landen und
+ * nicht in der Wurzel.
+ */
+function helpUrl(folderPath: string, topic: HelpTopic): string {
+  return `${encodePath(folderPath)}?${ISLAND_PARAM}=help-${topic}`
 }
 
 /** Kodiert einen relativen Pfad als absoluten URL-Pfad; "" wird zu "/". */
@@ -1306,12 +1714,21 @@ export function renderFilesView(container: HTMLElement): void {
 
   /**
    * Baut die Einträge des Zahnrad-Menüs. Reihenfolge ist immer:
-   * 1. Speicherwechsel (immer zuerst, immer nur in die *andere* Art),
-   * 2. Ordnerverwaltung (wechseln / trennen), falls verfügbar.
+   * 1. Hilfe (immer vorhanden, braucht keinen Speicher),
+   * 2. Speicherwechsel (immer nur in die *andere* Art),
+   * 3. Ordnerverwaltung (wechseln / trennen), falls verfügbar.
    * Welche Speicherart aktiv ist, entscheidet `currentStorageType`.
-   */
-  function buildSettingsActions(): SettingsAction[] {
-    const actions: SettingsAction[] = []
+   */ function buildSettingsActions(): SettingsAction[] {
+    const actions: SettingsAction[] = [
+      {
+        // EIN Hilfe-Eintrag. Die Kapitel liegen im Fenster als Akkordeon; ein
+        // Eintrag pro Kapitel im Menü wäre derselbe Inhalt doppelt und macht
+        // das Menü länger, als es sein muss.
+        id: "btn-open-help",
+        html: "❓ Hilfe",
+        run: () => handleOpenHelp("menu"),
+      },
+    ]
 
     if (currentStorageType !== "opfs" && hasOPFS) {
       actions.push({
@@ -1348,10 +1765,9 @@ export function renderFilesView(container: HTMLElement): void {
     return actions
   }
 
-  /** Baut das komplette Zahnrad-Menü; leer, wenn es nichts anzubieten gibt. */
+  /** Baut das komplette Zahnrad-Menü. Nie leer: der Hilfe-Eintrag steht immer drin. */
   function renderSettingsMenu(): string {
     const actions = buildSettingsActions()
-    if (actions.length === 0) return ""
 
     return `
       <div class="settings-menu" id="settings-menu">
@@ -1387,6 +1803,8 @@ export function renderFilesView(container: HTMLElement): void {
   function bindSettingsActions(scope: HTMLElement) {
     for (const action of buildSettingsActions()) {
       scope.querySelector<HTMLButtonElement>(`#${action.id}`)?.addEventListener("click", () => {
+        // Erst schliessen, dann die Aktion starten: die Aktionen bauen die
+        // Ansicht auf und ersetzen dabei das Menue.
         closeSettingsMenu()
         action.run()
       })
@@ -1425,11 +1843,29 @@ export function renderFilesView(container: HTMLElement): void {
   let deepLinkResolved = false
 
   /**
-   * True, wenn der aktuelle History-Schritt ein Editor-Schritt direkt ueber
-   * dem Ordnerlink ist. Dann ersetzt das naechste Oeffnen ihn nur, statt einen
-   * weiteren Schritt anzulegen.
+   * True, wenn der aktuelle History-Schritt ein Schritt direkt ueber dem
+   * Ordnerlink ist -- vom Editor oder vom Hilfe-Fenster.
+   *
+   * Dann ersetzt das naechste Oeffnen ihn nur, statt einen weiteren Schritt
+   * anzulegen. Beide Fenster teilen sich das Flag, weil es eine Aussage ueber
+   * den History-Schritt ist und nicht ueber das Fenster: zwei getrennte Flags
+   * wuerden auseinanderlaufen.
    */
-  let editorStepOnFolder = false
+  let modalStepOnFolder = false
+
+  /**
+   * True, waehrend das Hilfe-Fenster offen ist. Solange darf `syncUrl` die
+   * Adresse nicht auf den Ordnerlink zuruecksetzen: `updateBreadcrumbs` laeuft
+   * auch nach einem Neuladen der Liste, waehrend das Fenster noch offen ist.
+   */
+  let helpOpen = false
+
+  /**
+   * Das zuletzt gezeigte Hilfe-Kapitel. Bestimmt die Adresse
+   * (`=help-api`/`=help-fs`) und den Tab-Titel, tanto waehrend das Fenster
+   * offen ist als auch nachdem es aus dem Menue geoeffnet wurde.
+   */
+  let helpTopic: HelpTopic = "api"
 
   /**
    * True, waehrend der Browser die Adresse selbst gesetzt hat (Zurueck-/
@@ -1566,6 +2002,16 @@ export function renderFilesView(container: HTMLElement): void {
   function closeSettingsMenu() {
     settingsMenuCleanup?.()
     settingsMenuCleanup = null
+    // Zusaetzlich den aktuell sichtbaren Kasten schliessen. `settingsMenuCleanup`
+    // gehoert zu dem Menue, das beim letzten Aufbau verdrahtet wurde; wird die
+    // Kopfzeile zwischendurch neu gerendert (z. B. nach `refreshCurrentList`),
+    // zeigt die Variable ins Leere und das neue Menue bliebe offen.
+    const menu = container.querySelector<HTMLDivElement>("#settings-menu")
+    const list = container.querySelector<HTMLDivElement>("#settings-menu-list")
+    const toggle = container.querySelector<HTMLButtonElement>("#btn-settings")
+    if (list) list.hidden = true
+    if (toggle) toggle.setAttribute("aria-expanded", "false")
+    menu?.classList.remove("is-open")
   }
 
   /**
@@ -1579,8 +2025,8 @@ export function renderFilesView(container: HTMLElement): void {
    * darf davon nicht abhaengen.
    */
   function syncUrl(folderPath: string) {
-    // Der Editor ist offen: dessen Adresse stehen lassen.
-    if (editorEntryName) return
+    // Der Editor oder das Hilfe-Fenster ist offen: deren Adresse stehen lassen.
+    if (editorEntryName || helpOpen) return
 
     // Die Adresse kam gerade vom Browser (Zurueck-Button): nichts schreiben,
     // aber ab jetzt wieder normale Schritte anlegen.
@@ -1602,7 +2048,7 @@ export function renderFilesView(container: HTMLElement): void {
       // Ersetzen wuerde den Zurueck-Button wirkungslos machen.
       if (urlSyncDone && deepLinkResolved) {
         window.history.pushState({ folderPath }, "", url)
-        editorStepOnFolder = false
+        modalStepOnFolder = false
       } else {
         window.history.replaceState({ folderPath }, "", url)
       }
@@ -1634,6 +2080,11 @@ export function renderFilesView(container: HTMLElement): void {
     // bleibt sichtbar, wenn der Tab den Titel abschneidet.
     const trail = segments.map((segment) => segment.label).reverse()
     if (entryName) trail.unshift(`${entryName} bearbeiten`)
+    // Das offene Hilfe-Fenster nennt sein Kapitel: der Tab zeigt dann
+    // "PWA Islands bauen — Hilfe — foo — PWA Islands". Nur wenn es offen ist -- der
+    // gemerkte `helpTopic` bleibt nach dem Schliessen stehen, die Adresse aber
+    // nicht.
+    if (helpOpen) trail.unshift(HELP_TOPIC_LABEL[helpTopic], "Hilfe")
     document.title = trail.join(" — ")
   }
 
@@ -1795,6 +2246,106 @@ export function renderFilesView(container: HTMLElement): void {
   }
 
   /**
+   * Öffnet das Hilfe-Fenster und hält die Adresse damit synchron.
+   *
+   * `source` unterscheidet die beiden Wege: aus dem Zahnrad-Menü kommt die
+   * Adresse vom Klick und muss geschrieben werden, bei `"address"` steht das
+   * Kapitel schon in der Adresse (Kaltstart oder Vorwaerts-Button) -- ein
+   * zweiter Schritt mit gleichem Ziel wäre nur Ballast.
+   *
+   * `topic` ist das Kapitel, das aufgeklappt wird. Ohne Angabe gilt das zuletzt
+   * gezeigte Kapitel, beim ersten Oeffnen der Einstieg.
+   */
+  function handleOpenHelp(source: "menu" | "address", topic?: HelpTopic) {
+    // Ohne offenen Ordner (Kaltstart hinter dem Schloss, OPFS-Aufbau) gibt es
+    // keinen Speicher, aus dem der Pfad kaeme; dann zaehlt der Deeplink-Pfad,
+    // damit `/foo?pwaislands=help-api` nach dem Schliessen auf `/foo` landet.
+    const folderPath =
+      currentStorage instanceof FileSystemHandleStorage
+        ? currentStorage.subPath
+        : (parentAndName(islandDeepLink?.path ?? "")?.parentPath ?? islandDeepLink?.path ?? "")
+
+    // Schon offen: nichts tun. Das Kapitel wechselt der Benutzer im Fenster
+    // selbst; ein zweiter Menueklick soll es nicht umschalten.
+    if (document.querySelector(".help-modal-overlay")) return
+
+    const shownTopic: HelpTopic = topic ?? helpTopic
+    helpOpen = true
+
+    if (source === "menu") {
+      try {
+        const state = { folderPath }
+        if (modalStepOnFolder) {
+          window.history.replaceState(state, "", helpUrl(folderPath, shownTopic))
+        } else {
+          window.history.pushState(state, "", helpUrl(folderPath, shownTopic))
+          modalStepOnFolder = true
+        }
+      } catch (err) {
+        console.warn("Adresse konnte nicht aktualisiert werden:", err)
+      }
+      // Titel nachziehen: das Kapitel steht jetzt im Tab. Beim Oeffnen ueber
+      // die Adresse ist er schon richtig (siehe `readAddressState`).
+      helpTopic = shownTopic
+      updateDocumentTitle()
+    }
+
+    openHelpModal({
+      initialTopic: shownTopic,
+      support: { fsa: hasDirectoryPicker, opfs: hasOPFS },
+      onTopicChange: (next) => showHelpTopic(next, folderPath),
+      onClose: () => restoreHelpAddress(source, folderPath),
+    })
+  }
+
+  /**
+   * Wechselt das aufgeklappte Kapitel und zieht Adresse und Tab-Titel nach.
+   *
+   * Auf- und Zuklappen von Hand landet hier genauso wie ein Klick auf den
+   * anderen Hilfe-Eintrag im Zahnrad-Menue.
+   *
+   * Die Adresse wird ersetzt, nicht gepusht: die Kapitel sind Abschnitte
+   * *eines* Fensters. Mit `pushState` muesste man sich nach dem Durchklicken
+   * aller Kapitel mehrfach zurueckklicken, um das Fenster zu verlassen.
+   */
+  function showHelpTopic(topic: HelpTopic, folderPath: string) {
+    helpTopic = topic
+
+    const topics = document.querySelectorAll<HTMLDetailsElement>(".help-modal-overlay .help-topic")
+    for (const element of topics) {
+      element.open = element.dataset.topic === topic
+    }
+
+    try {
+      window.history.replaceState({ folderPath }, "", helpUrl(folderPath, topic))
+    } catch {
+      // History nicht verfuegbar -- das Fenster haengt nicht davon ab.
+    }
+
+    updateDocumentTitle()
+  }
+
+  /** Setzt die Adresse nach dem Schliessen der Hilfe auf den Ordner zurueck. */
+  function restoreHelpAddress(source: "menu" | "address", folderPath: string) {
+    helpOpen = false
+    try {
+      // Ersetzen, nicht pushen: wie beim Editor wird der Schritt ueber dem
+      // Ordnerlink wieder zum Ordnerlink, damit die History-Laenge beim
+      // Oeffnen und Schliessen gleich bleibt.
+      window.history.replaceState({ folderPath }, "", folderUrl(folderPath))
+      // Nur ein aus dem Menue geoeffnetes Fenster hat einen Schritt angelegt,
+      // der beim naechsten Oeffnen ersetzt werden darf. Kam das Fenster aus
+      // der Adresse, steht der Schritt darunter schon richtig.
+      if (source === "menu") modalStepOnFolder = true
+    } catch {
+      // History nicht verfuegbar -- die Dateiliste haengt nicht davon ab.
+    }
+    // Kapitel aus dem Tab-Titel nehmen.
+    updateDocumentTitle(editorEntryName ?? undefined)
+    urlSyncDone = true
+  }
+
+  /**
    * Öffnet das Bearbeiten-Fenster. Dateien werden vorher gelesen, damit der
    * Inhalt im Feld steht; das Umbenennen ist in beiden Fällen möglich. Der
    * Löschen-Button ruft dieselbe Logik wie bisher die Aktionsspalte auf.
@@ -1830,11 +2381,11 @@ export function renderFilesView(container: HTMLElement): void {
         // nutzt ihn als Rueckfallebene, wenn die Adresse keinen Ordnerpfad
         // hergibt (Datei in der Wurzel, z. B. `/bar.html`).
         const state = { folderPath: folderPathBeforeEdit }
-        if (editorStepOnFolder) {
+        if (modalStepOnFolder) {
           window.history.replaceState(state, "", editUrl)
         } else {
           window.history.pushState(state, "", editUrl)
-          editorStepOnFolder = true
+          modalStepOnFolder = true
         }
       } catch (err) {
         console.warn("Adresse konnte nicht aktualisiert werden:", err)
@@ -1855,7 +2406,7 @@ export function renderFilesView(container: HTMLElement): void {
         // ersetzt das naechste Oeffnen ihn nur -- die History-Laenge bleibt
         // beim Oeffnen und Schliessen gleich.
         window.history.replaceState({ folderPath: folderPathBeforeEdit }, "", folderUrlBeforeEdit)
-        editorStepOnFolder = true
+        modalStepOnFolder = true
       } catch {
         // History nicht verfuegbar -- die Ordneranzeige haengt nicht davon ab.
       }
@@ -2250,6 +2801,17 @@ export function renderFilesView(container: HTMLElement): void {
    * @returns true, wenn die Adresse aufgeloest werden konnte.
    */
   async function applyUrlState(path: string, mode: string): Promise<boolean> {
+    // Hilfe zuerst: der Pfad sagt nur, in welchem Ordner die Liste darunter
+    // stehen soll. Auch ein Dateipfad ist erlaubt -- dann steht die Liste in
+    // dessen Elternordner.
+    if (isHelpMode(mode)) {
+      const topic = readHelpTopic(mode)
+      if (topic) helpTopic = topic
+      const reached = await navigateToFolder(path)
+      if (reached) handleOpenHelp("address", topic ?? undefined)
+      return reached
+    }
+
     if (!currentStorage || !(currentStorage instanceof FileSystemHandleStorage)) return false
 
     if (isEditMode(mode) && path) {
@@ -2307,8 +2869,8 @@ export function renderFilesView(container: HTMLElement): void {
     }
   }
 
-  /** True, wenn ein Bearbeiten-Fenster offen ist. */
-  function hasOpenEditor(): boolean {
+  /** True, wenn ein Fenster (Editor oder Hilfe) offen ist. */
+  function hasOpenModal(): boolean {
     return document.querySelector(".modal-overlay") !== null
   }
 
@@ -2369,8 +2931,6 @@ export function renderFilesView(container: HTMLElement): void {
    * Editor hier stumm geschlossen und die Adresse danach neu gesetzt.
    */
   async function handlePopState() {
-    if (!(currentStorage instanceof FileSystemHandleStorage)) return
-
     const link = readIslandDeepLink()
     const path = link ? link.path : pathnameToPath(window.location.pathname)
     const mode = link ? link.mode : ""
@@ -2382,8 +2942,22 @@ export function renderFilesView(container: HTMLElement): void {
     // hier die einzige Quelle, also den Stand von vorher wiederherstellen.
     restoreUrl(url)
 
+    // Vorwaerts auf `?pwaislands=help` muss auch dann oeffnen, wenn (noch) kein
+    // Ordner offen ist -- die Hilfe braucht keinen Speicher. Fuer alles andere
+    // gilt: ohne Speicher gibt es nichts zu navigieren.
+    if (isHelpMode(mode)) {
+      const topic = readHelpTopic(mode)
+      if (topic) helpTopic = topic
+      handleOpenHelp("address", topic ?? undefined)
+      urlFromBrowser = false
+      urlSyncDone = true
+      return
+    }
+
+    if (!(currentStorage instanceof FileSystemHandleStorage)) return
+
     const resolved = await applyUrlState(path, mode)
-    if (!resolved || (isEditMode(mode) && !hasOpenEditor())) {
+    if (!resolved || (isEditMode(mode) && !hasOpenModal())) {
       // Adresse passt nicht zur Lage (Eintrag umbenannt oder geloescht):
       // auf den erreichten Ordner korrigieren, statt sie luegen zu lassen.
       syncUrlToCurrentFolder()
@@ -2398,6 +2972,16 @@ export function renderFilesView(container: HTMLElement): void {
   window.addEventListener("popstate", () => {
     void handlePopState()
   })
+
+  // Die Hilfe braucht keinen Speicher: sie oeffnet auch dann, wenn der Ordner
+  // noch nicht freigegeben ist oder nur der App-Speicher zur Verfuegung steht.
+  // Deshalb vor `initStorage`, damit `helpOpen` steht, bevor der erste
+  // Listenaufbau die Adresse anfassen kann.
+  if (islandDeepLink && isHelpMode(islandDeepLink.mode)) {
+    const topic = readHelpTopic(islandDeepLink.mode)
+    if (topic) helpTopic = topic
+    handleOpenHelp("address", topic ?? undefined)
+  }
 
   void initStorage()
 }

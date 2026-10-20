@@ -83,7 +83,9 @@ function buildApiDts(): string {
 
 /**
  * Bündelt src/api.ts zu einem eigenständigen ES-Modul, das die API als
- * Default-Export bereitstellt (und zusätzlich `globalThis.islands` setzt).
+ * Default-Export bereitstellt. Es gibt bewusst keine globale Variable: eine
+ * Island bindet die API ausschließlich über
+ * `import islands from '/api.js'` ein (in einem `<script type="module">`).
  * Wird in Dev und Build gleich verwendet, damit beide dasselbe liefern.
  */
 async function buildApiJs(): Promise<string> {

@@ -889,9 +889,220 @@ code {
   }
 }
 
+/*
+ * Hilfe-Fenster: laengerer Fliesstext statt Formularfelder. Die Bloecke sind
+ * enger gesetzt als `.form-group`, weil hier nur gelesen und nichts eingegeben
+ * wird.
+ */
+
+/*
+ * Akkordeon: jedes Thema ist ein <details>. Das oeffnet und schliesst ohne
+ * JavaScript und ist fuer Screenreader und Tastatur von sich aus bedienbar.
+ */
+.help-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.help-topic {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.help-topic-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+  background: var(--social-bg);
+  /* Das Standard-Dreieck des Browsers wird durch `.help-topic-marker` ersetzt. */
+  list-style: none;
+  user-select: none;
+}
+
+.help-topic-summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-topic-summary:hover {
+  background: var(--accent-bg);
+}
+
+.help-topic-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Dreieck, das beim Aufklappen nach unten zeigt. */
+.help-topic-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  flex: none;
+  color: var(--text);
+}
+
+/*
+ * Nur das offene Kapitel traegt das offene Schloss. Die Farbe kommt vom Akzent,
+ * damit man auf einen Blick sieht, welches Kapitel aufgeklappt ist.
+ */
+.help-topic[open] > .help-topic-summary .help-topic-marker {
+  color: var(--accent);
+}
+
+.help-topic-title {
+  flex: 1;
+}
+
+.help-topic-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.help-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/*
+ * Das Fragezeichen steht inline im Titel. Der Abstand kommt vom Margin, nicht
+ * von einem Leerzeichen im Markup -- das wuerde vor dem Umbruch haengen.
+ */
+.help-title-icon {
+  margin-right: 6px;
+}
+
+/*
+ * Bestaetigte Speicherarten in der Vergleichstabelle. Das Haekchen wird zur
+ * Laufzeit gesetzt, weil es vom Browser abhaengt; die Spalte bleibt auch dann
+ * stehen, wenn der Aufbau ausnahmsweise nicht stattfindet.
+ */
+.help-supported {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.help-supported[data-supported="yes"] {
+  color: var(--accent);
+}
+
+/* Nicht unterstuetzt: gedaempft, aber lesbar -- der Text nennt den Browser. */
+.help-supported[data-supported="no"] {
+  color: var(--text);
+}
+
+/* Vergleichstabelle der Speicherarten. */
+.help-table-wrap {
+  overflow-x: auto;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.help-table th,
+.help-table td {
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border);
+}
+
+.help-table th {
+  font-weight: 600;
+  color: var(--text-h);
+  white-space: nowrap;
+}
+
+.help-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.help-heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.help-text,
+.help-list {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-list {
+  padding-left: 20px;
+}
+
+.help-list li + li {
+  margin-top: 6px;
+}
+
+.help-hint {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  opacity: 0.85;
+}
+
+/*
+ * `code` ist global `display: inline-flex` und bricht damit das Block-Layout --
+ * der Codeblock setzt es deshalb ausdruecklich auf `display: block`.
+ */
+.help-code {
+  display: block;
+  margin: 0;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  overflow-x: auto;
+}
+
+.help-code code {
+  display: block;
+  padding: 0;
+  background: none;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.help-path {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding: 1px 4px;
+  background: var(--code-bg);
+}
+
+.help-link {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+
 #pwa-toast {
   visibility: hidden;
-  position: fixed;
   left: 0;
   top: 0;
   margin: 16px;
