@@ -1,15 +1,24 @@
 {
   "name": "pwa-islands",
-  "private": true,
   "version": "0.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build": "oxfmt --check && oxlint && vite build",
+    "preview": "vite preview",
+    "lint": "oxlint --fix",
+    "lint:check": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "x": "npm run -s fmt && npm run -s lint"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "@vite-pwa/assets-generator": "^2.0.0",
+    "oxfmt": "^0.74.0",
+    "oxlint": "^1.89.0",
+    "oxlint-tsgolint": "^7.0.2004",
     "terser": "^5.51.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
