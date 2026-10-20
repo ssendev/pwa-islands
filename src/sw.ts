@@ -6,7 +6,7 @@ import {
 } from "workbox-precaching"
 import { clientsClaim } from "workbox-core"
 import { registerRoute } from "workbox-routing"
-import { findSavedFile, getMimeType } from "./storage.ts"
+import { findSavedFile, getMimeType, ISLAND_PARAM } from "./storage.ts"
 
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>
@@ -44,7 +44,7 @@ registerRoute(
     // Mit ?pwaislands wird immer die App-Shell ausgeliefert – auch wenn unter
     // dem Pfad eine gespeicherte Datei liegt. Damit lässt sich eine Island
     // aufrufen und bearbeiten, statt sie zu rendern.
-    if (url.searchParams.has("pwaislands")) {
+    if (url.searchParams.has(ISLAND_PARAM)) {
       return appShell(request, url, event)
     }
 

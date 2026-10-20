@@ -3,6 +3,8 @@ export const DB_VERSION = 1
 export const STORE_NAME = "handles"
 export const HANDLE_KEY = "selected_folder"
 export const STORAGE_TYPE_KEY = "selected_storage_type"
+export const ISLAND_PARAM = "pwaislands"
+
 /**
  * OPFS hat pro Origin nur EINE Wurzel -- eine zweite Wurzel laesst sich nicht
  * waehlen. Damit die App nicht direkt im Origin-Wurzelverzeichnis schreibt,

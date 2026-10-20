@@ -7,6 +7,7 @@ import {
   storeStorageType,
   clearStoredStorageType,
   getOPFSDirectoryHandle,
+  ISLAND_PARAM,
 } from "./storage.ts"
 import rootIconUrl from "./assets/pwa-islands.svg"
 
@@ -40,6 +41,7 @@ export interface IFileStorage {
   deleteEntry(name: string): Promise<void>
   /** True, wenn unter dem Namen bereits eine Datei oder ein Ordner liegt. */
   hasEntry(name: string): Promise<boolean>
+  entryKind(name: string): Promise<"file" | "directory" | null>
   /** Benennt eine Datei oder einen Ordner um. */
   renameEntry(oldName: string, newName: string): Promise<void>
   ensureWritePermission(): Promise<boolean>
@@ -94,20 +96,6 @@ export class FileSystemHandleStorage implements IFileStorage {
 
   get rawHandle(): FileSystemDirectoryHandle {
     return this.handle
-  }
-
-  /** Wechselt in einen direkten Unterordner und liefert die gescopte Sicht. */
-  async enterDirectory(name: string): Promise<FileSystemHandleStorage> {
-    const nextHandle = await this.handle.getDirectoryHandle(name)
-    const nextPath = this.subPath ? `${this.subPath}/${name}` : name
-    return new FileSystemHandleStorage(
-      nextHandle,
-      this.type,
-      this.isFallback,
-      nextPath,
-      this.displayName,
-      this.rootHandle,
-    )
   }
 
   async listFiles(): Promise<FileEntry[]> {
@@ -276,33 +264,32 @@ export class FileSystemHandleStorage implements IFileStorage {
    * der zaehlt hier ebenfalls als "belegt".
    */
   async hasEntry(name: string): Promise<boolean> {
+    return (await this.entryKind(name)) !== null
+  }
+
+  /**
+   * Fragt Datei und Ordner der Reihe nach ab; was zuerst greift, gewinnt.
+   *
+   * `TypeMismatchError` heisst "der Name existiert, aber als das andere" --
+   * das wird hier zu `null` fuer diese Abfrage und die andere entscheidet.
+   */
+  async entryKind(name: string): Promise<"file" | "directory" | null> {
+    const misses = new Set(["NotFoundError", "TypeMismatchError"])
+    const isMiss = (err: unknown) => err instanceof DOMException && misses.has(err.name)
+
     try {
       await this.handle.getFileHandle(name)
-      return true
+      return "file"
     } catch (err) {
-      if (
-        !(
-          err instanceof DOMException &&
-          (err.name === "NotFoundError" || err.name === "TypeMismatchError")
-        )
-      ) {
-        throw err
-      }
+      if (!isMiss(err)) throw err
     }
     try {
       await this.handle.getDirectoryHandle(name)
-      return true
+      return "directory"
     } catch (err) {
-      if (
-        !(
-          err instanceof DOMException &&
-          (err.name === "NotFoundError" || err.name === "TypeMismatchError")
-        )
-      ) {
-        throw err
-      }
+      if (!isMiss(err)) throw err
     }
-    return false
+    return null
   }
 
   /** Kopiert einen Ordner samt Inhalt rekursiv unter einen neuen Namen. */
@@ -394,6 +381,12 @@ interface EditorModalOptions {
   onSave: (name: string, content: string | Blob | null) => Promise<void>
   /** Nur bei mode 'edit': loescht den Eintrag. */
   onDelete?: () => Promise<void>
+  /**
+   * Wird beim Schliessen des Fensters aufgerufen (nach `onSave`/`onDelete`).
+   * Der Aufrufer setzt hier die Adresszeile vom Eintrag ("...=edit") zurueck
+   * auf den Ordnerlink.
+   */
+  onClose?: () => void
 }
 
 /**
@@ -485,6 +478,48 @@ function getExtension(name: string): string {
 }
 
 /**
+ * Sucht den tiefsten Ordner, den der Pfad hergibt -- in einem Durchgang.
+ *
+ * `/foo/bar.html` liefert `foo` (der Pfad zeigt auf eine Datei, also bleibt
+ * der Elternordner uebrig), `/foo/sub` liefert `foo/sub`, ein unbekannter Pfad
+ * die Wurzel `""`. Die Sicht des Dateisystems entscheidet; der Name wird nicht
+ * gedeutet.
+ */
+async function findDeepestDirectory(
+  root: FileSystemDirectoryHandle,
+  path: string,
+): Promise<string> {
+  let handle = root
+  let reached = ""
+  for (const segment of path ? path.split("/") : []) {
+    try {
+      handle = await handle.getDirectoryHandle(segment)
+    } catch {
+      break
+    }
+    reached = reached ? `${reached}/${segment}` : segment
+  }
+  return reached
+}
+
+/**
+ * Uebersetzt die Fehler des File System Access API beim Ordnerwechsel in eine
+ * verstaendliche deutsche Meldung.
+ *
+ * Die Browser liefern `NotFoundError` (Ordner fehlt) bzw. `TypeMismatchError`
+ * mit dem englischen Text "Wrong type" (der Eintrag ist eine Datei, kein
+ * Ordner). Letzteres sieht man, wenn eine Adresse auf eine Datei zeigt -- die
+ * rohe Meldung sagt dann nichts aus.
+ */
+function describeFolderError(err: unknown): string {
+  const name = err instanceof Error ? err.name : ""
+  if (name === "TypeMismatchError") return "Der Eintrag ist eine Datei, kein Ordner."
+  if (name === "NotFoundError") return "Der Ordner wurde nicht gefunden."
+  if (name === "NotAllowedError") return "Kein Zugriff auf den Ordner."
+  return err instanceof Error ? err.message : String(err)
+}
+
+/**
  * Maskiert Text fuer die Ausgabe in HTML-Attributen und -Textknoten.
  * Datei- und Ordnernamen koennen beliebige Zeichen enthalten.
  */
@@ -506,33 +541,49 @@ function escapeHtml(value: string): string {
  * neben den Buttons in der Toolbar.
  */
 function buildBreadcrumbs(storage: FileSystemHandleStorage): string {
-  const rootLabel = "PWA Islands"
-  const segments = storage.subPath ? storage.subPath.split("/") : []
+  return breadcrumbSegments(storage.subPath)
+    .map((segment, index, all) => {
+      const isLast = index === all.length - 1
+      // Erster Abschnitt ohne Auslassungspunkt, alle weiteren davor.
+      const separator =
+        index === 0 ? "" : `<span class="breadcrumb-separator" aria-hidden="true">/</span>`
+      if (isLast) {
+        return `${separator}<span class="breadcrumb-current">${escapeHtml(segment.label)}</span>`
+      }
+      return `${separator}<button type="button" class="breadcrumb-item" data-segment="${escapeHtml(
+        segment.path,
+      )}" title="${escapeHtml(segment.label)}">${escapeHtml(segment.label)}</button>`
+    })
+    .join("")
+}
 
-  const parts: string[] = []
-  parts.push(
-    segments.length === 0
-      ? `<span class="breadcrumb-current">${escapeHtml(rootLabel)}</span>`
-      : `<button type="button" class="breadcrumb-item" data-segment="" title="${escapeHtml(
-          rootLabel,
-        )}">${escapeHtml(rootLabel)}</button>`,
-  )
+interface BreadcrumbSegment {
+  /** Angezeigter Text. */
+  label: string
+  /** Zielpfad ab der Wurzel; "" steht fuer die Wurzel selbst. */
+  path: string
+}
+
+/**
+ * Zerlegt einen Ordnerpfad in Breadcrumb-Abschnitte. Die Wurzel ist immer
+ * "PWA Islands" -- unabhaengig davon, ob lokal (FS API) oder im App-Speicher
+ * (OPFS) gearbeitet wird.
+ *
+ * Wird auch fuer den Fenstertitel benutzt, damit Titel und Brotkrumen nicht
+ * auseinanderlaufen koennen.
+ */
+function breadcrumbSegments(folderPath: string): BreadcrumbSegment[] {
+  const rootLabel = "PWA Islands"
+  const segments = folderPath ? folderPath.split("/") : []
+  const result: BreadcrumbSegment[] = [{ label: rootLabel, path: "" }]
 
   let accumulated = ""
-  segments.forEach((segment, index) => {
+  for (const segment of segments) {
     accumulated = accumulated ? `${accumulated}/${segment}` : segment
-    const isLast = index === segments.length - 1
-    parts.push(`<span class="breadcrumb-separator" aria-hidden="true">/</span>`)
-    parts.push(
-      isLast
-        ? `<span class="breadcrumb-current">${escapeHtml(segment)}</span>`
-        : `<button type="button" class="breadcrumb-item" data-segment="${escapeHtml(
-            accumulated,
-          )}" title="${escapeHtml(segment)}">${escapeHtml(segment)}</button>`,
-    )
-  })
+    result.push({ label: segment, path: accumulated })
+  }
 
-  return parts.join("")
+  return result
 }
 
 /**
@@ -699,6 +750,19 @@ async function findFreeName(storage: IFileStorage, name: string): Promise<string
 }
 
 /**
+ * Schliesst ein offenes Bearbeiten-Fenster, falls eins da ist. Wird vom
+ * Zurueck-Button benutzt: die Adresse springt dann auf den Ordnerlink zurueck
+ * und das Fenster muss mitgehen.
+ */
+function closeOpenEditor(): void {
+  const modal = document.querySelector<HTMLElement>(".modal-overlay")
+  if (!modal) return
+  // Den vorhandenen Schliessen-Weg nutzen, damit Listener, Object-URL und
+  // `onClose` (Adresse zuruecksetzen) genau einmal laufen.
+  modal.querySelector<HTMLButtonElement>(".modal-close-btn")?.click()
+}
+
+/**
  * Öffnet das Bearbeiten-Fenster für eine Datei oder einen Ordner. Im Modus
  * 'edit' lässt sich der Name ändern (Umbenennen) und der Eintrag löschen; bei
  * Dateien kommt das Inhaltsfeld hinzu.
@@ -818,6 +882,7 @@ function openEditorModal(options: EditorModalOptions): void {
     // Object-URLs belegen Speicher, bis sie freigegeben werden.
     if (options.preview?.previewUrl) URL.revokeObjectURL(options.preview.previewUrl)
     modalOverlay.remove()
+    options.onClose?.()
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -880,6 +945,135 @@ function openEditorModal(options: EditorModalOptions): void {
       alert(`Löschen fehlgeschlagen: ${err instanceof Error ? err.message : String(err)}`)
     }
   })
+}
+
+/**
+ * Deeplink aus der aktuellen Adresse, z. B. `/foo/bar.html?pwaislands=edit`.
+ * Liefert null, wenn der Parameter fehlt (normale App-Adresse).
+ */
+interface IslandDeepLink {
+  /**
+   * Der ganze Pfad aus der Adresse, relativ zur Wurzel, z. B. "foo/bar.html".
+   * Leer fuer die Wurzel.
+   */
+  path: string
+  /** Der Wert des Parameters (z. B. "", "1", "e", "edit"), klein geschrieben. */
+  mode: string
+}
+
+/**
+ * Zerlegt einen URL-Pfad in seine Abschnitte und dekodiert sie.
+ *
+ * - "/foo/bar.html" -> ["foo", "bar.html"]
+ * - "/"             -> []
+ *
+ * Ein ungueltiger Prozent-Code fuehrt zu einer leeren Liste -- die Adresse ist
+ * dann nicht brauchbar und die App startet in der Wurzel.
+ */
+function pathSegments(pathname: string): string[] {
+  try {
+    return pathname
+      .split("/")
+      .filter(Boolean)
+      .map((segment) => decodeURIComponent(segment))
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Der Pfad aus der Adresse als relativer Pfad zur Wurzel: "/foo/bar" -> "foo/bar".
+ * Die Wurzel selbst ist "".
+ */
+function pathnameToPath(pathname: string): string {
+  return pathSegments(pathname).join("/")
+}
+
+/**
+ * Wertet den `?pwaislands`-Parameter aus (siehe ISLAND_PARAM). Nur bekannte
+ * Schreibweisen gelten als Bearbeiten-Wunsch; alles andere zeigt die
+ * Dateiverwaltung im passenden Ordner.
+ */
+function readIslandDeepLink(): IslandDeepLink | null {
+  if (typeof window === "undefined") return null
+
+  const params = new URLSearchParams(window.location.search)
+  if (!params.has(ISLAND_PARAM)) return null
+
+  const rawMode = (params.get(ISLAND_PARAM) ?? "").trim().toLowerCase()
+
+  return { path: pathnameToPath(window.location.pathname), mode: rawMode }
+}
+
+/**
+ * True, wenn der Parameter-Wert das Bearbeiten-Fenster oeffnen soll.
+ * Nur bekannte Schreibweisen zaehlen -- ein blosses `?pwaislands` (leer) oder
+ * `=1` zeigt die Datei nur in der Liste, nicht im Editor.
+ */
+function isEditMode(mode: string): boolean {
+  return mode === "e" || mode === "edit" || mode === "bearbeiten" || mode === "true"
+}
+
+/**
+ * Zerlegt einen Pfad in Elternpfad und letzten Abschnitt:
+ * "foo/sub" -> { parentPath: "foo", name: "sub" }, "sub" -> { parentPath: "", name: "sub" }.
+ *
+ * Gebraucht, wenn ein Eintrag im Editor geoeffnet werden soll, ohne dass er
+ * selbst das Ziel der Adresse ist: das Fenster zeigt den Eintrag innerhalb
+ * seines Elternordners, also muss dorthin navigiert werden.
+ */
+function parentAndName(path: string): { parentPath: string; name: string } | null {
+  if (!path) return null
+  const segments = path.split("/").filter(Boolean)
+  const name = segments.pop()
+  if (!name) return null
+  return { parentPath: segments.join("/"), name }
+}
+
+/**
+ * Der Deeplink wird nur einmal je Seitenaufruf ausgewertet -- sonst wuerde
+ * jedes erneute Einlesen der Liste (z. B. nach dem Speichern) den Editor
+ * ungefragt wieder oeffnen.
+ */
+const islandDeepLink: IslandDeepLink | null = readIslandDeepLink()
+
+/**
+ * Baut aus dem Ordnerpfad die Adresse fuer die Adresszeile: `foo/bar` ->
+ * `/foo/bar?pwaislands`.
+ *
+ * Der Ordner steht im Pfad, nicht in einem Hash -- die Adresse soll lesbar
+ * sein und sich kopieren lassen. Der ISLAND_PARAM-Parameter sorgt dafuer,
+ * dass der Service Worker die App-Shell ausliefert statt der unter dem Pfad
+ * gespeicherten Datei bzw. des Index-Fallbacks (siehe sw.ts).
+ *
+ * Der Parameterwert wird bewusst geleert: der Bearbeiten-Wunsch (`=edit`) gilt
+ * nur fuer den Aufruf, der ihn mitbringt. Nach dem Navigieren steht die
+ * Adresse fuer "Dateiverwaltung in diesem Ordner", nicht fuer "Editor oeffnen"
+ * -- sonst wuerde ein spaeteres Neuladen den Editor erneut aufreissen.
+ */
+function folderUrl(folderPath: string): string {
+  return `${encodePath(folderPath)}?${ISLAND_PARAM}`
+}
+
+/**
+ * Baut die Adresse fuer eine einzelne Datei: `foo/bar.html` mit Modus "edit"
+ * wird zu `/foo/bar.html?pwaislands=edit`.
+ *
+ * Dieselbe Form, die ein Deeplink von aussen hat -- ein Kopieren der Adresse
+ * aus dem offenen Editor ergibt also genau den Link, der die Datei spaeter
+ * wieder im Editor oeffnet.
+ */
+function entryUrl(entryPath: string, mode: string): string {
+  return `${encodePath(entryPath)}?${ISLAND_PARAM}=${encodeURIComponent(mode)}`
+}
+
+/** Kodiert einen relativen Pfad als absoluten URL-Pfad; "" wird zu "/". */
+function encodePath(path: string): string {
+  if (!path) return "/"
+  return `/${path
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/")}`
 }
 
 /**
@@ -1215,6 +1409,44 @@ export function renderFilesView(container: HTMLElement): void {
   /** Aufräumfunktion des Einstellungen-Menüs (Listener), falls es offen ist. */
   let settingsMenuCleanup: (() => void) | null = null
 
+  /**
+   * True, sobald die Adresse einmal an den Ordner angepasst wurde. Ab dann
+   * legt jeder Ordnerwechsel einen History-Schritt an (Zurueck-Button), statt
+   * nur zu ersetzen.
+   */
+  let urlSyncDone = false
+
+  /**
+   * True, sobald ein Deeplink aufgeloest wurde (oder keiner vorlag). Vorher
+   * darf `syncUrl` nur ersetzen: der erste Listenaufbau laeuft schon durch,
+   * bevor der Link den Ordner gewechselt hat, und wuerde sonst einen
+   * ueberfluessigen Schritt auf die Wurzel anlegen.
+   */
+  let deepLinkResolved = false
+
+  /**
+   * True, wenn der aktuelle History-Schritt ein Editor-Schritt direkt ueber
+   * dem Ordnerlink ist. Dann ersetzt das naechste Oeffnen ihn nur, statt einen
+   * weiteren Schritt anzulegen.
+   */
+  let editorStepOnFolder = false
+
+  /**
+   * True, waehrend der Browser die Adresse selbst gesetzt hat (Zurueck-/
+   * Vorwaerts-Button). Dann darf `syncUrl` die Adresse nicht erneut schreiben,
+   * sonst entstuende bei jedem Zurueck-Klick ein neuer History-Eintrag.
+   */
+  let urlFromBrowser = false
+
+  /**
+   * Name des Eintrags im offenen Editor, sonst null. Solange etwas bearbeitet
+   * wird, gehoert die Adresse dem Editor (`/foo/bar.html?pwaislands=edit`) und
+   * `syncUrl` darf sie nicht auf den Ordnerlink zuruecksetzen --
+   * `refreshCurrentList` laeuft auch nach dem Speichern, waehrend das Fenster
+   * noch offen ist. Der Name geht ausserdem in den Fenstertitel ein.
+   */
+  let editorEntryName: string | null = null
+
   async function updateView(storage: IFileStorage | null) {
     currentStorage = storage
     if (storage) currentStorageType = storage.type
@@ -1337,6 +1569,75 @@ export function renderFilesView(container: HTMLElement): void {
   }
 
   /**
+   * Hält die Adresszeile mit dem aktuellen Ordner synchron. Beim Wechsel in
+   * einen Ordner wird die Adresse per History-API ersetzt (kein Neuladen, kein
+   * Request) und der neue Stand als "pushState" abgelegt, damit der
+   * Zurueck-Button des Browsers wieder eine Ebene nach oben fuehrt.
+   *
+   * Scheitert der History-Aufruf (z. B. in einem eingebetteten Kontext ohne
+   * eigene History), bleibt die Adresse unveraendert -- die Ordneranzeige
+   * darf davon nicht abhaengen.
+   */
+  function syncUrl(folderPath: string) {
+    // Der Editor ist offen: dessen Adresse stehen lassen.
+    if (editorEntryName) return
+
+    // Die Adresse kam gerade vom Browser (Zurueck-Button): nichts schreiben,
+    // aber ab jetzt wieder normale Schritte anlegen.
+    if (urlFromBrowser) {
+      urlFromBrowser = false
+      urlSyncDone = true
+      return
+    }
+
+    const url = folderUrl(folderPath)
+
+    try {
+      if (url === `${window.location.pathname}${window.location.search}`) {
+        return
+      }
+      // Solange der Deeplink noch nicht aufgeloest ist, wird nur ersetzt: die
+      // Adresse aus dem Link ist der Ausgangspunkt, kein Schritt dorthin.
+      // Danach legt jeder Ordnerwechsel einen Schritt an -- wiederholtes
+      // Ersetzen wuerde den Zurueck-Button wirkungslos machen.
+      if (urlSyncDone && deepLinkResolved) {
+        window.history.pushState({ folderPath }, "", url)
+        editorStepOnFolder = false
+      } else {
+        window.history.replaceState({ folderPath }, "", url)
+      }
+    } catch (err) {
+      console.warn("Adresse konnte nicht aktualisiert werden:", err)
+    }
+
+    urlSyncDone = true
+  }
+
+  /**
+   * Haelt den Fenster- bzw. Tab-Titel am angezeigten Pfad. Beim offenen Editor
+   * kommt der bearbeitete Eintrag davor, damit im Tab erkennbar ist,
+   * dass gerade etwas bearbeitet wird.
+   *
+   * Aufbau: "bar.html bearbeiten — foo — PWA Islands".
+   */
+  function updateDocumentTitle(entryName?: string) {
+    const storage = currentStorage
+    // Ohne Speicher (Startphase) bleibt der Titel, wie er ist.
+    if (!storage) return
+
+    const segments =
+      storage instanceof FileSystemHandleStorage
+        ? breadcrumbSegments(storage.subPath)
+        : [{ label: storage.name, path: "" }]
+
+    // Wurzel nach hinten, Pfad davor -- der spezifischste Teil steht vorn und
+    // bleibt sichtbar, wenn der Tab den Titel abschneidet.
+    const trail = segments.map((segment) => segment.label).reverse()
+    if (entryName) trail.unshift(`${entryName} bearbeiten`)
+    document.title = trail.join(" — ")
+  }
+
+  /**
    * Aktualisiert den Breadcrumb in der Toolbar. Muss nach jedem Wechsel des
    * aktuellen Ordners aufgerufen werden, weil `refreshCurrentList` nur den
    * Listenbereich neu rendert.
@@ -1361,6 +1662,14 @@ export function renderFilesView(container: HTMLElement): void {
         void navigateToSegment(crumb.dataset.segment ?? "")
       })
     })
+
+    // Adresse mit dem angezeigten Ordner synchron halten. Auch der Aufruf
+    // ohne Pfadwechsel (z. B. nach dem Speichern) ist billig: syncUrl bricht ab,
+    // wenn sich nichts geaendert hat.
+    syncUrl(storage instanceof FileSystemHandleStorage ? storage.subPath : "")
+
+    // Titel mit demselben Pfad bestuecken -- beim offenen Editor mit Eintrag.
+    updateDocumentTitle(editorEntryName ?? undefined)
   }
 
   async function refreshCurrentList() {
@@ -1406,27 +1715,31 @@ export function renderFilesView(container: HTMLElement): void {
       console.error("Fehler bei der Berechtigungsprüfung:", err)
     }
 
-    try {
-      const next = await storage.enterDirectory(name)
-      currentStorage = next
-      await refreshCurrentList()
-    } catch (err: unknown) {
-      alert(
-        `Ordner "${name}" konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
+    await navigateToSegment(storage.subPath ? `${storage.subPath}/${name}` : name)
   }
 
   /**
    * Wechselt zu einem beliebigen Punkt im aktuellen Pfad. Ein leerer Zielpfad
    * steht fuer die Wurzel. Der Pfad wird vom Wurzel-Handle aus neu aufgebaut,
    * damit auch mehrere Ebenen auf einmal moeglich sind.
+   *
+   * `history: "none"` bedeutet: die Adresse kommt gerade vom Browser
+   * (Zurueck-Button) und darf nicht erneut geschrieben werden. Auch der
+   * Fruehausstieg (Ziel ist schon der aktuelle Ordner) verbraucht das Flag --
+   * sonst bliebe es liegen und der naechste Ordnerwechsel wuerde die Adresse
+   * stumm ueberspringen.
    */
-  async function navigateToSegment(targetPath: string) {
+  async function navigateToSegment(targetPath: string, options?: { history?: "none" }) {
     if (!currentStorage) return
     const storage = currentStorage
     if (!(storage instanceof FileSystemHandleStorage)) return
-    if (targetPath === storage.subPath) return
+    if (targetPath === storage.subPath) {
+      // Adresse kam vom Browser und beschreibt schon den aktuellen Ordner:
+      // Flag verbrauchen, sonst ueberspringt der naechste Ordnerwechsel die
+      // Adresse (die Leiste bliebe auf dem alten Pfad stehen).
+      if (options?.history === "none") urlSyncDone = true
+      return
+    }
 
     try {
       let handle = storage.rootHandle
@@ -1441,11 +1754,17 @@ export function renderFilesView(container: HTMLElement): void {
         storage.rootName,
         storage.rootHandle,
       )
+      // Der History-Eintrag kommt vom Browser selbst -- sonst wuerde jeder
+      // Zurueck-Klick einen neuen Eintrag erzeugen und die History aufblaehen.
+      if (options?.history === "none") urlSyncDone = true
       await refreshCurrentList()
     } catch (err: unknown) {
-      alert(
-        `Ordner konnte nicht geöffnet werden: ${err instanceof Error ? err.message : String(err)}`,
-      )
+      // Der Grund steckt in `err.name`: `NotFoundError` (Ordner gibt es nicht),
+      // `TypeMismatchError` (Eintrag ist eine Datei, kein Ordner). Letzteres
+      // passiert z. B. bei einer Adresse, die auf eine Datei zeigt; die reine
+      // Meldung "Wrong type" sagt im Deutschen nichts aus.
+      const reason = describeFolderError(err)
+      alert(`Ordner "${targetPath}" konnte nicht geöffnet werden: ${reason}`)
     }
   }
 
@@ -1484,6 +1803,67 @@ export function renderFilesView(container: HTMLElement): void {
     if (!currentStorage) return
     const storage = currentStorage
 
+    // Die Adresszeile zeigt waehrend des Bearbeitens den Eintrag samt `=edit`
+    // und kehrt beim Schliessen zum Ordnerlink zurueck. Fuer Dateien ist das
+    // `/foo/bar.html?pwaislands=edit`, fuer einen Ordner dessen Pfad ohne
+    // Dateiendung: `/foo/sub?pwaislands=edit`.
+    const entryPath = relativePathOf(storage, name)
+    const editUrl = entryUrl(entryPath, "edit")
+    const folderPathBeforeEdit = storage instanceof FileSystemHandleStorage ? storage.subPath : ""
+    const folderUrlBeforeEdit = folderUrl(folderPathBeforeEdit)
+    if (editUrl) {
+      editorEntryName = name
+      try {
+        // Der Editor bekommt einen eigenen Schritt, damit der Zurueck-Button
+        // zum Ordner fuehrt und nicht daran vorbei.
+        //
+        // Frueher stand hier immer `replaceState`. Das hat den Ordner-Eintrag
+        // ueberschrieben: `/foo?pwaislands` wurde zu
+        // `/foo/bar.html?pwaislands=edit`, und Zurueck sprang vom Editor
+        // direkt auf die Wurzel -- fuer den Benutzer sah es aus, als haette
+        // der Zurueck-Button eine Ebene zu weit gefuehrt.
+        //
+        // Nur der erste Editor-Schritt eines Ordnerbesuchs wird gepusht;
+        // danach wird ersetzt. Sonst legte jedes Oeffnen einen Eintrag an.
+        //
+        // Im State steht der ORDNER, nicht der Eintrag: `handlePopState`
+        // nutzt ihn als Rueckfallebene, wenn die Adresse keinen Ordnerpfad
+        // hergibt (Datei in der Wurzel, z. B. `/bar.html`).
+        const state = { folderPath: folderPathBeforeEdit }
+        if (editorStepOnFolder) {
+          window.history.replaceState(state, "", editUrl)
+        } else {
+          window.history.pushState(state, "", editUrl)
+          editorStepOnFolder = true
+        }
+      } catch (err) {
+        console.warn("Adresse konnte nicht aktualisiert werden:", err)
+      }
+      // Titel nachziehen: der Editor steht jetzt im Tab.
+      updateDocumentTitle(editorEntryName)
+    }
+
+    /** Setzt die Adresse nach dem Schliessen des Editors auf den Ordner zurueck. */
+    const restoreAddress = () => {
+      editorEntryName = null
+      // Titel zurueck auf den reinen Pfad.
+      updateDocumentTitle()
+      if (!editUrl) return
+      try {
+        // Ersetzen, nicht pushen: der Editor-Eintrag wird wieder zum
+        // Ordnerlink. Der Schritt darunter ist derselbe Ordnerlink, also
+        // ersetzt das naechste Oeffnen ihn nur -- die History-Laenge bleibt
+        // beim Oeffnen und Schliessen gleich.
+        window.history.replaceState({ folderPath: folderPathBeforeEdit }, "", folderUrlBeforeEdit)
+        editorStepOnFolder = true
+      } catch {
+        // History nicht verfuegbar -- die Ordneranzeige haengt nicht davon ab.
+      }
+      // Der Ordnerpfad hat sich nicht geaendert, aber die Adresse schon; beim
+      // naechsten Ordnerwechsel soll wieder ein Schritt entstehen.
+      urlSyncDone = true
+    }
+
     const removeEntry = async () => {
       try {
         if (!(await storage.ensureWritePermission())) {
@@ -1496,10 +1876,12 @@ export function renderFilesView(container: HTMLElement): void {
       await refreshCurrentList()
     }
 
-    const saveEntry = async (newName: string, content: string | Blob | null) => {
+    const saveEntry = async (newName: string, content: string | Blob | null | undefined) => {
       if (newName !== name) await storage.renameEntry(name, newName)
       // content === null bedeutet: Binaerdatei, Inhalt bleibt unveraendert.
-      if (kind === "file" && content !== null) await storage.writeFile(newName, content)
+      if (kind === "file" && content !== null && content !== undefined) {
+        await storage.writeFile(newName, content)
+      }
       await refreshCurrentList()
     }
 
@@ -1510,6 +1892,7 @@ export function renderFilesView(container: HTMLElement): void {
         name,
         onSave: saveEntry,
         onDelete: removeEntry,
+        onClose: restoreAddress,
       })
       return
     }
@@ -1530,6 +1913,7 @@ export function renderFilesView(container: HTMLElement): void {
           preview: tooLargeBlob ? buildImagePreview(tooLargeBlob) : undefined,
           onSave: saveEntry,
           onDelete: removeEntry,
+          onClose: restoreAddress,
         })
         return
       }
@@ -1555,11 +1939,15 @@ export function renderFilesView(container: HTMLElement): void {
           !editable && blob.size <= MAX_EDITABLE_TEXT_BYTES ? await blobToBase64(blob) : undefined,
         onSave: saveEntry,
         onDelete: removeEntry,
+        onClose: restoreAddress,
       })
     } catch (err: unknown) {
       alert(
         `Datei "${name}" konnte nicht gelesen werden: ${err instanceof Error ? err.message : String(err)}`,
       )
+      // Der Editor wurde nicht geoeffnet -- die Adresse darf nicht auf den
+      // Eintrag zeigen.
+      restoreAddress()
     }
   }
 
@@ -1673,6 +2061,7 @@ export function renderFilesView(container: HTMLElement): void {
       await storeDirectoryHandle(handle)
       const storage = new FileSystemHandleStorage(handle, "fsa", false)
       await updateView(storage)
+      await applyDeepLink()
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         return
@@ -1705,6 +2094,7 @@ export function renderFilesView(container: HTMLElement): void {
       await persistStorageChoice("opfs")
       const storage = new FileSystemHandleStorage(opfsHandle, "opfs", isFallbackToOPFS)
       await updateView(storage)
+      await applyDeepLink()
     } else {
       alert("Zugriff auf das Origin Private File System fehlgeschlagen.")
     }
@@ -1755,6 +2145,7 @@ export function renderFilesView(container: HTMLElement): void {
             await persistStorageChoice("fsa")
             const storage = new FileSystemHandleStorage(storedHandle, "fsa", false)
             await updateView(storage)
+            await applyDeepLink()
           } else {
             alert("Zugriff verweigert.")
           }
@@ -1827,6 +2218,7 @@ export function renderFilesView(container: HTMLElement): void {
         // Perfekt, Browser/Android hat es sich (im Hintergrund) gemerkt
         const storage = new FileSystemHandleStorage(storedHandle, "fsa", false)
         await updateView(storage)
+        await applyDeepLink()
       } else {
         // WICHTIG: Jetzt NICHT sofort requestPermission() aufrufen!
         // Zeige stattdessen die UI-Buttons an.
@@ -1837,6 +2229,175 @@ export function renderFilesView(container: HTMLElement): void {
       await updateView(null)
     }
   }
+
+  /**
+   * Bringt die Ansicht mit einer Adresse vom Typ `?pwaislands` in Einklang.
+   *
+   * Das ist der einzige Weg, eine Island-Adresse aufzuloesen -- sowohl beim
+   * Laden (Deeplink) als auch beim Zurueck-/Vorwaerts-Button. Zwei getrennte
+   * Wege hatten sich schon einmal auseinanderentwickelt (der Editor ging nur
+   * im einen auf).
+   *
+   * Regeln, abgeleitet aus dem Dateisystem statt aus der Schreibweise des
+   * Namens (ein Punkt sagt nichts -- "projekte/v1.2" ist ein Ordner, "notes"
+   * eine Datei):
+   *
+   * - `=edit` und der Pfad ist ein Eintrag: in den ELTERNordner wechseln und
+   *   den Eintrag dort im Editor oeffnen. Der Editor sitzt immer im
+   *   Elternordner, auch bei einem Ordner-Eintrag.
+   * - sonst: in den tiefsten Ordner wechseln, den der Pfad hergibt.
+   *
+   * @returns true, wenn die Adresse aufgeloest werden konnte.
+   */
+  async function applyUrlState(path: string, mode: string): Promise<boolean> {
+    if (!currentStorage || !(currentStorage instanceof FileSystemHandleStorage)) return false
+
+    if (isEditMode(mode) && path) {
+      const target = parentAndName(path)
+      if (target) {
+        const reached = await navigateToFolder(target.parentPath)
+        if (!reached) return false
+        // Ohne Eintrag (umbenannt, geloescht) bleibt die Liste stehen; der
+        // Aufrufer korrigiert dann die Adresse.
+        return await openEntryEditor(target.name)
+      }
+    }
+
+    return await navigateToFolder(path)
+  }
+
+  /**
+   * Wechselt in den tiefsten Ordner, den der Pfad hergibt. Zeigt der Pfad auf
+   * eine Datei (`/foo/bar.html`), ist das ihr Elternordner.
+   */
+  async function navigateToFolder(path: string): Promise<boolean> {
+    const storage = currentStorage
+    if (!(storage instanceof FileSystemHandleStorage)) return false
+
+    const folder = await findDeepestDirectory(storage.rootHandle, path)
+    await navigateToSegment(folder, { history: "none" })
+    return currentStorage instanceof FileSystemHandleStorage && currentStorage.subPath === folder
+  }
+
+  /** Oeffnet einen Eintrag des aktuellen Ordners im Editor. */
+  async function openEntryEditor(name: string): Promise<boolean> {
+    if (!currentStorage) return false
+    try {
+      const kind = await currentStorage.entryKind(name)
+      if (!kind) return false
+      await handleEditEntry(name, kind)
+      return true
+    } catch (err) {
+      console.warn(`Eintrag "${name}" aus der Adresse konnte nicht geoeffnet werden:`, err)
+      return false
+    }
+  }
+
+  /**
+   * Setzt die Adresse ohne neuen History-Schritt auf den uebergebenen Wert.
+   * Wird gebraucht, wenn das Schliessen des Editors die Adresse bereits
+   * ueberschrieben hat, der Browser aber auf einem anderen Schritt steht.
+   */
+  function restoreUrl(url: string) {
+    try {
+      if (url === `${window.location.pathname}${window.location.search}`) return
+      window.history.replaceState(window.history.state, "", url)
+    } catch (err) {
+      console.warn("Adresse konnte nicht wiederhergestellt werden:", err)
+    }
+  }
+
+  /** True, wenn ein Bearbeiten-Fenster offen ist. */
+  function hasOpenEditor(): boolean {
+    return document.querySelector(".modal-overlay") !== null
+  }
+
+  /**
+   * Setzt die Adresse auf den Ordner zurueck, in dem wir tatsaechlich stehen.
+   *
+   * Wird benutzt, wenn die Adresse ins Leere zeigt (Eintrag umbenannt oder
+   * geloescht): sonst behauptet sie weiter ein Ziel, das es nicht gibt, und
+   * ein Neuladen landet im Nirgendwo.
+   */
+  function syncUrlToCurrentFolder() {
+    const storage = currentStorage
+    const folderPath = storage instanceof FileSystemHandleStorage ? storage.subPath : ""
+    // `urlFromBrowser` verbrauchen, damit die Korrektur kein neuer Schritt wird.
+    urlFromBrowser = false
+    editorEntryName = null
+    updateDocumentTitle()
+    syncUrl(folderPath)
+  }
+
+  /**
+   * Loest den Deeplink einmalig nach dem Aufbau der Ansicht auf.
+   *
+   * `islandDeepLink` ist beim Laden ausgewertet; nach dem Aufloesen uebernimmt
+   * `handlePopState` mit der jeweils aktuellen Adresse.
+   */
+  async function applyDeepLink() {
+    const link = islandDeepLink
+    if (!link) {
+      // Ohne Deeplink ist nichts aufzuloesen; Ordnerwechsel sind echte Schritte.
+      deepLinkResolved = true
+      return
+    }
+    try {
+      await resolveDeepLink(link)
+    } finally {
+      // Auch bei einem Fehlschlag: ab jetzt sind Ordnerwechsel echte Schritte.
+      deepLinkResolved = true
+    }
+  }
+
+  /** Loest einen Deeplink auf und korrigiert die Adresse, wenn er ins Leere zeigt. */
+  async function resolveDeepLink(link: IslandDeepLink) {
+    if (!(await applyUrlState(link.path, link.mode))) {
+      // Adresse zeigt ins Leere: auf den Ordner zuruecksetzen, in dem wir
+      // tatsaechlich stehen. Sonst behauptet die Adresse etwas Falsches.
+      syncUrlToCurrentFolder()
+    }
+  }
+
+  /**
+   * Der Zurueck-/Vorwaerts-Button: die Adresse ist die einzige Quelle.
+   *
+   * Reihenfolge ist wichtig: die Adresse wird gelesen, *bevor* das Fenster
+   * geschlossen wird. `restoreAddress` schreibt beim Schliessen die
+   * Ordneradresse per `replaceState` -- der Browser steht aber schon auf dem
+   * Zielschritt, dessen Adresse damit ueberschrieben wuerde. Deshalb wird der
+   * Editor hier stumm geschlossen und die Adresse danach neu gesetzt.
+   */
+  async function handlePopState() {
+    if (!(currentStorage instanceof FileSystemHandleStorage)) return
+
+    const link = readIslandDeepLink()
+    const path = link ? link.path : pathnameToPath(window.location.pathname)
+    const mode = link ? link.mode : ""
+    const url = `${window.location.pathname}${window.location.search}`
+
+    closeOpenEditor()
+
+    // Das Schliessen hat die Adresse moeglicherweise ueberschrieben. Sie ist
+    // hier die einzige Quelle, also den Stand von vorher wiederherstellen.
+    restoreUrl(url)
+
+    const resolved = await applyUrlState(path, mode)
+    if (!resolved || (isEditMode(mode) && !hasOpenEditor())) {
+      // Adresse passt nicht zur Lage (Eintrag umbenannt oder geloescht):
+      // auf den erreichten Ordner korrigieren, statt sie luegen zu lassen.
+      syncUrlToCurrentFolder()
+    }
+
+    // Der Schritt kam vom Browser: kein neuer History-Eintrag, aber der
+    // naechste Ordnerwechsel soll wieder einen anlegen. Das Flag wird hier
+    // verbraucht, weil `syncUrl` je nach Verlauf gar nicht mehr laeuft.
+    urlFromBrowser = false
+    urlSyncDone = true
+  }
+  window.addEventListener("popstate", () => {
+    void handlePopState()
+  })
 
   void initStorage()
 }
