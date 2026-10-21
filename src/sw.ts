@@ -6,7 +6,13 @@ import {
 } from "workbox-precaching"
 import { clientsClaim } from "workbox-core"
 import { registerRoute } from "workbox-routing"
-import { findSavedFile, getMimeType, ISLAND_PARAM } from "./storage.ts"
+import {
+  DEFAULT_INDEX_FILE,
+  findSavedFile,
+  getMimeType,
+  ISLAND_PARAM,
+  type SavedFile,
+} from "./storage.ts"
 
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>
@@ -49,22 +55,14 @@ registerRoute(
     }
 
     // /foo.html -> gespeicherte Datei foo.html; / -> index.html; /foo ->
-    // foo/index.html (wie bei einem Webserver mit Index-Datei).
+    // foo/index.html (wie bei einem Webserver mit Index-Datei). Welcher Fall
+    // gilt, entscheidet das Dateisystem -- nicht ein Punkt im letzten
+    // Pfadabschnitt (siehe resolveRequestPath).
     const relativePath = resolveRequestPath(url.pathname)
 
     try {
-      const file = await findSavedFile(relativePath)
-      if (file) {
-        const mimeType = getMimeType(relativePath, file.type)
-        return new Response(file, {
-          status: 200,
-          headers: {
-            "Content-Type": mimeType,
-            "Content-Length": file.size.toString(),
-            "Cache-Control": "no-cache",
-          },
-        })
-      }
+      const saved = await findSavedFile(relativePath)
+      if (saved) return fileResponse(saved)
     } catch (err) {
       console.error("SW: Fehler beim Laden der Datei:", err)
     }
@@ -88,18 +86,8 @@ registerRoute(
   async ({ request, url }) => {
     const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ""))
     try {
-      const file = relativePath ? await findSavedFile(relativePath) : null
-      if (file) {
-        const mimeType = getMimeType(relativePath, file.type)
-        return new Response(file, {
-          status: 200,
-          headers: {
-            "Content-Type": mimeType,
-            "Content-Length": file.size.toString(),
-            "Cache-Control": "no-cache",
-          },
-        })
-      }
+      const saved = relativePath ? await findSavedFile(relativePath) : null
+      if (saved) return fileResponse(saved)
     } catch (err) {
       console.error("SW: Fehler beim Laden der Datei:", err)
     }
@@ -120,23 +108,39 @@ registerRoute(
 /**
  * Bildet einen URL-Pfad auf den relativen Pfad der gespeicherten Datei ab.
  *
- * - "/"        -> "index.html"   (Wurzel-Index)
- * - "/foo"     -> "foo/index.html" (Ordner-Index, wie bei einem Webserver)
- * - "/foo/"    -> "foo/index.html"
+ * - "/"         -> "index.html"   (Wurzel-Index)
+ * - "/foo"      -> "foo"          (Datei foo oder Ordner mit Index-Datei)
+ * - "/foo/"     -> "foo"
  * - "/foo/a.js" -> "foo/a.js"
  *
- * Der Index-Fallback gilt nur, wenn der letzte Pfadabschnitt keinen Punkt
- * enthält (also kein Dateiname mit Endung ist). Andernfalls würde z. B.
- * "/style.css" fälschlich zu "style.css/index.html".
+ * Ob der Pfad eine Datei oder ein Ordner ist, wird hier NICHT geraten. Frueher
+ * entschied ein Punkt im letzten Abschnitt darueber, was Ordner mit Punkt im
+ * Namen ("projekte/v1.2") unerreichbar machte. Die Entscheidung faellt jetzt in
+ * findSavedFile() anhand des Dateisystems.
+ *
+ * Die Wurzel wird hier zu "index.html" statt zu "" -- findSavedFile() liefert
+ * fuer den leeren Pfad bewusst null, damit Sub-Ressourcen-Anfragen nichts aus
+ * dem Wurzelordner ziehen.
  */
 function resolveRequestPath(pathname: string): string {
   const decoded = decodeURIComponent(pathname)
   const trimmed = decoded.replace(/^\/+|\/+$/g, "")
-  if (!trimmed) return "index.html"
-  const lastSegment = trimmed.slice(trimmed.lastIndexOf("/") + 1)
-  if (lastSegment.includes(".")) return trimmed
+  return trimmed || DEFAULT_INDEX_FILE
+}
 
-  return `${trimmed}/index.html`
+/** Baut die Antwort fuer eine gefundene gespeicherte Datei. */
+function fileResponse(saved: SavedFile): Response {
+  // Der gespeicherte Pfad traegt die Endung -- auch beim Ordner-Index, dessen
+  // URL-Pfad keine hat.
+  const mimeType = getMimeType(saved.path, saved.file.type)
+  return new Response(saved.file, {
+    status: 200,
+    headers: {
+      "Content-Type": mimeType,
+      "Content-Length": saved.file.size.toString(),
+      "Cache-Control": "no-cache",
+    },
+  })
 }
 
 /**

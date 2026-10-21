@@ -12,8 +12,20 @@ export const ISLAND_PARAM = "pwaislands"
  */
 export const OPFS_APP_FOLDER = "PWA Islands"
 
+let dbPromise: Promise<IDBDatabase> | null = null
+
+/**
+ * Oeffnet die IndexedDB genau einmal je Seitenaufruf.
+ *
+ * Der Service Worker fragt die Wurzel bei jeder Anfrage nach -- also auch fuer
+ * jedes CSS, JS und Bild einer Island. Ohne diesen Zwischenspeicher wuerde jede
+ * Anfrage eine neue Verbindung aufbauen, was den groessten Teil der Antwortzeit
+ * ausmacht.
+ */
 export function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
+  if (dbPromise) return dbPromise
+
+  const pending: Promise<IDBDatabase> = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
     request.onupgradeneeded = () => {
@@ -26,6 +38,16 @@ export function openDB(): Promise<IDBDatabase> {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
   })
+
+  dbPromise = pending
+  // Fehlversuch nicht festschreiben, sonst bliebe die App dauerhaft ohne DB.
+  // Der Fehler wird hier nicht geschluckt: `pending` bleibt für den Aufrufer
+  // abgelehnt, nur der Zwischenspeicher wird geraeumt.
+  void pending.catch(() => {
+    if (dbPromise === pending) dbPromise = null
+  })
+
+  return pending
 }
 
 export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
@@ -46,6 +68,7 @@ export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHan
 }
 
 export async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+  invalidateRootCache()
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
@@ -58,6 +81,7 @@ export async function storeDirectoryHandle(handle: FileSystemDirectoryHandle): P
 }
 
 export async function clearStoredDirectoryHandle(): Promise<void> {
+  invalidateRootCache()
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
@@ -89,6 +113,7 @@ export async function getStoredStorageType(): Promise<"fsa" | "opfs" | null> {
 
 /** Speichert die zuletzt gewählte Speicherart. */
 export async function storeStorageType(type: "fsa" | "opfs"): Promise<void> {
+  invalidateRootCache()
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
@@ -101,6 +126,7 @@ export async function storeStorageType(type: "fsa" | "opfs"): Promise<void> {
 }
 
 export async function clearStoredStorageType(): Promise<void> {
+  invalidateRootCache()
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
@@ -129,76 +155,135 @@ export async function getOPFSDirectoryHandle(): Promise<FileSystemDirectoryHandl
   return null
 }
 
-export async function getFileFromDirectory(
+/** Dateiname des Ordner-Index, wie bei einem Webserver. */
+export const DEFAULT_INDEX_FILE = "index.html"
+
+/** Eine gefundene gespeicherte Datei samt Pfad, unter dem sie gefunden wurde. */
+export interface SavedFile {
+  file: File
+  /**
+   * Der Pfad, der tatsaechlich die Datei ist -- bei einem Ordner also
+   * `"foo/index.html"` statt `"foo"`. Entscheidet ueber den MIME-Typ: aus
+   * `"projekte/v1.2"` laesst sich keine Endung ableiten, aus
+   * `"projekte/v1.2/index.html"` schon.
+   */
+  path: string
+}
+
+const MISS_ERRORS = new Set(["NotFoundError", "TypeMismatchError"])
+
+/**
+ * Lauft den Pfad bis zum Elternordner ab. Liefert null, sobald ein Abschnitt
+ * fehlt oder auf eine Datei zeigt -- ohne Ausnahme nach aussen.
+ */
+async function walkToParent(
+  root: FileSystemDirectoryHandle,
+  segments: string[],
+): Promise<FileSystemDirectoryHandle | null> {
+  let current = root
+  for (const segment of segments) {
+    try {
+      current = await current.getDirectoryHandle(segment)
+    } catch (err) {
+      if (err instanceof DOMException && MISS_ERRORS.has(err.name)) return null
+      throw err
+    }
+  }
+  return current
+}
+
+/**
+ * Loest einen relativen Pfad zu einer gespeicherten Datei auf.
+ *
+ * Der Eintrag wird zuerst als Datei probiert, danach als Ordner mit
+ * Index-Datei. Was er ist, entscheidet also das Dateisystem, nicht die
+ * Schreibweise: ein Punkt im Namen sagt nichts -- "projekte/v1.2" ist ein
+ * Ordner, "notes" eine Datei.
+ *
+ * Pro Aufruf kostet das im Trefferfall genau einen Handle-Zugriff; ein Ordner
+ * kostet einen zusaetzlichen, weil der erste Versuch fehlschlaegt.
+ */
+export async function resolveFileInDirectory(
   root: FileSystemDirectoryHandle,
   relativePath: string,
-): Promise<File | null> {
-  const cleanPath = relativePath.replace(/^\/+|\/+$/g, "")
-  if (!cleanPath) return null
-
-  const parts = cleanPath.split("/").filter(Boolean)
+  indexFile = DEFAULT_INDEX_FILE,
+): Promise<SavedFile | null> {
+  const parts = splitPath(relativePath)
   if (parts.length === 0) return null
 
-  // 1. Try walking nested directories
+  const parent = await walkToParent(root, parts.slice(0, -1))
+  if (!parent) return null
+
+  const name = parts[parts.length - 1]
+  const filePath = parts.join("/")
+
+  // 1. Der uebliche Fall: unter dem Pfad liegt direkt eine Datei.
   try {
-    let currentDir = root
-    for (let i = 0; i < parts.length - 1; i++) {
-      currentDir = await currentDir.getDirectoryHandle(parts[i])
-    }
-    const fileHandle = await currentDir.getFileHandle(parts[parts.length - 1])
-    return await fileHandle.getFile()
-  } catch {
-    // 2. Fallback nur für einfache Dateinamen (kein Unterordner): früher wurde
-    //    hier immer der Basisname probiert. Das führte dazu, dass z. B. die
-    //    Dev-Anfrage /src/style.css die gespeicherte style.css auslieferte und
-    //    damit das Vite-Modul-Skript kaputt machte.
-    if (parts.length > 1) return null
-    try {
-      const fileHandle = await root.getFileHandle(parts[0])
-      return await fileHandle.getFile()
-    } catch {
-      return null
-    }
+    const fileHandle = await parent.getFileHandle(name)
+    return { file: await fileHandle.getFile(), path: filePath }
+  } catch (err) {
+    if (!(err instanceof DOMException && MISS_ERRORS.has(err.name))) throw err
+  }
+
+  // 2. Ordner mit Index-Datei. Der zweite Versuch ist kein Fehler, sondern der
+  //    Normalfall fuer /foo und /foo/ -- deshalb erst hier, nicht vorher.
+  if (!indexFile) return null
+  try {
+    const dir = await parent.getDirectoryHandle(name)
+    const fileHandle = await dir.getFileHandle(indexFile)
+    return { file: await fileHandle.getFile(), path: `${filePath}/${indexFile}` }
+  } catch (err) {
+    if (err instanceof DOMException && MISS_ERRORS.has(err.name)) return null
+    throw err
   }
 }
 
-export async function findSavedFile(relativePath: string): Promise<File | null> {
-  const cleanPath = relativePath.replace(/^\/+|\/+$/g, "")
-  if (!cleanPath) return null
+let rootCache: { root: FileSystemDirectoryHandle | null } | null = null
 
-  // 1. Try FSA handle stored in IndexedDB
+/**
+ * Verwirft den zwischengespeicherten Wurzel-Handle. Wird bei jedem Wechsel der
+ * Speicherart oder des Ordners aufgerufen -- sonst zeigte die App weiter auf
+ * den alten Speicher.
+ */
+export function invalidateRootCache(): void {
+  rootCache = null
+}
+
+/**
+ * Wie {@link findActiveStorage}, aber ohne erneuten IndexedDB-Zugriff bei jeder
+ * Anfrage. Der Wert wird nur bei einem Wechsel der Speicherart oder des Ordners
+ * verworfen (siehe {@link invalidateRootCache}).
+ *
+ * Eine fehlende Berechtigung wird bewusst NICHT zwischengespeichert: sie kann
+ * der Benutzer jederzeit erteilen, ohne dass ein Ereignis hier ankaeme.
+ */
+async function findCachedActiveStorage(): Promise<FileSystemDirectoryHandle | null> {
+  if (rootCache) return rootCache.root
+  const root = await findActiveStorage()
+  // null (kein Speicher) nicht festschreiben -- sonst bliebe die App nach dem
+  // spaeteren Waehlen eines Ordners stumm.
+  if (root) rootCache = { root }
+  return root
+}
+
+/**
+ * Sucht eine gespeicherte Datei zum relativen Pfad in der aktiven Speicherwurzel.
+ * Liefert die Datei samt effektivem Pfad (siehe {@link SavedFile}).
+ */
+export async function findSavedFile(
+  relativePath: string,
+  indexFile = DEFAULT_INDEX_FILE,
+): Promise<SavedFile | null> {
+  if (splitPath(relativePath).length === 0) return null
+
   try {
-    const storedHandle = await getStoredDirectoryHandle()
-    if (storedHandle) {
-      let perm: PermissionState = "granted"
-      if (storedHandle.queryPermission) {
-        try {
-          perm = await storedHandle.queryPermission({ mode: "read" })
-        } catch {
-          perm = "prompt"
-        }
-      }
-      if (perm === "granted") {
-        const file = await getFileFromDirectory(storedHandle, relativePath)
-        if (file) return file
-      }
-    }
+    const root = await findCachedActiveStorage()
+    if (!root) return null
+    return await resolveFileInDirectory(root, relativePath, indexFile)
   } catch (err) {
-    console.warn("findSavedFile FSA Fehler:", err)
+    console.warn("findSavedFile Fehler:", err)
+    return null
   }
-
-  // 2. Try OPFS
-  try {
-    const opfsHandle = await getOPFSDirectoryHandle()
-    if (opfsHandle) {
-      const file = await getFileFromDirectory(opfsHandle, relativePath)
-      if (file) return file
-    }
-  } catch (err) {
-    console.warn("findSavedFile OPFS Fehler:", err)
-  }
-
-  return null
 }
 
 const MIME_TYPES: Record<string, string> = {
