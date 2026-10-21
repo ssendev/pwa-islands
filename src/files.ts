@@ -1886,7 +1886,7 @@ export function renderFilesView(container: HTMLElement): void {
        * noch nicht, der Hinweis steht im Leerzustand darunter.
        */
       folderNameDisplay.innerHTML =
-        currentStorageType === "fsa" ? '<span class="breadcrumb-current">💻 PWA Islands</span>' : ""
+        currentStorageType === "fsa" ? '<span class="breadcrumb-current">PWA Islands</span>' : ""
 
       folderActions.innerHTML = renderSettingsMenu()
       bindSettingsActions(container)
@@ -2656,7 +2656,7 @@ export function renderFilesView(container: HTMLElement): void {
 
   // Hilfsfunktion: Bereitet die UI so vor, dass der Klick direkt in requestPermission resultiert.
   function showReopenButtonUI(storedHandle: FileSystemDirectoryHandle) {
-    folderNameDisplay.innerHTML = `<span class="breadcrumb-current">💻 ${escapeHtml(storedHandle.name)}</span>`
+    folderNameDisplay.innerHTML = `<span class="breadcrumb-current">${escapeHtml(storedHandle.name)}</span>`
 
     // Das Zahnrad-Menü kommt zentral aus buildSettingsActions(): Dort gibt es
     // den Speicherwechsel nur in die *andere* Art. Ein "Trennen" ergänzt den
