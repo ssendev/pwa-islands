@@ -1738,8 +1738,6 @@ export function renderFilesView(container: HTMLElement): void {
   interface SettingsAction {
     id: string
     html: string
-    /** Kurze Beschreibung der Speicherart, erscheint als Tooltip/Untertitel. */
-    hint?: string
     danger?: boolean
     run: () => void
   }
@@ -1766,7 +1764,6 @@ export function renderFilesView(container: HTMLElement): void {
       actions.push({
         id: "btn-use-opfs",
         html: "📦 Zu App-Speicher wechseln",
-        hint: "App-Speicher (OPFS): liegt versteckt im Browser, funktioniert ohne Ordnerauswahl und ohne Berechtigung. Die Dateien sind aber an diesen Browser gebunden.",
         run: () => void handleUseOPFS(),
       })
     }
@@ -1775,7 +1772,6 @@ export function renderFilesView(container: HTMLElement): void {
       actions.push({
         id: "btn-select-folder",
         html: "💻 Zu lokalem Ordner wechseln",
-        hint: "Lokaler Ordner (FS API): ein normaler Ordner auf dem Gerät, jederzeit mit anderen Programmen bearbeitbar. Der Browser fragt nach Zugriff.",
         run: () => void handleSwitchToLocalFolder(),
       })
     }
@@ -1818,12 +1814,7 @@ export function renderFilesView(container: HTMLElement): void {
           ${actions
             .map((a) => {
               const classes = `settings-menu-item${a.danger ? " is-danger" : ""}`
-              // Der Erklaertext erscheint als Tooltip (data-tooltip), nicht
-              // dauerhaft im Eintrag -- das Menue soll schlank bleiben.
-              const tip = a.hint
-                ? ` data-tooltip="${escapeHtml(a.hint)}" aria-description="${escapeHtml(a.hint)}"`
-                : ""
-              return `<button id="${a.id}" type="button" class="${classes}"${tip}>${a.html}</button>`
+              return `<button id="${a.id}" type="button" class="${classes}">${a.html}</button>`
             })
             .join("")}
         </div>

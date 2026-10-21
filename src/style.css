@@ -1654,59 +1654,6 @@ button#pwa-refresh {
   position: relative;
 }
 
-/*
- * Erklaer-Tooltip der Einträge: erscheint erst bei Hover bzw. Tastatur-Fokus,
- * links vom Eintrag, damit er nicht aus dem Bildschirm laeuft.
- */
-.settings-menu-item[data-tooltip]::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  top: 50%;
-  right: calc(100% + 10px);
-  transform: translateY(-50%);
-  z-index: 30;
-  width: max-content;
-  max-width: min(300px, calc(100vw - 48px));
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--text-h);
-  color: var(--bg);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.4;
-  white-space: normal;
-  text-align: left;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.12s ease;
-  pointer-events: none;
-}
-
-.settings-menu-item[data-tooltip]:hover::after,
-.settings-menu-item[data-tooltip]:focus-visible::after {
-  opacity: 1;
-  visibility: visible;
-}
-
-/*
- * Schmale Bildschirme: kein Platz links vom Menue -- der Tooltip klappt nach
- * unten und bleibt innerhalb des Viewports.
- */
-@media (max-width: 520px) {
-  .settings-menu-item[data-tooltip]::after {
-    top: calc(100% + 6px);
-    right: 0;
-    transform: none;
-    max-width: calc(100vw - 32px);
-  }
-
-  /*
-   * Schmale Bildschirme: Die Buttons stehen gefloatet rechts, der Pfad bricht
-   * bei Bedarf von allein darunter -- hier ist nichts nachzujustieren.
-   */
-}
-
 .settings-menu-item:hover,
 .settings-menu-item:focus-visible {
   background: var(--accent-bg);
