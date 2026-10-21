@@ -6,6 +6,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { maskableIcon } from "./tools/maskable-icon.ts"
+
 const root = fileURLToPath(new URL(".", import.meta.url))
 const apiTypesEntry = join(root, "src", "api-types.ts")
 const apiDtsFile = join(root, ".generated", "api.d.ts")
@@ -206,6 +208,7 @@ export default defineConfig({
 
   plugins: [
     ...islandsApiPlugin(),
+    maskableIcon(),
     VitePWA({
       strategies: "injectManifest",
       srcDir: "src",
@@ -214,7 +217,6 @@ export default defineConfig({
       injectRegister: false,
 
       pwaAssets: {
-        disabled: false,
         config: true,
       },
 

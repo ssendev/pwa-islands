@@ -61,7 +61,7 @@
     </mask>
 
     <!-- App Icon Base Clip Path -->
-    <clipPath id="appClip">
+    <clipPath id="appClip" class="no-maskable">
       <rect width="512" height="512" rx="115" ry="115"/>
     </clipPath>
   </defs>
@@ -107,6 +107,6 @@
   </g>
 
   <!-- App Icon Inner Border & Glassy Gloss Overlay -->
-  <rect width="512" height="512" rx="115" ry="115" fill="url(#gloss)" opacity="0.4" pointer-events="none"/>
-  <rect width="512" height="512" rx="115" ry="115" fill="none" stroke="#FFFFFF" stroke-width="8" opacity="0.25" pointer-events="none"/>
+  <rect class="no-maskable" width="512" height="512" rx="115" ry="115" fill="url(#gloss)" opacity="0.4" pointer-events="none"/>
+  <rect class="no-maskable" width="512" height="512" rx="115" ry="115" fill="none" stroke="#FFFFFF" stroke-width="8" opacity="0.25" pointer-events="none"/>
 </svg>
