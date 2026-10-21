@@ -1062,6 +1062,11 @@ function openHelpModal(
   // uebereinanderliegen und dessen `onClose` noch laeuft.
   closeOpenEditor()
 
+  // Adressen in der Hilfe immer mit vollem Ursprung: "?pwaislands" allein sagt
+  // niemandem, wo er es eintippen soll, und der Speicherort der App
+  // (localhost, *.localhost, eigene Domain) ist je nach Installation anders.
+  const origin = window.location.origin
+
   const modalOverlay = document.createElement("div")
   modalOverlay.className = "modal-overlay help-modal-overlay"
 
@@ -1115,6 +1120,42 @@ function openHelpModal(
                 <p class="help-hint">
                   Alle Pfade sind relativ zur Wurzel des gewählten Ordners.
                 </p>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">App-Start und Startseiten (index.html)</h4>
+                <p class="help-text">
+                  Beim Öffnen der App landen Sie standardmäßig im Hauptverzeichnis
+                  (<code class="help-path">/</code>).
+                </p>
+                <ul class="help-list">
+                  <li>Zu Beginn sehen Sie hier eine Dateiliste, da noch keine Startseite
+                    existiert.</li>
+                  <li>Sobald Sie eine Datei namens <code class="help-path">index.html</code>
+                    erstellen, wird diese automatisch geladen, wenn Sie die App öffnen.</li>
+                </ul>
+                <p class="help-text">
+                  Dieses Prinzip gilt auch für alle Unterordner: Die Adresse
+                  <code class="help-path">/projekte/</code> lädt automatisch die Datei
+                  <code class="help-path">/projekte/index.html</code>. Fehlt die Datei (oder
+                  existiert die aufgerufene Adresse gar nicht), zeigt die App stattdessen die
+                  Dateiliste des Ordners.
+                </p>
+              </div>
+
+              <div class="help-section">
+                <h4 class="help-heading">Der Bearbeitungsmodus (?${ISLAND_PARAM})</h4>
+                <p class="help-text">
+                  Wenn die App eine fertige Webseite (wie die
+                  <code class="help-path">index.html</code>) anzeigt, können Sie mit dem Parameter
+                  <code class="help-path">?${ISLAND_PARAM}</code> in der Adresse zurück in die
+                  Bearbeitungs-App wechseln:
+                </p>
+                <ul class="help-list">
+                  <li><code class="help-path">${origin}/?${ISLAND_PARAM}</code> → Erzwingt die
+                    Dateiliste des Hauptverzeichnisses (auch wenn eine
+                    <code class="help-path">index.html</code> existiert).</li>
+                </ul>
               </div>
 
               <div class="help-section">
