@@ -2801,7 +2801,9 @@ export function renderFilesView(container: HTMLElement): void {
         // Perfekt, Browser/Android hat es sich (im Hintergrund) gemerkt
         const storage = new FileSystemHandleStorage(storedHandle, "fsa", false)
         await updateView(storage)
-        await applyDeepLink()
+        // Erster Aufbau nach dem Start: der Deeplink gilt hier auch dann, wenn
+        // bereits ein Fenster steht (Hilfe oeffnet vor `initStorage`).
+        await applyDeepLink({ force: true })
       } else {
         // WICHTIG: Jetzt NICHT sofort requestPermission() aufrufen!
         // Zeige stattdessen die UI-Buttons an.
@@ -2924,19 +2926,32 @@ export function renderFilesView(container: HTMLElement): void {
   }
 
   /**
-   * Loest den Deeplink einmalig nach dem Aufbau der Ansicht auf.
+   * Loest den Deeplink nach dem Aufbau der Ansicht auf.
    *
-   * `islandDeepLink` ist beim Laden ausgewertet; nach dem Aufloesen uebernimmt
-   * `handlePopState` mit der jeweils aktuellen Adresse.
+   * `islandDeepLink` wird beim Laden EINMAL ausgewertet. Frueher wurde es hier
+   * bei jedem Aufruf erneut angewandt -- und `applyDeepLink` laeuft nicht nur
+   * beim Start, sondern auch nach jedem Wechsel der Speicherart und nach jeder
+   * Ordnerauswahl. Ein alter Hilfe-Deeplink riss das Hilfe-Fenster deshalb
+   * wieder auf, sobald man den Speicher wechselte. Nach dem ersten Durchlauf
+   * gilt daher die aktuelle Adresse als Quelle (wie in `handlePopState`).
+   *
+   * `force` beim ersten Aufbau: dort ist die Adresse bereits der Deeplink und
+   * muss auch dann gelten, wenn schon ein Fenster offen ist.
    */
-  async function applyDeepLink() {
-    const link = islandDeepLink
+  async function applyDeepLink({ force = false }: { force?: boolean } = {}) {
+    // Erster Aufbau liest den beim Laden ausgewerteten Link, danach die
+    // aktuelle Adresse. So bleibt der Kaltstartpfad unveraendert und der
+    // spaetere Aufruf sieht, was wirklich in der Adresszeile steht.
+    const link = deepLinkResolved ? readIslandDeepLink() : islandDeepLink
     if (!link) {
       // Ohne Deeplink ist nichts aufzuloesen; Ordnerwechsel sind echte Schritte.
       deepLinkResolved = true
       return
     }
     try {
+      // Ein offenes Fenster nicht durch einen erneuten Deeplink aufreissen: es
+      // steht schon, und der Wechsel der Speicherart hat damit nichts zu tun.
+      if (!force && hasOpenModal()) return
       await resolveDeepLink(link)
     } finally {
       // Auch bei einem Fehlschlag: ab jetzt sind Ordnerwechsel echte Schritte.
