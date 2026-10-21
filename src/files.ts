@@ -1746,6 +1746,81 @@ export function renderFilesView(container: HTMLElement): void {
    */
   let currentStorageType: "fsa" | "opfs" | null = null
 
+  /**
+   * Das `beforeinstallprompt`-Ereignis, solange der Browser die Installation
+   * anbietet. Bleibt null, wenn die App schon installiert ist (dann feuert der
+   * Browser das Ereignis gar nicht) oder der Browser es nicht unterstuetzt.
+   */
+  let installPrompt: InstallPromptEvent | null = null
+
+  window.addEventListener("beforeinstallprompt", (event) => {
+    // Ohne `preventDefault()` zeigt der Browser seine eigene Leiste an -- hier
+    // soll aber allein der Menueeintrag den Installationsdialog oeffnen.
+    event.preventDefault()
+    installPrompt = event
+    // Das Menue ist schon gerendert? Dann den Installieren-Eintrag nachziehen.
+    refreshSettingsMenuList()
+  })
+
+  // Nach einer Installation gibt es nichts mehr zu installieren.
+  window.addEventListener("appinstalled", () => {
+    installPrompt = null
+    refreshSettingsMenuList()
+  })
+
+  /**
+   * Fragt den Browser, ob die App als installierte App laeuft. Nur dann ist
+   * der Installieren-Eintrag im Zahnrad sinnlos.
+   *
+   * Alle Modi aus `display_override` mitpruefen, nicht nur `standalone`:
+   * Das Manifest wuenscht `fullscreen` und faellt auf `standalone` bzw.
+   * `minimal-ui` zurueck. Eine installierte App kann also in jedem dieser Modi
+   * laufen -- wuerde hier nur `standalone` stehen, hielte die App sich im
+   * `minimal-ui`-Fenster fuer nicht installiert.
+   */
+  function isAppInstalled(): boolean {
+    const installedModes = ["standalone", "fullscreen", "minimal-ui", "window-controls-overlay"]
+    if (installedModes.some((mode) => window.matchMedia(`(display-mode: ${mode})`).matches)) {
+      return true
+    }
+    // iOS/Safari kennt nur diese eigene Kennzeichnung.
+    return (navigator as Navigator & { standalone?: boolean }).standalone === true
+  }
+
+  /**
+   * True, wenn das Zahnrad "App installieren" anbieten soll.
+   *
+   * Nur wenn der Browser das Ereignis wirklich gefeuert hat -- also nur dort,
+   * wo ein Klick den Installationsdialog oeffnen KANN. Eine Vermutung ueber
+   * den Browser (etwa per User-Agent) waere hier falsch: Firefox installiert
+   * zwar ueber sein eigenes Menue (Version 143+ auf Windows/macOS), aber nicht
+   * auf jeder Plattform, und `beforeinstallprompt` gibt es dort nie. Ein Knopf
+   * waere also ein Versprechen ohne Deckung -- deshalb gar keiner.
+   *
+   * Wo das Ereignis nie kommt (Firefox, Safari auf iOS), installiert der
+   * Nutzer ueber das Menue des Browsers. Dafuer braucht es keinen Eintrag.
+   */
+  function canOfferInstall(): boolean {
+    return installPrompt !== null && !isAppInstalled()
+  }
+
+  /** Oeffnet den Installationsdialog des Browsers. */
+  async function handleInstallApp() {
+    const prompt = installPrompt
+    if (!prompt) return
+    // Das Ereignis laesst sich nur EINMAL ausloesen -- danach ist es verbraucht.
+    installPrompt = null
+    try {
+      await prompt.prompt()
+      await prompt.userChoice
+    } catch (err) {
+      console.warn("Installationsdialog konnte nicht geöffnet werden:", err)
+    }
+    // Ergebnis egal: erst nach dem Dialog neu zeichnen, damit der Eintrag
+    // entweder verschwindet (installiert) oder erneut angeboten wird.
+    refreshSettingsMenuList()
+  }
+
   /** Sammelt die Menüeinträge des Zahnrads -- eine einzige Quelle der Wahrheit. */
   interface SettingsAction {
     id: string
@@ -1802,6 +1877,17 @@ export function renderFilesView(container: HTMLElement): void {
       })
     }
 
+    // Installieren steht zuletzt: es gehoert nicht zum Speicher, sondern zur App
+    // selbst -- und nur dort, wo der Browser den Dialog wirklich oeffnen kann
+    // (siehe `canOfferInstall`).
+    if (canOfferInstall()) {
+      actions.push({
+        id: "btn-install-app",
+        html: "📲 App installieren",
+        run: () => void handleInstallApp(),
+      })
+    }
+
     return actions
   }
 
@@ -1844,6 +1930,29 @@ export function renderFilesView(container: HTMLElement): void {
         action.run()
       })
     }
+  }
+
+  /**
+   * Baut den Inhalt der Eintragsliste neu -- und haengt die Handler neu an,
+   * weil deren Elemente dabei ersetzt werden.
+   *
+   * `beforeinstallprompt` feuert, wann immer der Browser bereit ist; das kann
+   * nach dem ersten Aufbau der Kopfzeile passieren. Statt die ganze Ansicht
+   * neu zu zeichnen (das wuerde die Liste der Dateien neu laden), wird nur die
+   * Menueliste getauscht. Das offene Menue bleibt dabei offen.
+   */
+  function refreshSettingsMenuList() {
+    const list = container.querySelector<HTMLDivElement>("#settings-menu-list")
+    if (!list) return
+    const wasOpen = !list.hidden
+    list.innerHTML = buildSettingsActions()
+      .map((a) => {
+        const classes = `settings-menu-item${a.danger ? " is-danger" : ""}`
+        return `<button id="${a.id}" type="button" class="${classes}">${a.html}</button>`
+      })
+      .join("")
+    bindSettingsActions(list)
+    list.hidden = !wasOpen
   }
 
   /**

@@ -224,7 +224,24 @@ export default defineConfig({
         description: "Offline-capable progressive web application islands",
         theme_color: "#2e69c9",
         background_color: "#2e69c9",
-        display: "fullscreen",
+        /*
+         * Basis bleibt `standalone`: das ist der Modus, den alle Installer
+         * (auch Firefox und iOS Safari) zuverlaessig anbieten. Der
+         * Fullscreen-Wunsch steht in `display_override` -- eine geordnete
+         * Liste, aus der der Browser den ERSTEN Modus nimmt, den er kann.
+         *
+         * Reihenfolge:
+         * 1. `fullscreen` -- randlos, wo unterstuetzt (Chrome, Edge, Safari).
+         * 2. `standalone` -- eigenes Fenster mit Titelleiste (Firefox kennt
+         *    nur das, ignoriert `fullscreen` und faellt hierher).
+         * 3. `minimal-ui` -- letzter Rueckfall fuer Browser ohne Standalone.
+         *
+         * Damit muss die App den Vollbildmodus nicht selbst per
+         * `requestFullscreen()` erzwingen (das braucht eine Nutzergeste).
+         */
+        display: "standalone",
+        display_override: ["fullscreen", "standalone", "minimal-ui"],
+        lang: "de",
       },
 
       injectManifest: {
