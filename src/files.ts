@@ -785,7 +785,7 @@ function openEditorModal(options: EditorModalOptions): void {
               type="text"
               id="modal-file-name"
               class="form-input"
-              value="${escapeHtml(options.name ?? (isFolder ? "Neuer Ordner" : "notiz.txt"))}"
+              value="${escapeHtml(options.name ?? (isFolder ? "Neuer Ordner" : "Neu.html"))}"
               required
               placeholder="${isFolder ? "z. B. projekte" : "z. B. index.html, daten.json"}"
             />
