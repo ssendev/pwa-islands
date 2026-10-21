@@ -13,7 +13,7 @@ aller UI text MUSS in Deutsch geschrieben werden
 # Befehle
 
 `npm run -s build` prüft Formatierung und Lint und baut dann.
-`npm run -s fix` Code Formatieren und Linten.
+`npm run -s fix` runs `oxfmt` and `oxlint --fix` Code Formatieren und Linten.
 
 # Islands-API
 
