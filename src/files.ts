@@ -1727,6 +1727,18 @@ export function renderFilesView(container: HTMLElement): void {
   }
 
   let currentStorage: IFileStorage | null = null
+
+  /**
+   * True, solange die Ansicht "Zugriff erforderlich" steht: der Ordner ist
+   * bekannt, aber nicht freigegeben.
+   *
+   * Noetig, weil `showReopenButtonUI` `updateView` NICHT aufruft -- `currentStorage`
+   * traegt dort also noch den alten Wert. Beim Kaltstart ist das `null`, aber
+   * ueber Zahnrad -> "Zu lokalem Ordner wechseln" steht dort noch der offene
+   * OPFS-Speicher. Ein Test auf `currentStorage` allein laege in diesem Fall
+   * falsch.
+   */
+  let awaitingFolderPermission = false
   /**
    * Die aktuell gewaehlte Speicherart. Bleibt auch dann gesetzt, wenn (noch)
    * kein Ordner offen ist -- so bietet das Zahnrad-Menue im Leerzustand nur
@@ -1891,6 +1903,21 @@ export function renderFilesView(container: HTMLElement): void {
   let helpTopic: HelpTopic = "api"
 
   /**
+   * Welches Kapitel ein Klick auf "Hilfe" ohne Adressangabe oeffnet.
+   *
+   * Ohne offenen Ordner (Kaltstart, OPFS, getrennter Ordner) ist die Frage
+   * "wie baue ich eine Island?" nicht die dringende -- der Nutzer steht vor dem
+   * Schloss und braucht zuerst zu wissen, WO seine Dateien liegen. Dort also
+   * das Speicher-Kapitel; sobald sich eine Liste zeigt, wieder der Einstieg.
+   *
+   * Bewusst nicht in `helpTopic` selbst: das ist die Erinnerung an die letzte
+   * Wahl und soll beim Aufbau der Ansicht nicht ueberschrieben werden.
+   */
+  function defaultHelpTopic(): HelpTopic {
+    return awaitingFolderPermission || !currentStorage ? "fs" : "api"
+  }
+
+  /**
    * True, waehrend der Browser die Adresse selbst gesetzt hat (Zurueck-/
    * Vorwaerts-Button). Dann darf `syncUrl` die Adresse nicht erneut schreiben,
    * sonst entstuende bei jedem Zurueck-Klick ein neuer History-Eintrag.
@@ -1908,6 +1935,9 @@ export function renderFilesView(container: HTMLElement): void {
 
   async function updateView(storage: IFileStorage | null) {
     currentStorage = storage
+    // Jede andere Ansicht raeumt das Schloss weg -- der Ordner ist dann
+    // entweder freigegeben oder gar nicht mehr gewaehlt.
+    awaitingFolderPermission = false
     if (storage) currentStorageType = storage.type
 
     if (!storage) {
@@ -2292,8 +2322,12 @@ export function renderFilesView(container: HTMLElement): void {
     // selbst; ein zweiter Menueklick soll es nicht umschalten.
     if (document.querySelector(".help-modal-overlay")) return
 
-    const shownTopic: HelpTopic = topic ?? helpTopic
+    const shownTopic: HelpTopic = topic ?? defaultHelpTopic()
     helpOpen = true
+
+    // Adresse und Titel nennen das Kapitel, das wirklich offen ist -- auch
+    // wenn es nicht das zuletzt gewaehlte war (siehe `defaultHelpTopic`).
+    helpTopic = shownTopic
 
     if (source === "menu") {
       try {
@@ -2307,9 +2341,7 @@ export function renderFilesView(container: HTMLElement): void {
       } catch (err) {
         console.warn("Adresse konnte nicht aktualisiert werden:", err)
       }
-      // Titel nachziehen: das Kapitel steht jetzt im Tab. Beim Oeffnen ueber
-      // die Adresse ist er schon richtig (siehe `readAddressState`).
-      helpTopic = shownTopic
+      // Titel nachziehen: das Kapitel steht jetzt im Tab.
       updateDocumentTitle()
     }
 
@@ -2688,6 +2720,9 @@ export function renderFilesView(container: HTMLElement): void {
 
   // Hilfsfunktion: Bereitet die UI so vor, dass der Klick direkt in requestPermission resultiert.
   function showReopenButtonUI(storedHandle: FileSystemDirectoryHandle) {
+    // Vor dem Rendern setzen: `defaultHelpTopic` fragt danach, sobald der
+    // Nutzer von hier aus die Hilfe oeffnet.
+    awaitingFolderPermission = true
     folderNameDisplay.innerHTML = `<span class="breadcrumb-current">${escapeHtml(storedHandle.name)}</span>`
 
     // Das Zahnrad-Menü kommt zentral aus buildSettingsActions(): Dort gibt es
