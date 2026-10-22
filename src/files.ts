@@ -5,6 +5,8 @@ import {
   clearStoredDirectoryHandle,
   getStoredStorageType,
   storeStorageType,
+  getStoredFileInfoVisible,
+  storeFileInfoVisible,
   clearStoredStorageType,
   getOPFSDirectoryHandle,
   ISLAND_PARAM,
@@ -355,7 +357,8 @@ function formatDate(timestamp: number): string {
  * `previewUrl` ist eine Object-URL und muss beim Schliessen freigegeben werden.
  */
 interface ContentPreview {
-  kind: "image"
+  /** `image` = `<img>`, `pdf` = `<iframe>` */
+  kind: "image" | "pdf"
   previewUrl: string
 }
 
@@ -402,8 +405,40 @@ function buildImagePreview(blob: Blob): ContentPreview {
   }
 }
 
+/**
+ * Baut eine PDF-Vorschau ueber eine Object-URL mit `application/pdf` als Typ.
+ * Der Browser zeigt sie in seinem eigenen Betrachter an; ohne passenden Typ
+ * laedt er sie nur herunter bzw. zeigt sie als Text an.
+ */
+function buildPdfPreview(blob: Blob): ContentPreview {
+  return {
+    kind: "pdf",
+    previewUrl: URL.createObjectURL(new Blob([blob], { type: "application/pdf" })),
+  }
+}
+
 /** Dateiendungen, die als Bild angezeigt werden koennen (Browser-Standard). */
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg", "ico"])
+
+/** Dateiendungen, die der Browser im eigenen Betrachter anzeigen kann. */
+const PDF_EXTENSIONS = new Set(["pdf"])
+
+/**
+ * Waehlt anhand der Endung die passende Vorschau. `null`, wenn die Datei sich
+ * nicht anzeigen laesst (dann bleibt es beim reinen Umbenennen/Loeschen).
+ */
+function buildPreview(blob: Blob, name: string): ContentPreview | null {
+  const ext = getExtension(name)
+  if (IMAGE_EXTENSIONS.has(ext)) return buildImagePreview(blob)
+  if (PDF_EXTENSIONS.has(ext)) return buildPdfPreview(blob)
+  return null
+}
+
+/** True, wenn die Datei eine Vorschau im Editor bekommt (Bild oder PDF). */
+function hasPreviewSupport(name: string): boolean {
+  const ext = getExtension(name)
+  return IMAGE_EXTENSIONS.has(ext) || PDF_EXTENSIONS.has(ext)
+}
 
 /** Obergrenze fuer Dateien, die der Editor als Text laedt (10 MB). */
 const MAX_EDITABLE_TEXT_BYTES = 10 * 1024 * 1024
@@ -614,7 +649,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
 /**
  * Baut den Inhaltsbereich des Editors: bei editierbaren Textdateien das
  * Textfeld, bei Binaerdateien nur einen kurzen Hinweis -- plus eine Vorschau
- * (Bild) und/oder die Option, die Bytes als Base64 zu bearbeiten.
+ * (Bild oder PDF) und/oder die Option, die Bytes als Base64 zu bearbeiten.
  */
 function renderFileContent(options: {
   locked: boolean
@@ -641,7 +676,15 @@ function renderFileContent(options: {
             class="file-preview-image"
           />
         </figure>`
-      : ""
+      : options.preview?.kind === "pdf"
+        ? `<figure id="modal-file-preview" class="file-preview">
+          <iframe
+            src="${escapeHtml(options.preview.previewUrl)}"
+            title="Vorschau der Datei"
+            class="file-preview-pdf"
+          ></iframe>
+        </figure>`
+        : ""
 
   const base64Html = options.base64Editable
     ? `<label class="form-check">
@@ -1534,6 +1577,8 @@ async function renderGenericFileList(
     onRequestOpen: (name: string) => void
     onRequestOpenFolder: (name: string) => void
   },
+  /** Steuert, ob Groesse und Aenderungsdatum in der Liste erscheinen. */
+  showFileInfo: boolean,
 ): Promise<void> {
   contentEl.innerHTML = `
     <div class="loading-state">
@@ -1588,8 +1633,16 @@ async function renderGenericFileList(
                 <span class="file-name" title="${entry.name}">${entry.name}</span>
               </span>
             </td>
-            <td class="file-size-cell" data-label="Größe">${sizeDisplay}</td>
-            <td class="file-date-cell" data-label="Zuletzt geändert" data-label-short="Geändert">${dateDisplay}</td>
+            ${
+              showFileInfo
+                ? `<td class="file-size-cell" data-label="Größe">${sizeDisplay}</td>`
+                : ""
+            }
+            ${
+              showFileInfo
+                ? `<td class="file-date-cell" data-label="Zuletzt geändert" data-label-short="Geändert">${dateDisplay}</td>`
+                : ""
+            }
             <td class="files-actions-cell">
               <div class="files-actions-inner">
                 <button type="button" class="btn btn-secondary btn-sm btn-edit-entry" data-entry="${encodeURIComponent(
@@ -1613,8 +1666,8 @@ async function renderGenericFileList(
           <thead>
             <tr>
               <th scope="col" class="th-name">Name</th>
-              <th scope="col" class="th-size">Größe</th>
-              <th scope="col" class="th-date">Zuletzt geändert</th>
+              ${showFileInfo ? `<th scope="col" class="th-size">Größe</th>` : ""}
+              ${showFileInfo ? `<th scope="col" class="th-date">Zuletzt geändert</th>` : ""}
               <th scope="col" class="th-actions"><span class="visually-hidden">Aktion</span></th>
             </tr>
           </thead>
@@ -1739,6 +1792,14 @@ export function renderFilesView(container: HTMLElement): void {
   let currentStorageType: "fsa" | "opfs" | null = null
 
   /**
+   * Zeigt die Dateiliste Groesse und Aenderungsdatum? Vorgabe `true`; die
+   * gespeicherte Wahl wird beim Start nachgeladen (siehe
+   * {@link ensureFileInfoSettingKnown}), damit der erste Aufbau der Liste nicht
+   * auf die IndexedDB warten muss.
+   */
+  let showFileInfo = true
+
+  /**
    * Das `beforeinstallprompt`-Ereignis, solange der Browser die Installation
    * anbietet. Bleibt null, wenn die App schon installiert ist (dann feuert der
    * Browser das Ereignis gar nicht) oder der Browser es nicht unterstuetzt.
@@ -1824,8 +1885,9 @@ export function renderFilesView(container: HTMLElement): void {
   /**
    * Baut die Einträge des Zahnrad-Menüs. Reihenfolge ist immer:
    * 1. Hilfe (immer vorhanden, braucht keinen Speicher),
-   * 2. Speicherwechsel (immer nur in die *andere* Art),
-   * 3. Ordnerverwaltung (wechseln / trennen), falls verfügbar.
+   * 2. Datei-Infos ein-/ausblenden (reine Ansichtssache, kein Speicher nötig),
+   * 3. Speicherwechsel (immer nur in die *andere* Art),
+   * 4. Ordnerverwaltung (wechseln / trennen), falls verfügbar.
    * Welche Speicherart aktiv ist, entscheidet `currentStorageType`.
    */ function buildSettingsActions(): SettingsAction[] {
     const actions: SettingsAction[] = [
@@ -1838,6 +1900,23 @@ export function renderFilesView(container: HTMLElement): void {
         run: () => handleOpenHelp("menu"),
       },
     ]
+
+    /*
+     * Datei-Infos nur, wenn es auch eine Liste mit diesen Spalten gibt.
+     *
+     * Solange der lokale Ordner auf Freigabe wartet (`awaitingFolderPermission`),
+     * zeigt die Ansicht den Schloss-Hinweis -- ein Umschalter fuer Spalten, die
+     * gar nicht da sind, waere ein Eintrag ohne Wirkung.
+     */
+    if (currentStorage) {
+      // Direkt unter der Hilfe: beides betrifft nur die Ansicht, nicht den
+      // Speicher -- und ist damit auch ohne offenen Ordner sinnvoll.
+      actions.push({
+        id: "btn-toggle-file-info",
+        html: showFileInfo ? "🔢 Datei-Infos ausblenden" : "🔢 Datei-Infos einblenden",
+        run: () => void handleToggleFileInfo(),
+      })
+    }
 
     if (currentStorageType !== "opfs" && hasOPFS) {
       actions.push({
@@ -1965,6 +2044,42 @@ export function renderFilesView(container: HTMLElement): void {
       }
     })
   }
+
+  /**
+   * Laedt die gespeicherte Wahl fuer "Datei-Infos" einmal beim Start.
+   *
+   * Die Liste wird mit der Vorgabe `true` gezeichnet, also ohne auf die
+   * IndexedDB zu warten. Weicht die gespeicherte Wahl davon ab, wird die Liste
+   * einmal neu aufgebaut -- das passiert nur, wenn der Nutzer die Infos
+   * abgeschaltet hatte.
+   */
+  function ensureFileInfoSettingKnown() {
+    void getStoredFileInfoVisible().then((stored) => {
+      if (stored === showFileInfo) return
+      showFileInfo = stored
+      refreshSettingsMenuList()
+      void refreshCurrentList()
+    })
+  }
+
+  /**
+   * Schaltet Groesse und Aenderungsdatum in der Liste um und merkt sich die
+   * Wahl. Nur die Liste wird neu gezeichnet -- der Speicher bleibt unberuehrt.
+   */
+  async function handleToggleFileInfo() {
+    showFileInfo = !showFileInfo
+    // Erst das Menue, dann die Liste: `refreshCurrentList` tauscht die
+    // Kopfzeile nicht aus, das Menue bliebe sonst mit alter Beschriftung stehen.
+    refreshSettingsMenuList()
+    await refreshCurrentList()
+    try {
+      await storeFileInfoVisible(showFileInfo)
+    } catch (err) {
+      // Die Ansicht stimmt bereits; nur die Erinnerung fehlt. Kein Grund, den
+      // Nutzer mit einem Dialog zu behelligen.
+      console.warn("Datei-Info-Einstellung konnte nicht gespeichert werden:", err)
+    }
+  }
   /** Aufräumfunktion des Einstellungen-Menüs (Listener), falls es offen ist. */
   let settingsMenuCleanup: (() => void) | null = null
 
@@ -2077,6 +2192,7 @@ export function renderFilesView(container: HTMLElement): void {
 
       setupSettingsMenu(container)
       ensureStorageTypeKnown()
+      ensureFileInfoSettingKnown()
       return
     }
 
@@ -2116,6 +2232,7 @@ export function renderFilesView(container: HTMLElement): void {
     bindSettingsActions(container)
     setupSettingsMenu(container)
 
+    ensureFileInfoSettingKnown()
     await refreshCurrentList()
   }
 
@@ -2286,29 +2403,34 @@ export function renderFilesView(container: HTMLElement): void {
     if (!currentStorage) return
     updateBreadcrumbs()
 
-    await renderGenericFileList(filesContent, currentStorage, {
-      onRefresh: refreshCurrentList,
-      onRequestNewFile: handleCreateFile,
-      onRequestNewFolder: handleCreateFolder,
-      onRequestImport: handleImportFiles,
-      onRequestEdit: handleEditEntry,
-      onRequestOpen: (name) => {
-        // Echte Browser-Navigation (kein SPA-Routing), damit der Service
-        // Worker unter /<pfad> die gespeicherte Datei ausliefern kann. Der
-        // volle relative Pfad bleibt erhalten, damit Dateien in Unterordnern
-        // unter /<ordner>/<name> geladen werden.
-        const path = relativePathOf(currentStorage!, name)
-        window.location.assign(
-          `/${path
-            .split("/")
-            .map((segment) => encodeURIComponent(segment))
-            .join("/")}`,
-        )
+    await renderGenericFileList(
+      filesContent,
+      currentStorage,
+      {
+        onRefresh: refreshCurrentList,
+        onRequestNewFile: handleCreateFile,
+        onRequestNewFolder: handleCreateFolder,
+        onRequestImport: handleImportFiles,
+        onRequestEdit: handleEditEntry,
+        onRequestOpen: (name) => {
+          // Echte Browser-Navigation (kein SPA-Routing), damit der Service
+          // Worker unter /<pfad> die gespeicherte Datei ausliefern kann. Der
+          // volle relative Pfad bleibt erhalten, damit Dateien in Unterordnern
+          // unter /<ordner>/<name> geladen werden.
+          const path = relativePathOf(currentStorage!, name)
+          window.location.assign(
+            `/${path
+              .split("/")
+              .map((segment) => encodeURIComponent(segment))
+              .join("/")}`,
+          )
+        },
+        onRequestOpenFolder: (name) => {
+          void openFolder(name)
+        },
       },
-      onRequestOpenFolder: (name) => {
-        void openFolder(name)
-      },
-    })
+      showFileInfo,
+    )
   }
 
   /** Öffnet einen Unterordner und zeigt dessen Inhalt in der Liste. */
@@ -2611,18 +2733,16 @@ export function renderFilesView(container: HTMLElement): void {
 
     try {
       // Grosse Dateien (> 10 MB) werden gar nicht erst als Text geladen. Ist es
-      // ein Bild, zeigen wir trotzdem eine Vorschau.
+      // ein Bild oder PDF, zeigen wir trotzdem eine Vorschau.
       const size = await storage.getFileSize(name)
       if (size > MAX_EDITABLE_TEXT_BYTES) {
-        const tooLargeBlob = IMAGE_EXTENSIONS.has(getExtension(name))
-          ? await storage.readFileBlob(name)
-          : null
+        const tooLargeBlob = hasPreviewSupport(name) ? await storage.readFileBlob(name) : null
         openEditorModal({
           kind: "file",
           mode: "edit",
           name,
           contentLocked: true,
-          preview: tooLargeBlob ? buildImagePreview(tooLargeBlob) : undefined,
+          preview: tooLargeBlob ? (buildPreview(tooLargeBlob, name) ?? undefined) : undefined,
           onSave: saveEntry,
           onDelete: removeEntry,
           onClose: restoreAddress,
@@ -2641,10 +2761,7 @@ export function renderFilesView(container: HTMLElement): void {
         // zerstoeren.
         initialContent: editable ? await blob.text() : "",
         contentLocked: !editable,
-        preview:
-          !editable && IMAGE_EXTENSIONS.has(getExtension(name))
-            ? buildImagePreview(blob)
-            : undefined,
+        preview: !editable ? (buildPreview(blob, name) ?? undefined) : undefined,
         // Bis zur Groessengrenze laesst sich jede Datei als Base64 bearbeiten.
         base64Editable: !editable && blob.size <= MAX_EDITABLE_TEXT_BYTES,
         base64:

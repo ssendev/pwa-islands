@@ -3,6 +3,14 @@ export const DB_VERSION = 1
 export const STORE_NAME = "handles"
 export const HANDLE_KEY = "selected_folder"
 export const STORAGE_TYPE_KEY = "selected_storage_type"
+/**
+ * Schluessel fuer die Sichtbarkeit von Groesse und Aenderungsdatum in der
+ * Dateiliste (Zahnrad -> "Datei-Infos"). Absichtlich eine eigene Zeile in der
+ * Ablage statt eines Feldes an der Speicherart: die Einstellung gehoert zur
+ * Ansicht und soll auch beim Wechsel zwischen lokalem Ordner und App-Speicher
+ * erhalten bleiben.
+ */
+export const FILE_INFO_VISIBLE_KEY = "file_info_visible"
 export const ISLAND_PARAM = "pwaislands"
 
 /**
@@ -119,6 +127,43 @@ export async function storeStorageType(type: "fsa" | "opfs"): Promise<void> {
     const tx = db.transaction(STORE_NAME, "readwrite")
     const store = tx.objectStore(STORE_NAME)
     const req = store.put(type, STORAGE_TYPE_KEY)
+
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+/**
+ * Liest, ob die Dateiliste Groesse und Aenderungsdatum zeigt. Vorgabe ist
+ * `true`: ohne gespeicherte Wahl bleibt die gewohnte Tabellenansicht stehen.
+ *
+ * Fehler (kein IndexedDB, gesperrte Ablage) liefern ebenfalls `true` -- eine
+ * fehlende Einstellung darf die Liste nicht veraendern.
+ */
+export async function getStoredFileInfoVisible(): Promise<boolean> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const store = tx.objectStore(STORE_NAME)
+      const req = store.get(FILE_INFO_VISIBLE_KEY)
+
+      req.onsuccess = () => resolve(req.result !== false)
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Datei-Info-Einstellung:", error)
+    return true
+  }
+}
+
+/** Speichert, ob die Dateiliste Groesse und Aenderungsdatum zeigt. */
+export async function storeFileInfoVisible(visible: boolean): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const store = tx.objectStore(STORE_NAME)
+    const req = store.put(visible, FILE_INFO_VISIBLE_KEY)
 
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
