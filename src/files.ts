@@ -873,7 +873,13 @@ function openEditorModal(options: EditorModalOptions): void {
   const isCreate = options.mode === "create"
   const isFolder = options.kind === "folder"
   const noun = isFolder ? "Ordner" : "Datei"
-  const title = isCreate ? `Neuen ${noun} erstellen` : `${noun} bearbeiten: ${options.name}`
+  /*
+   * Titel des Fensters. Das Genus gehoert zum Substantiv: "die Datei", "der
+   * Ordner" -- daher die zwei Formen statt eines zusammengesetzten
+   * "Neuen ${noun}", das bei "Datei" falsch waere ("Neuen Datei erstellen").
+   */
+  const createTitle = isFolder ? "Neuen Ordner erstellen" : "Neue Datei erstellen"
+  const title = isCreate ? createTitle : `${noun} bearbeiten: ${options.name}`
 
   const modalOverlay = document.createElement("div")
   modalOverlay.className = "modal-overlay"
