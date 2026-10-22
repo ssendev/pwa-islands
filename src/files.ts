@@ -1858,7 +1858,7 @@ export function renderFilesView(container: HTMLElement): void {
     if (currentStorageType !== "fsa" && hasDirectoryPicker) {
       actions.push({
         id: "btn-select-folder",
-        html: "💻 Zu lokalem Ordner wechseln",
+        html: "📁 Zu lokalem Ordner wechseln",
         run: () => void handleSwitchToLocalFolder(),
       })
     }
