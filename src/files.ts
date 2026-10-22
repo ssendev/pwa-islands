@@ -505,6 +505,70 @@ function getExtension(name: string): string {
 }
 
 /**
+ * Symbole fuer die Dateiliste, nach Endung. Reihenfolge im Array ist die
+ * Pruefreihenfolge -- die erste passende Menge gewinnt.
+ *
+ * Bewusst nur eine Handvoll Gruppen statt einer Zuordnung pro Endung: in der
+ * Liste zaehlt Wiedererkennbarkeit (Code, Bild, Ton, Archiv), nicht die exakte
+ * Sprache. Alles Unbekannte bleibt beim neutralen Dokument.
+ */
+const FILE_ICON_GROUPS: Array<{ extensions: Set<string>; icon: string }> = [
+  // Bild -- dieselben Endungen, die auch eine Vorschau bekommen.
+  { extensions: IMAGE_EXTENSIONS, icon: "🖼️" },
+  { extensions: PDF_EXTENSIONS, icon: "📕" },
+  {
+    extensions: new Set(["html", "htm", "xhtml"]),
+    icon: "🌐",
+  },
+  {
+    extensions: new Set(["js", "mjs", "cjs", "jsx", "ts", "tsx"]),
+    icon: "📜",
+  },
+  { extensions: new Set(["css"]), icon: "🎨" },
+  {
+    extensions: new Set(["json", "webmanifest", "yml", "yaml", "toml", "ini", "xml"]),
+    icon: "⚙️",
+  },
+  {
+    extensions: new Set(["md", "txt"]),
+    icon: "📝",
+  },
+  {
+    extensions: new Set(["csv"]),
+    icon: "📊",
+  },
+  {
+    extensions: new Set(["mp3", "wav", "ogg", "m4a", "flac", "aac"]),
+    icon: "🎵",
+  },
+  {
+    extensions: new Set(["mp4", "webm", "mov", "mkv", "avi"]),
+    icon: "🎬",
+  },
+  {
+    extensions: new Set(["zip", "gz", "tar", "rar", "7z", "bz2"]),
+    icon: "🗜️",
+  },
+  {
+    extensions: new Set(["ttf", "otf", "woff", "woff2"]),
+    icon: "🔤",
+  },
+]
+
+/**
+ * Symbol fuer einen Eintrag der Liste. Ordner bekommen das Ordnersymbol,
+ * Dateien das ihrer Endung; unbekannte Endungen das neutrale Dokument.
+ */
+function fileIconFor(name: string, isDirectory: boolean): string {
+  if (isDirectory) return "📁"
+  const ext = getExtension(name)
+  for (const group of FILE_ICON_GROUPS) {
+    if (group.extensions.has(ext)) return group.icon
+  }
+  return "📄"
+}
+
+/**
  * Sucht den tiefsten Ordner, den der Pfad hergibt -- in einem Durchgang.
  *
  * `/foo/bar.html` liefert `foo` (der Pfad zeigt auf eine Datei, also bleibt
@@ -1615,7 +1679,7 @@ async function renderGenericFileList(
     const rows = entries
       .map((entry) => {
         const isDir = entry.kind === "directory"
-        const icon = isDir ? "📁" : "📄"
+        const icon = fileIconFor(entry.name, isDir)
         const sizeDisplay = isDir ? "—" : entry.size !== undefined ? formatBytes(entry.size) : "—"
         const dateDisplay = isDir
           ? "—"
