@@ -524,9 +524,15 @@ code {
   word-break: break-all;
 }
 
+/*
+ * Das Icon sitzt mittig auf der Zeilenhoehe des Namens -- auch wenn der Name
+ * mehrzeilig umbricht. `line-height: 1` verhindert, dass die Emoji-Zeile selbst
+ * hoeher wird als das Zeichen und das Icon dadurch nach unten wandert.
+ */
 .file-icon {
   font-size: 18px;
   flex-shrink: 0;
+  line-height: 1;
 }
 
 .file-row.is-directory .file-name {
@@ -1450,11 +1456,13 @@ button#pwa-refresh {
    * Der Dateiname darf umbrechen. Das Icon bleibt dabei LINKS vom Textblock
    * stehen: es ist `flex-shrink: 0` und die erste Spalte des inneren
    * Flex-Containers, sodass der Text rechts daneben umbricht -- nicht unter
-   * dem Icon.
+   * dem Icon. Ausgerichtet wird es mittig zur Zeilenbox (`align-items: center`
+   * aus der Basisregel), damit es bei mehrzeiligen Namen nicht am oberen Rand
+   * klebt.
    */
   .file-name-inner {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 10px;
     word-break: break-word;
     overflow-wrap: anywhere;
@@ -1462,12 +1470,6 @@ button#pwa-refresh {
 
   .file-name-inner .file-icon {
     flex-shrink: 0;
-    /*
-     * Das Icon sitzt auf der ersten Textzeile. `line-height` entspricht der
-     * Zeilenhoehe des Namens, damit beide auf derselben Grundlinie beginnen --
-     * bei einzeiligen wie bei mehrzeiligen Namen.
-     */
-    line-height: 1.4;
   }
 }
 
