@@ -1161,14 +1161,9 @@ function openHelpModal(
               <div class="help-section">
                 <h4 class="help-heading">Typen für Werkzeuge und Agenten</h4>
                 <p class="help-text">
-                  Die Datei <code class="help-path">/api.d.ts</code> beschreibt die komplette API mit
+                  Die Datei <code class="help-path"><a class="help-link" href="/api.d.ts" target="_blank" rel="noopener">${origin}/api.d.ts</a></code> beschreibt die komplette API mit
                   allen Typen. Kopieren Sie sie in die Zwischenablage und geben Sie sie einem
                   KI-Agenten als Kontext — damit kann er Islands schreiben, ohne die API zu raten.
-                </p>
-                <p class="help-hint">
-                  Klappt das Kopieren nicht, öffnen Sie
-                  <a class="help-link" href="/api.d.ts" target="_blank" rel="noopener">/api.d.ts</a>
-                  direkt im Browser und markieren Sie den Text von Hand.
                 </p>
               </div>
             </div>
@@ -1346,7 +1341,7 @@ function openHelpModal(
       const errorBox = document.createElement("div")
       errorBox.id = "help-copy-error"
       errorBox.className = "alert alert-danger"
-      errorBox.textContent = `Kopieren hat nicht geklappt: ${err instanceof Error ? err.message : String(err)} Öffnen Sie /api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`
+      errorBox.textContent = `Kopieren hat nicht geklappt: ${err instanceof Error ? err.message : String(err)} Öffnen Sie ${origin}/api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`
       body?.appendChild(errorBox)
     } finally {
       copyBtn.disabled = false
