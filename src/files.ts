@@ -1688,18 +1688,15 @@ export function renderFilesView(container: HTMLElement): void {
         <div class="folder-icon" aria-hidden="true">
           <img class="breadcrumb-root-icon" src="${rootIconUrl}" alt="" />
         </div>
-        <div class="folder-actions" id="folder-actions"></div>
+        <div class="folder-actions" id="folder-actions">
+          ${renderSettingsMenuShell()}
+        </div>
         <div class="folder-status-box" id="folder-status">
-          <nav id="folder-name-display" class="breadcrumbs" aria-label="Pfad">Speicher wird überprüft...</nav>
+          <nav id="folder-name-display" class="breadcrumbs" aria-label="Pfad"><span class="breadcrumb-current">PWA Islands</span></nav>
         </div>
       </div>
 
-      <div id="files-content" class="files-content">
-        <div class="loading-state">
-          <div class="spinner"></div>
-          <p>Dateien werden geladen...</p>
-        </div>
-      </div>
+      <div id="files-content" class="files-content"></div>
 
       <input type="file" id="files-import-input" multiple style="display: none;" />
     </div>
@@ -1891,10 +1888,15 @@ export function renderFilesView(container: HTMLElement): void {
     return actions
   }
 
-  /** Baut das komplette Zahnrad-Menü. Nie leer: der Hilfe-Eintrag steht immer drin. */
   function renderSettingsMenu(): string {
-    const actions = buildSettingsActions()
+    return renderSettingsMenuWith(buildSettingsActions())
+  }
 
+  function renderSettingsMenuShell(): string {
+    return renderSettingsMenuWith([])
+  }
+
+  function renderSettingsMenuWith(actions: SettingsAction[]): string {
     return `
       <div class="settings-menu" id="settings-menu">
         <button
@@ -2832,7 +2834,7 @@ export function renderFilesView(container: HTMLElement): void {
     // Vor dem Rendern setzen: `defaultHelpTopic` fragt danach, sobald der
     // Nutzer von hier aus die Hilfe oeffnet.
     awaitingFolderPermission = true
-    folderNameDisplay.innerHTML = `<span class="breadcrumb-current">${escapeHtml(storedHandle.name)}</span>`
+    folderNameDisplay.innerHTML = `<span class="breadcrumb-current">PWA Islands</span>`
 
     // Das Zahnrad-Menü kommt zentral aus buildSettingsActions(): Dort gibt es
     // den Speicherwechsel nur in die *andere* Art. Ein "Trennen" ergänzt den
@@ -2843,9 +2845,9 @@ export function renderFilesView(container: HTMLElement): void {
       <div class="empty-state">
         <div class="empty-icon">🔒</div>
         <h3>Zugriff erforderlich</h3>
-        <p>Um Ihre Dateien zu laden, bestätigen Sie bitte den dauerhaften Zugriff auf den Ordner <strong>${storedHandle.name}</strong>.</p>
+        <p>Um Ihre Dateien zu laden, bestätigen Sie bitte den dauerhaften Zugriff auf den Ordner <strong>${escapeHtml(storedHandle.name)}</strong>.</p>
         <button id="btn-grant-permission-hero" type="button" class="btn btn-primary">
-          Zugriff auf "${storedHandle.name}" erlauben
+          Zugriff auf "${escapeHtml(storedHandle.name)}" erlauben
         </button>
       </div>
     `
@@ -3154,6 +3156,12 @@ export function renderFilesView(container: HTMLElement): void {
   window.addEventListener("popstate", () => {
     void handlePopState()
   })
+
+  // Das Zahnrad steht schon im statischen Markup (siehe
+  // `renderSettingsMenuShell`), damit die Knopfreihe nicht nach dem ersten Bild
+  // noch waechst. Verdrahtet wird es hier -- unabhaengig davon, welchen Zweig
+  // `initStorage` gleich nimmt.
+  setupSettingsMenu(container)
 
   // Die Hilfe braucht keinen Speicher: sie oeffnet auch dann, wenn der Ordner
   // noch nicht freigegeben ist oder nur der App-Speicher zur Verfuegung steht.
