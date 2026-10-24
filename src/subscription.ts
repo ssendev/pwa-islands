@@ -1,4 +1,4 @@
-import { Effect, Option, Queue, Schema, Stream } from "effect"
+import { Effect, Option, Schema, Stream } from "effect"
 import * as Dom from "foldkit/dom"
 import * as Subscription from "foldkit/subscription"
 import {
@@ -10,7 +10,7 @@ import {
 import { Message } from "./message"
 import type { Model } from "./model"
 
-const serviceWorkerStream: Stream.Stream<Message> = Stream.callback((queue) =>
+const serviceWorkerStream: Stream.Stream<Message> = Stream.callback(() =>
   Effect.acquireRelease(
     Effect.sync(() => {
       try {
@@ -20,16 +20,24 @@ const serviceWorkerStream: Stream.Stream<Message> = Stream.callback((queue) =>
         }
         const refreshSW = registerSW({
           immediate: true,
-          onOfflineReady() {
-            Queue.offerUnsafe(queue, Message.ReceivedPwaOfflineReady())
+          onNeedReload() {
+            // In autoUpdate mode, onNeedReload prevents window.location.reload()
+            // so open windows are not disrupted by an automatic reload.
+            console.log("PWA: onNeedReload - Service Worker aktualisiert")
           },
-          onNeedRefresh() {
-            Queue.offerUnsafe(queue, Message.ReceivedPwaNeedRefresh())
+          onOfflineReady() {
+            console.log("PWA: onOfflineReady - App ist bereit für die Offline-Nutzung")
+          },
+          onRegisterError(error) {
+            console.error(
+              "PWA: onRegisterError - Fehler bei der Service-Worker-Registrierung:",
+              error,
+            )
           },
         })
         setRefreshServiceWorker(refreshSW)
-      } catch {
-        // Ignore SW registration failure in non-SW / test environments
+      } catch (error) {
+        console.error("PWA: Fehler beim Registrieren des Service Workers:", error)
       }
     }),
     () =>

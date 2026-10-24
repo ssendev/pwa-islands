@@ -23,7 +23,6 @@ import {
   SaveModalChanges,
   SyncHistoryUrl,
   TriggerInstallAppPrompt,
-  TriggerPwaRefresh,
 } from "./command"
 import { Message } from "./message"
 import {
@@ -33,7 +32,6 @@ import {
   Flags,
   Model,
   ModalState,
-  PwaToastState,
   StorageState,
   buildEditUrl,
   buildFolderUrl,
@@ -90,7 +88,6 @@ export const init = (flags: Flags): Update.Return<Model, Message> => {
         isSettingsOpen: false,
         canInstallApp: false,
         modalState: Option.getOrElse(maybeInitialHelpModal, () => ModalState.Closed()),
-        pwaToastState: PwaToastState.Hidden(),
         maybeAlertBanner: Option.some({
           message:
             "Browser wird nicht unterstützt: Weder die File System Access API noch OPFS sind in diesem Browser verfügbar. Bitte verwenden Sie einen aktuellen Browser (z. B. Chrome, Edge, Firefox oder Safari).",
@@ -109,7 +106,6 @@ export const init = (flags: Flags): Update.Return<Model, Message> => {
       isSettingsOpen: false,
       canInstallApp: false,
       modalState: Option.getOrElse(maybeInitialHelpModal, () => ModalState.Closed()),
-      pwaToastState: PwaToastState.Hidden(),
       maybeAlertBanner: Option.none(),
     },
     commands: [
@@ -989,31 +985,6 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
     CompletedInstallApp: ({ didAccept }) => ({
       model: modifyFields(model, {
         canInstallApp: () => !didAccept && model.canInstallApp,
-      }),
-    }),
-
-    ReceivedPwaOfflineReady: () => ({
-      model: modifyFields(model, {
-        pwaToastState: () => PwaToastState.OfflineReady(),
-      }),
-    }),
-
-    ReceivedPwaNeedRefresh: () => ({
-      model: modifyFields(model, {
-        pwaToastState: () => PwaToastState.NeedRefresh(),
-      }),
-    }),
-
-    ClickedPwaRefresh: () => ({
-      model,
-      commands: [TriggerPwaRefresh()],
-    }),
-
-    CompletedPwaRefresh: () => ({ model }),
-
-    ClickedPwaClose: () => ({
-      model: modifyFields(model, {
-        pwaToastState: () => PwaToastState.Hidden(),
       }),
     }),
   })

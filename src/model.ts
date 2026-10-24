@@ -118,13 +118,6 @@ export const ModalState = defineTaggedUnion({
 })
 export type ModalState = typeof ModalState.Type
 
-export const PwaToastState = defineTaggedUnion({
-  Hidden: {},
-  OfflineReady: {},
-  NeedRefresh: {},
-})
-export type PwaToastState = typeof PwaToastState.Type
-
 export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
 export type AlertVariant = typeof AlertVariant.Type
 
@@ -154,7 +147,6 @@ export const Model = Schema.Struct({
   isSettingsOpen: Schema.Boolean,
   canInstallApp: Schema.Boolean,
   modalState: ModalState,
-  pwaToastState: PwaToastState,
   maybeAlertBanner: Schema.Option(AlertBanner),
 })
 export type Model = typeof Model.Type

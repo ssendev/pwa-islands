@@ -9,7 +9,6 @@ import {
   type Model,
   ModalState,
   PreviewContent,
-  PwaToastState,
   StorageState,
   computeDocumentTitle,
   formatDate,
@@ -98,7 +97,7 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
     Initializing: () =>
       h.nav(
         [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")],
-        [h.span([h.Class("breadcrumb-current")], ["Initialisiere..."])],
+        [h.span([h.Class("breadcrumb-current")], ["PWA Islands"])],
       ),
 
     Unsupported: () =>
@@ -1483,92 +1482,6 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
   )
 
 // ---------------------------------------------------------------------------
-// PWA Update Toast
-// ---------------------------------------------------------------------------
-
-const viewPwaToast = (model: Model, h: HtmlBuilder): Html.Html =>
-  PwaToastState.match(model.pwaToastState, {
-    Hidden: () =>
-      h.div(
-        [h.Id("pwa-toast"), h.Role("alert"), h.AriaLabelledBy("toast-message")],
-        [
-          h.div([h.Class("message")], [h.span([h.Id("toast-message")])]),
-          h.div(
-            [h.Class("buttons")],
-            [
-              h.button(
-                [h.Id("pwa-refresh"), h.Type("button"), h.OnClick(Message.ClickedPwaRefresh())],
-                ["Neu laden"],
-              ),
-              h.button(
-                [h.Id("pwa-close"), h.Type("button"), h.OnClick(Message.ClickedPwaClose())],
-                ["Schließen"],
-              ),
-            ],
-          ),
-        ],
-      ),
-
-    OfflineReady: () =>
-      h.div(
-        [h.Id("pwa-toast"), h.Class("show"), h.Role("alert"), h.AriaLabelledBy("toast-message")],
-        [
-          h.div(
-            [h.Class("message")],
-            [h.span([h.Id("toast-message")], ["App ist bereit für die Offline-Nutzung"])],
-          ),
-          h.div(
-            [h.Class("buttons")],
-            [
-              h.button(
-                [h.Id("pwa-refresh"), h.Type("button"), h.OnClick(Message.ClickedPwaRefresh())],
-                ["Neu laden"],
-              ),
-              h.button(
-                [h.Id("pwa-close"), h.Type("button"), h.OnClick(Message.ClickedPwaClose())],
-                ["Schließen"],
-              ),
-            ],
-          ),
-        ],
-      ),
-
-    NeedRefresh: () =>
-      h.div(
-        [
-          h.Id("pwa-toast"),
-          h.Class("show refresh"),
-          h.Role("alert"),
-          h.AriaLabelledBy("toast-message"),
-        ],
-        [
-          h.div(
-            [h.Class("message")],
-            [
-              h.span(
-                [h.Id("toast-message")],
-                ["Neuer Inhalt verfügbar, klicken Sie auf Neu laden zum Aktualisieren"],
-              ),
-            ],
-          ),
-          h.div(
-            [h.Class("buttons")],
-            [
-              h.button(
-                [h.Id("pwa-refresh"), h.Type("button"), h.OnClick(Message.ClickedPwaRefresh())],
-                ["Neu laden"],
-              ),
-              h.button(
-                [h.Id("pwa-close"), h.Type("button"), h.OnClick(Message.ClickedPwaClose())],
-                ["Schließen"],
-              ),
-            ],
-          ),
-        ],
-      ),
-  })
-
-// ---------------------------------------------------------------------------
 // Root Document View
 // ---------------------------------------------------------------------------
 
@@ -1591,7 +1504,6 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
           ),
         ],
       ),
-      viewPwaToast(model, h),
     ],
   ),
 })

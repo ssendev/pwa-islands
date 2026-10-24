@@ -1161,48 +1161,6 @@ code {
   font-family: var(--mono);
 }
 
-#pwa-toast {
-  visibility: hidden;
-  left: 0;
-  top: 0;
-  margin: 16px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  z-index: 100;
-  text-align: left;
-  box-shadow: var(--shadow);
-  background: var(--bg);
-  color: var(--text);
-  display: grid;
-}
-#pwa-toast .message {
-  margin-bottom: 8px;
-}
-#pwa-toast .buttons {
-  display: flex;
-}
-#pwa-toast button {
-  border: 1px solid var(--border);
-  outline: none;
-  margin-right: 5px;
-  border-radius: 4px;
-  padding: 3px 10px;
-  font-family: var(--sans);
-  color: var(--accent);
-  background: var(--accent-bg);
-  cursor: pointer;
-}
-#pwa-toast.show {
-  visibility: visible;
-}
-button#pwa-refresh {
-  display: none;
-}
-#pwa-toast.show.refresh button#pwa-refresh {
-  display: block;
-}
-
 /*
  * Karten-Ansicht fuer schmale Viewports (≤720 px): Aus jeder Tabellenzeile
  * wird eine Karte. Der Bearbeiten-Button steht LINKS vom Namen -- dazu wird

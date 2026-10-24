@@ -12,7 +12,6 @@ import {
   getDeferredInstallPrompt,
   getOPFSRootDirectory,
   getPendingHandle,
-  getRefreshServiceWorker,
   getSavedDirectoryHandle,
   getSavedFileInfoVisible,
   getSavedStorageType,
@@ -1038,21 +1037,6 @@ export const TriggerInstallAppPrompt = Command.define("TriggerInstallAppPrompt",
       })
     } catch {
       return Message.CompletedInstallApp({ didAccept: false })
-    }
-  }),
-})
-
-export const TriggerPwaRefresh = Command.define("TriggerPwaRefresh", {
-  messages: [Message.CompletedPwaRefresh],
-  execute: Effect.promise(async () => {
-    try {
-      const refreshSW = getRefreshServiceWorker()
-      if (refreshSW) {
-        await refreshSW(true)
-      }
-      return Message.CompletedPwaRefresh()
-    } catch {
-      return Message.CompletedPwaRefresh()
     }
   }),
 })

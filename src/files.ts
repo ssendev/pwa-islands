@@ -419,8 +419,15 @@ export class FileSystemHandleStorage {
 
 export type RegisterSWOptions = {
   immediate?: boolean
+  onNeedReload?: () => void
   onOfflineReady?: () => void
   onNeedRefresh?: () => void
+  onRegistered?: (registration: ServiceWorkerRegistration | undefined) => void
+  onRegisteredSW?: (
+    swScriptUrl: string,
+    registration: ServiceWorkerRegistration | undefined,
+  ) => void
+  onRegisterError?: (error: unknown) => void
 }
 
 export type RegisterSWFn = (options?: RegisterSWOptions) => (reloadPage?: boolean) => Promise<void>

@@ -12,7 +12,6 @@ import {
   SaveFileInfoPreference,
   SaveModalChanges,
   SyncHistoryUrl,
-  TriggerPwaRefresh,
 } from "./command"
 import { Message, init, update, view } from "./main"
 import {
@@ -23,7 +22,6 @@ import {
   type Model,
   ModalState,
   PreviewContent,
-  PwaToastState,
   StorageState,
 } from "./model"
 
@@ -56,7 +54,6 @@ const readyModel: Model = {
   isSettingsOpen: false,
   canInstallApp: false,
   modalState: ModalState.Closed(),
-  pwaToastState: PwaToastState.Hidden(),
   maybeAlertBanner: Option.none(),
 }
 
@@ -268,23 +265,6 @@ describe("PWA Islands Foldkit App", () => {
         ),
         Scene.expect(Scene.selector(".modal-overlay")).toBeAbsent(),
         Scene.expect(Scene.text("hallo.html")).toExist(),
-      )
-    })
-
-    it("shows the PWA update toast and triggers refresh when clicked", () => {
-      Scene.scene(
-        { update, view },
-        Scene.given(readyModel),
-        Scene.expect(Scene.selector("#pwa-toast")).not.toHaveClass("show"),
-        Scene.Subscription.emit(Message.ReceivedPwaNeedRefresh()),
-        Scene.expect(Scene.selector("#pwa-toast")).toHaveClass("show"),
-        Scene.expect(Scene.selector("#pwa-toast")).toHaveClass("refresh"),
-        Scene.expect(Scene.selector("#toast-message")).toHaveText(
-          "Neuer Inhalt verfügbar, klicken Sie auf Neu laden zum Aktualisieren",
-        ),
-        Scene.click(Scene.selector("#pwa-refresh")),
-        Scene.Command.expectExact(TriggerPwaRefresh()),
-        Scene.Command.resolve(TriggerPwaRefresh, Message.CompletedPwaRefresh()),
       )
     })
 

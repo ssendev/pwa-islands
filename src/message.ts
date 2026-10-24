@@ -127,18 +127,13 @@ export const Message = defineMessageUnion({
     message: Schema.String,
   },
 
-  // PWA Install & Service Worker Toast
+  // PWA Install Prompt
   CapturedInstallPrompt: {},
   InstalledApp: {},
   ClickedInstallApp: {},
   CompletedInstallApp: {
     didAccept: Schema.Boolean,
   },
-  ReceivedPwaOfflineReady: {},
-  ReceivedPwaNeedRefresh: {},
-  ClickedPwaRefresh: {},
-  CompletedPwaRefresh: {},
-  ClickedPwaClose: {},
 })
 
 export type Message = typeof Message.Type
