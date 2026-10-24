@@ -238,6 +238,44 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
+        message(Message.ToggledHelpTopic({ topic: "fs", isOpen: true })),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.Help({
+              isApiOpen: false,
+              isFsOpen: true,
+              copyDtsState: CopyDtsState.Idle(),
+            }),
+          )
+        }),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands=help-fs" })),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        message(Message.ToggledHelpTopic({ topic: "fs", isOpen: false })),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.Help({
+              isApiOpen: false,
+              isFsOpen: false,
+              copyDtsState: CopyDtsState.Idle(),
+            }),
+          )
+        }),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands=help" })),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        message(
+          Message.ChangedUrl({
+            url: Option.getOrThrow(fromString("http://localhost:5173/?pwaislands=help")),
+          }),
+        ),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.Help({
+              isApiOpen: false,
+              isFsOpen: false,
+              copyDtsState: CopyDtsState.Idle(),
+            }),
+          )
+        }),
       )
     })
 

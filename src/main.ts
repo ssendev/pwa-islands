@@ -450,20 +450,34 @@ export const update = (model: Model, message: Message) =>
 
         Help: ({ maybeTopic }) => {
           revokeActivePreviewUrl()
+          const maybeExistingHelp =
+            model.modalState._tag === "Help" ? Option.some(model.modalState) : Option.none()
+
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
               modalState: () =>
                 ModalState.Help({
                   isApiOpen: Option.match(maybeTopic, {
-                    onNone: () => true,
+                    onNone: () =>
+                      Option.match(maybeExistingHelp, {
+                        onNone: () => true,
+                        onSome: (existing) => existing.isApiOpen,
+                      }),
                     onSome: (topic) => topic === "api",
                   }),
                   isFsOpen: Option.match(maybeTopic, {
-                    onNone: () => false,
+                    onNone: () =>
+                      Option.match(maybeExistingHelp, {
+                        onNone: () => false,
+                        onSome: (existing) => existing.isFsOpen,
+                      }),
                     onSome: (topic) => topic === "fs",
                   }),
-                  copyDtsState: CopyDtsState.Idle(),
+                  copyDtsState: Option.match(maybeExistingHelp, {
+                    onNone: () => CopyDtsState.Idle(),
+                    onSome: (existing) => existing.copyDtsState,
+                  }),
                 }),
             }),
           }
@@ -1490,8 +1504,8 @@ export const update = (model: Model, message: Message) =>
         return { model }
       }
       const helpState = model.modalState
-      const nextIsApiOpen = topic === "api" ? isOpen : helpState.isApiOpen
-      const nextIsFsOpen = topic === "fs" ? isOpen : helpState.isFsOpen
+      const nextIsApiOpen = topic === "api" ? isOpen : isOpen ? false : helpState.isApiOpen
+      const nextIsFsOpen = topic === "fs" ? isOpen : isOpen ? false : helpState.isFsOpen
 
       if (nextIsApiOpen === helpState.isApiOpen && nextIsFsOpen === helpState.isFsOpen) {
         return { model }

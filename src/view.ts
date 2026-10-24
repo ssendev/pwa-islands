@@ -941,6 +941,7 @@ const viewHelpModal = (
                   h.details(
                     [
                       h.Class("help-topic"),
+                      h.Name("help-topic"),
                       h.DataAttribute("topic", "api"),
                       h.Open(isApiOpen),
                       h.OnToggle((isOpen) => Message.ToggledHelpTopic({ topic: "api", isOpen })),
@@ -1146,6 +1147,7 @@ const viewHelpModal = (
                   h.details(
                     [
                       h.Class("help-topic"),
+                      h.Name("help-topic"),
                       h.DataAttribute("topic", "fs"),
                       h.Open(isFsOpen),
                       h.OnToggle((isOpen) => Message.ToggledHelpTopic({ topic: "fs", isOpen })),
