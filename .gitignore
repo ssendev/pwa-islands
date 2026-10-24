@@ -27,5 +27,7 @@ dev-dist
 *.sln
 *.sw?
 
+/repos/*
+
 # Agent environments
 .gemini

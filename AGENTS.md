@@ -25,10 +25,6 @@ die .html projekte können die öffentliche API für Islands verwenden. Sie ist 
 
 This is a Foldkit app. Read [`FOLDKIT.md`](./FOLDKIT.md) before writing any code in this project. It covers the architecture, the APIs, and the conventions the project is built on.
 
-`FOLDKIT.md` reads the line below to decide whether it has already offered to vendor the Foldkit source. Leave it in place.
-
-subtree_prompted: false
-
 ## Project Notes
 
 Domain vocabulary, deployment steps, local conventions that differ from Foldkit's defaults: write them here.
