@@ -28,5 +28,4 @@ dev-dist
 *.sw?
 
 # Agent environments
-.agents
 .gemini
