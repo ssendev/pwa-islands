@@ -522,9 +522,7 @@ export const OpenFileInBrowser = Command.define("OpenFileInBrowser", {
   messages: [Message.CompletedOpenFileInBrowser],
   execute: (args) => {
     const encodedPath = encodeSubPath([...args.subPath, args.fileName])
-    return Navigation.openUrl(`/${encodedPath}`).pipe(
-      Effect.as(Message.CompletedOpenFileInBrowser()),
-    )
+    return Navigation.load(`/${encodedPath}`).pipe(Effect.as(Message.CompletedOpenFileInBrowser()))
   },
 })
 
