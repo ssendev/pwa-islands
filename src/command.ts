@@ -101,6 +101,39 @@ const resolveRouteDeepLink = async (
       }
     },
 
+    New: async ({ subPath, target }) => {
+      let resolvedSubPath = subPath
+      let entries: ReadonlyArray<FileEntry>
+      let maybeAlertBanner = Option.none<AlertBanner>()
+      try {
+        entries = await storage.listEntries(subPath)
+      } catch {
+        resolvedSubPath = []
+        entries = await storage.listEntries([])
+        maybeAlertBanner = Option.some<AlertBanner>({
+          message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+          variant: "warning",
+        })
+      }
+      return {
+        subPath: resolvedSubPath,
+        entries,
+        maybeModalState: Option.some(
+          target === "folder"
+            ? ModalState.CreateFolder({
+                name: "Neuer Ordner",
+                maybeValidationError: Option.none(),
+              })
+            : ModalState.CreateFile({
+                name: "Neu.html",
+                content: "",
+                maybeValidationError: Option.none(),
+              }),
+        ),
+        maybeAlertBanner,
+      }
+    },
+
     Edit: async ({ subPath, name }) => {
       let entries: ReadonlyArray<FileEntry>
       let currentSubPath = subPath

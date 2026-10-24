@@ -49,6 +49,7 @@ import {
   buildEditUrl,
   buildFolderUrl,
   buildHelpUrl,
+  buildNewUrl,
   currentSubPathFromStorageState,
   parseUrlToRoute,
 } from "./model"
@@ -60,8 +61,21 @@ import { view } from "./view"
 export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
   const isSupported = flags.hasDirectoryPicker || flags.hasOPFS
   const initialRoute = parseUrlToRoute(url)
-  const maybeInitialHelpModal = AppRoute.match(initialRoute, {
+  const maybeInitialModal: Option.Option<ModalState> = AppRoute.match(initialRoute, {
     Folder: () => Option.none(),
+    New: ({ target }) =>
+      Option.some(
+        target === "folder"
+          ? ModalState.CreateFolder({
+              name: "Neuer Ordner",
+              maybeValidationError: Option.none(),
+            })
+          : ModalState.CreateFile({
+              name: "Neu.html",
+              content: "",
+              maybeValidationError: Option.none(),
+            }),
+      ),
     Edit: () => Option.none(),
     Help: ({ maybeTopic }) =>
       Option.some(
@@ -89,7 +103,7 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
         showFileInfo: true,
         isSettingsOpen: false,
         installPrompt: InstallPrompt.Unavailable(),
-        modalState: Option.getOrElse(maybeInitialHelpModal, () => ModalState.Closed()),
+        modalState: Option.getOrElse(maybeInitialModal, () => ModalState.Closed()),
         maybeAlertBanner: Option.some({
           message:
             "Browser wird nicht unterstützt: Weder die File System Access API noch OPFS sind in diesem Browser verfügbar. Bitte verwenden Sie einen aktuellen Browser (z. B. Chrome, Edge, Firefox oder Safari).",
@@ -108,7 +122,7 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
       showFileInfo: true,
       isSettingsOpen: false,
       installPrompt: InstallPrompt.Unavailable(),
-      modalState: Option.getOrElse(maybeInitialHelpModal, () => ModalState.Closed()),
+      modalState: Option.getOrElse(maybeInitialModal, () => ModalState.Closed()),
       maybeAlertBanner: Option.none(),
     },
     commands: [
@@ -322,6 +336,61 @@ export const update = (model: Model, message: Message) =>
               modalState: () => nextModalState,
             }),
             commands: [NavigateToSubfolder({ targetSubPath: subPath })],
+          }
+        },
+
+        New: ({ subPath, target }) => {
+          revokeActivePreviewUrl()
+          const isAlreadyNew =
+            (target === "folder" && model.modalState._tag === "CreateFolder") ||
+            (target === "file" && model.modalState._tag === "CreateFile")
+
+          const targetModalState =
+            target === "folder"
+              ? ModalState.CreateFolder({
+                  name: "Neuer Ordner",
+                  maybeValidationError: Option.none(),
+                })
+              : ModalState.CreateFile({
+                  name: "Neu.html",
+                  content: "",
+                  maybeValidationError: Option.none(),
+                })
+
+          if (isAlreadyNew) {
+            return { model }
+          }
+
+          if (model.storageState._tag !== "Ready") {
+            return {
+              model: modifyFields(model, {
+                isSettingsOpen: () => false,
+                modalState: () => targetModalState,
+              }),
+            }
+          }
+
+          const readyState = model.storageState
+          const isSamePath =
+            readyState.subPath.length === subPath.length &&
+            readyState.subPath.every((seg, idx) => seg === subPath[idx])
+
+          if (isSamePath) {
+            return {
+              model: modifyFields(model, {
+                isSettingsOpen: () => false,
+                modalState: () => targetModalState,
+              }),
+              commands: [FocusModalNameInput()],
+            }
+          }
+
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => targetModalState,
+            }),
+            commands: [NavigateToSubfolder({ targetSubPath: subPath }), FocusModalNameInput()],
           }
         },
 
@@ -542,7 +611,7 @@ export const update = (model: Model, message: Message) =>
               maybeValidationError: Option.none(),
             }),
         }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), FocusModalNameInput()],
+        commands: [PushUrl({ url: buildNewUrl(subPath, "file") }), FocusModalNameInput()],
       }
     },
 
@@ -558,7 +627,7 @@ export const update = (model: Model, message: Message) =>
               maybeValidationError: Option.none(),
             }),
         }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), FocusModalNameInput()],
+        commands: [PushUrl({ url: buildNewUrl(subPath, "folder") }), FocusModalNameInput()],
       }
     },
 

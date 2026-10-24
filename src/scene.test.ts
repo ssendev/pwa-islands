@@ -11,7 +11,13 @@ import {
   type,
 } from "foldkit/scene"
 import { describe, it } from "vitest"
-import { FocusModalNameInput, LoadModalBase64, ReplaceUrl, SaveModalChanges } from "./command"
+import {
+  FocusModalNameInput,
+  LoadModalBase64,
+  PushUrl,
+  ReplaceUrl,
+  SaveModalChanges,
+} from "./command"
 import { Message, update, view } from "./main"
 import {
   BinaryEdit,
@@ -77,7 +83,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(text("index.html")).toExist(),
       click(selector("#btn-new-file")),
       Command.resolveAll(
-        [ReplaceUrl, Message.CompletedReplaceUrl()],
+        [PushUrl, Message.CompletedPushUrl()],
         [FocusModalNameInput, Message.CompletedFocusModalNameInput()],
       ),
       sceneExpect(selector(".modal-title")).toHaveText("Neue Datei erstellen"),

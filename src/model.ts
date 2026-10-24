@@ -95,6 +95,9 @@ export type EditorFileMode = typeof EditorFileMode.Type
 export const HelpTopic = Schema.Literals(["api", "fs"])
 export type HelpTopic = typeof HelpTopic.Type
 
+export const NewTarget = Schema.Literals(["file", "folder"])
+export type NewTarget = typeof NewTarget.Type
+
 export const CopyDtsState = defineTaggedUnion({
   Idle: {},
   Copying: {},
@@ -197,6 +200,10 @@ export const AppRoute = defineRouteUnion({
   Folder: {
     subPath: Schema.Array(Schema.String),
   },
+  New: {
+    subPath: Schema.Array(Schema.String),
+    target: NewTarget,
+  },
   Edit: {
     subPath: Schema.Array(Schema.String),
     name: Schema.String,
@@ -272,6 +279,12 @@ export const buildFolderUrl = (subPath: ReadonlyArray<string>): string => {
   return `${pathPart}?pwaislands`
 }
 
+export const buildNewUrl = (subPath: ReadonlyArray<string>, target: NewTarget): string => {
+  const encoded = encodeSubPath(subPath)
+  const pathPart = encoded !== "" ? `/${encoded}` : "/"
+  return `${pathPart}?pwaislands=${target === "folder" ? "new-folder" : "new"}`
+}
+
 export const buildEditUrl = (subPath: ReadonlyArray<string>, entryName: string): string => {
   const encoded = encodeSubPath([...subPath, entryName])
   return `/${encoded}?pwaislands=edit`
@@ -308,6 +321,22 @@ export const parseHelpParam = (
   return Option.none()
 }
 
+export const parseNewActionParam = (
+  raw: string | null,
+): Option.Option<{ readonly target: NewTarget }> => {
+  if (raw === null) {
+    return Option.none()
+  }
+  const normalized = raw.trim().toLowerCase()
+  if (normalized === "new" || normalized === "neu" || normalized === "new-file") {
+    return Option.some({ target: "file" as const })
+  }
+  if (normalized === "new-folder" || normalized === "neuer-ordner") {
+    return Option.some({ target: "folder" as const })
+  }
+  return Option.none()
+}
+
 export const decodeUrlPathnameSegments = (pathname: string): ReadonlyArray<string> =>
   pipe(
     pathname.split("/"),
@@ -335,6 +364,14 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
     })
   }
 
+  const maybeNew = parseNewActionParam(pwaislandsParam)
+  if (Option.isSome(maybeNew)) {
+    return AppRoute.New({
+      subPath: segments,
+      target: maybeNew.value.target,
+    })
+  }
+
   if (isEditActionParam(pwaislandsParam)) {
     if (Array.isReadonlyArrayNonEmpty(segments)) {
       const name = Array.lastNonEmpty(segments)
@@ -349,6 +386,7 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
 export const routeToUrl = (route: AppRoute): string =>
   AppRoute.match(route, {
     Folder: ({ subPath }) => buildFolderUrl(subPath),
+    New: ({ subPath, target }) => buildNewUrl(subPath, target),
     Edit: ({ subPath, name }) => buildEditUrl(subPath, name),
     Help: ({ subPath, maybeTopic }) => buildHelpUrl(subPath, maybeTopic),
   })

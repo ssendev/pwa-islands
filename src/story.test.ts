@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   CopyApiDtsToClipboard,
   DeleteModalEntry,
+  FocusModalNameInput,
   NavigateToSubfolder,
   PushUrl,
   ReplaceUrl,
@@ -436,6 +437,72 @@ describe("PWA Islands Story Tests", () => {
         ),
         model((m) => {
           expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+    })
+
+    it("opens CreateFile modal and updates URL to ?pwaislands=new when ClickedNewFile", () => {
+      story(
+        update,
+        given(readyModel),
+        message(Message.ClickedNewFile()),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=new" }), FocusModalNameInput()),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        Command.resolve(FocusModalNameInput, Message.CompletedFocusModalNameInput()),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.CreateFile({
+              name: "Neu.html",
+              content: "",
+              maybeValidationError: Option.none(),
+            }),
+          )
+        }),
+        message(Message.ClickedCloseModal()),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" })),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        model((m) => {
+          expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+    })
+
+    it("opens CreateFolder modal and updates URL to ?pwaislands=new-folder when ClickedNewFolder", () => {
+      story(
+        update,
+        given(readyModel),
+        message(Message.ClickedNewFolder()),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=new-folder" }), FocusModalNameInput()),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        Command.resolve(FocusModalNameInput, Message.CompletedFocusModalNameInput()),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.CreateFolder({
+              name: "Neuer Ordner",
+              maybeValidationError: Option.none(),
+            }),
+          )
+        }),
+      )
+    })
+
+    it("handles URL change to ?pwaislands=new without clearing loaded entries", () => {
+      const newUrl = Option.getOrThrow(fromString("http://localhost:5173/?pwaislands=new"))
+      story(
+        update,
+        given(readyModel),
+        message(Message.ChangedUrl({ url: newUrl })),
+        Command.expectExact(FocusModalNameInput()),
+        Command.resolve(FocusModalNameInput, Message.CompletedFocusModalNameInput()),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.CreateFile({
+              name: "Neu.html",
+              content: "",
+              maybeValidationError: Option.none(),
+            }),
+          )
+          expect(m.storageState).toEqual(readyModel.storageState)
         }),
       )
     })
