@@ -16,10 +16,78 @@ import {
   formatSize,
   formatSummaryText,
 } from "./model"
-
+import { OPFS_APP_FOLDER } from "./storage"
 import rootIconUrl from "./assets/pwa-islands.svg"
 
 type HtmlBuilder = Html.HtmlBuilder<Message>
+
+// ---------------------------------------------------------------------------
+// File Icons by Extension
+// ---------------------------------------------------------------------------
+
+const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "svg", "ico"])
+const PDF_EXTENSIONS = new Set(["pdf"])
+
+const FILE_ICON_GROUPS: ReadonlyArray<{
+  readonly extensions: ReadonlySet<string>
+  readonly icon: string
+}> = [
+  { extensions: IMAGE_EXTENSIONS, icon: "🖼️" },
+  { extensions: PDF_EXTENSIONS, icon: "📕" },
+  {
+    extensions: new Set(["html", "htm", "xhtml"]),
+    icon: "🌐",
+  },
+  {
+    extensions: new Set(["js", "mjs", "cjs", "jsx", "ts", "tsx"]),
+    icon: "📜",
+  },
+  { extensions: new Set(["css"]), icon: "🎨" },
+  {
+    extensions: new Set(["json", "webmanifest", "yml", "yaml", "toml", "ini", "xml"]),
+    icon: "⚙️",
+  },
+  {
+    extensions: new Set(["md", "txt"]),
+    icon: "📝",
+  },
+  {
+    extensions: new Set(["csv"]),
+    icon: "📊",
+  },
+  {
+    extensions: new Set(["mp3", "wav", "ogg", "m4a", "flac", "aac"]),
+    icon: "🎵",
+  },
+  {
+    extensions: new Set(["mp4", "webm", "mov", "mkv", "avi"]),
+    icon: "🎬",
+  },
+  {
+    extensions: new Set(["zip", "gz", "tar", "rar", "7z", "bz2"]),
+    icon: "🗜️",
+  },
+  {
+    extensions: new Set(["ttf", "otf", "woff", "woff2"]),
+    icon: "🔤",
+  },
+]
+
+const getExtension = (name: string): string => {
+  const dotIndex = name.lastIndexOf(".")
+  return dotIndex === -1 || dotIndex === name.length - 1
+    ? ""
+    : name.slice(dotIndex + 1).toLowerCase()
+}
+
+export const fileIconFor = (name: string, isDirectory: boolean): string => {
+  if (isDirectory) return "📁"
+  const ext = getExtension(name)
+  for (const group of FILE_ICON_GROUPS) {
+    if (group.extensions.has(ext)) return group.icon
+  }
+  return "📄"
+}
 
 // ---------------------------------------------------------------------------
 // Toolbar & Breadcrumbs
@@ -29,41 +97,43 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
   StorageState.match(model.storageState, {
     Initializing: () =>
       h.nav(
-        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfadnavigation")],
+        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")],
         [h.span([h.Class("breadcrumb-current")], ["Initialisiere..."])],
       ),
 
     Unsupported: () =>
       h.nav(
-        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfadnavigation")],
+        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")],
         [h.span([h.Class("breadcrumb-current")], ["Dateisystem-APIs nicht unterstützt"])],
       ),
 
     NoFolderSelected: () =>
       h.nav(
-        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfadnavigation")],
-        [h.span([h.Class("breadcrumb-current")], ["Kein Ordner ausgewählt"])],
+        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")],
+        [h.span([h.Class("breadcrumb-current")], ["PWA Islands"])],
       ),
 
-    PermissionRequired: ({ folderName }) =>
+    PermissionRequired: () =>
       h.nav(
-        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfadnavigation")],
-        [h.span([h.Class("breadcrumb-current")], [`${folderName} (Zugriff erforderlich)`])],
+        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")],
+        [h.span([h.Class("breadcrumb-current")], ["PWA Islands"])],
       ),
 
     Ready: ({ subPath }) => {
       if (Array.isReadonlyArrayEmpty(subPath)) {
         return h.nav(
-          [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfadnavigation")],
+          [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")],
           [h.span([h.Class("breadcrumb-current"), h.Title("PWA Islands")], ["PWA Islands"])],
         )
       }
 
       const segmentNodes: Array<Html.Html> = []
+      let accumulatedPath = ""
       for (let i = 0; i < subPath.length; i++) {
         const segment = subPath[i]
+        accumulatedPath = accumulatedPath ? `${accumulatedPath}/${segment}` : segment
         const isLast = i === subPath.length - 1
-        segmentNodes.push(h.span([h.Class("breadcrumb-sep"), h.AriaHidden(true)], ["/"]))
+        segmentNodes.push(h.span([h.Class("breadcrumb-separator"), h.AriaHidden(true)], ["/"]))
         if (isLast) {
           segmentNodes.push(h.span([h.Class("breadcrumb-current"), h.Title(segment)], [segment]))
         } else {
@@ -73,6 +143,7 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
                 h.Type("button"),
                 h.Class("breadcrumb-item"),
                 h.Title(segment),
+                h.DataAttribute("segment", accumulatedPath),
                 h.OnClick(Message.ClickedBreadcrumbSegment({ index: i })),
               ],
               [segment],
@@ -82,13 +153,14 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
       }
 
       return h.nav(
-        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfadnavigation")],
+        [h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")],
         [
           h.button(
             [
               h.Type("button"),
               h.Class("breadcrumb-item"),
               h.Title("PWA Islands"),
+              h.DataAttribute("segment", ""),
               h.OnClick(Message.ClickedBreadcrumbRoot()),
             ],
             ["PWA Islands"],
@@ -126,7 +198,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
         [
           h.Type("button"),
           h.Id("btn-settings"),
-          h.Class("btn btn-icon"),
+          h.Class("btn btn-secondary btn-icon"),
           h.Title("Einstellungen"),
           h.AriaLabel("Einstellungen"),
           h.AriaHasPopup("true"),
@@ -140,9 +212,8 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
       h.div(
         [
           h.Id("settings-menu-list"),
-          h.Class(
-            model.isSettingsOpen ? "settings-menu-dropdown" : "settings-menu-dropdown hidden",
-          ),
+          h.Class("settings-menu-list"),
+          h.Hidden(!model.isSettingsOpen),
           h.Role("menu"),
         ],
         [
@@ -238,67 +309,83 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
   )
 }
 
-const viewHeader = (model: Model, h: HtmlBuilder): Html.Html => {
+const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
   const isReady = model.storageState._tag === "Ready"
 
-  return h.header(
+  return h.div(
     [h.Class("files-toolbar")],
     [
       h.div(
-        [h.Class("files-toolbar-info")],
+        [h.Class("folder-icon"), h.AriaHidden(true)],
+        [h.img([h.Class("breadcrumb-root-icon"), h.Src(rootIconUrl), h.Alt("")])],
+      ),
+      h.div(
+        [h.Id("folder-actions"), h.Class("folder-actions")],
         [
-          h.span(
-            [h.Class("folder-icon"), h.AriaHidden(true)],
-            [h.img([h.Class("breadcrumb-root-icon"), h.Src(rootIconUrl), h.Alt("")])],
-          ),
-          viewBreadcrumbs(model, h),
-          h.div(
-            [h.Class("files-toolbar-actions")],
-            [
-              isReady
-                ? h.button(
+          isReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-new-file"),
+                  h.Class("btn btn-primary"),
+                  h.Title("Neue Datei erstellen"),
+                  h.AriaLabel("Neue Datei erstellen"),
+                  h.OnClick(Message.ClickedNewFile()),
+                ],
+                [
+                  h.span(
+                    [h.Class("btn-icon-only"), h.AriaHidden(true)],
                     [
-                      h.Type("button"),
-                      h.Id("btn-new-file"),
-                      h.Class("btn btn-primary"),
-                      h.Title("Neue Datei erstellen"),
-                      h.AriaLabel("Neue Datei erstellen"),
-                      h.OnClick(Message.ClickedNewFile()),
+                      h.span([h.Class("btn-icon-sub")], ["📄"]),
+                      h.span([h.Class("btn-icon-main")], ["➕"]),
                     ],
-                    ["📄➕ Datei"],
-                  )
-                : h.empty,
-              isReady
-                ? h.button(
+                  ),
+                  h.span([h.Class("btn-label")], ["Datei"]),
+                ],
+              )
+            : h.empty,
+          isReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-new-folder"),
+                  h.Class("btn btn-primary"),
+                  h.Title("Neuen Ordner erstellen"),
+                  h.AriaLabel("Neuen Ordner erstellen"),
+                  h.OnClick(Message.ClickedNewFolder()),
+                ],
+                [
+                  h.span(
+                    [h.Class("btn-icon-only"), h.AriaHidden(true)],
                     [
-                      h.Type("button"),
-                      h.Id("btn-new-folder"),
-                      h.Class("btn btn-secondary"),
-                      h.Title("Neuen Ordner erstellen"),
-                      h.AriaLabel("Neuen Ordner erstellen"),
-                      h.OnClick(Message.ClickedNewFolder()),
+                      h.span([h.Class("btn-icon-sub")], ["📁"]),
+                      h.span([h.Class("btn-icon-main")], ["➕"]),
                     ],
-                    ["📁➕ Ordner"],
-                  )
-                : h.empty,
-              isReady
-                ? h.button(
-                    [
-                      h.Type("button"),
-                      h.Id("btn-import-file"),
-                      h.Class("btn btn-secondary"),
-                      h.Title("Externe Dateien hochladen"),
-                      h.AriaLabel("Externe Dateien hochladen"),
-                      h.OnClick(Message.ClickedImportFiles()),
-                    ],
-                    ["📥 Hochladen"],
-                  )
-                : h.empty,
-              viewSettingsMenu(model, h),
-            ],
-          ),
+                  ),
+                  h.span([h.Class("btn-label")], ["Ordner"]),
+                ],
+              )
+            : h.empty,
+          isReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-import-file"),
+                  h.Class("btn btn-secondary"),
+                  h.Title("Externe Dateien hochladen"),
+                  h.AriaLabel("Externe Dateien hochladen"),
+                  h.OnClick(Message.ClickedImportFiles()),
+                ],
+                [
+                  h.span([h.Class("btn-icon-only"), h.AriaHidden(true)], ["📥"]),
+                  h.span([h.Class("btn-label")], ["Hochladen"]),
+                ],
+              )
+            : h.empty,
+          viewSettingsMenu(model, h),
         ],
       ),
+      h.div([h.Id("folder-status"), h.Class("folder-status-box")], [viewBreadcrumbs(model, h)]),
     ],
   )
 }
@@ -309,33 +396,37 @@ const viewHeader = (model: Model, h: HtmlBuilder): Html.Html => {
 
 const viewAlertContainer = (model: Model, h: HtmlBuilder): Html.Html =>
   Option.match(model.maybeAlertBanner, {
-    onNone: () => h.div([h.Id("files-alert-container"), h.AriaLive("polite")]),
+    onNone: () => h.div([h.Id("files-alert-area"), h.AriaLive("polite")]),
     onSome: (banner) =>
       h.div(
-        [h.Id("files-alert-container"), h.AriaLive("polite")],
+        [h.Id("files-alert-area"), h.AriaLive("polite")],
         [h.div([h.Class(`alert alert-${banner.variant}`)], [banner.message])],
       ),
   })
 
 const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): Html.Html => {
-  const icon = entry.kind === "directory" ? "📁" : "📄"
-  const sizeStr = Option.match(entry.maybeSize, {
-    onNone: () => "—",
-    onSome: formatSize,
-  })
-  const dateStr = Option.match(entry.maybeLastModified, {
-    onNone: () => "—",
-    onSome: formatDate,
-  })
+  const isDir = entry.kind === "directory"
+  const icon = fileIconFor(entry.name, isDir)
+  const sizeDisplay = isDir
+    ? "—"
+    : Option.match(entry.maybeSize, {
+        onNone: () => "—",
+        onSome: formatSize,
+      })
+  const dateDisplay = isDir
+    ? "—"
+    : Option.match(entry.maybeLastModified, {
+        onNone: () => "—",
+        onSome: formatDate,
+      })
 
   return h.keyed("tr")(
     entry.name,
     [
-      h.Class(
-        entry.kind === "directory" ? "file-row is-clickable is-directory" : "file-row is-clickable",
-      ),
-      h.DataAttribute("name", entry.name),
+      h.Class(`file-row ${isDir ? "is-directory" : "is-file"}`),
+      h.DataAttribute("entry", entry.name),
       h.DataAttribute("kind", entry.kind),
+      h.Title(isDir ? "Ordner öffnen" : "Datei öffnen"),
       h.OnClick(Message.ClickedEntryRow({ entry })),
     ],
     [
@@ -346,13 +437,24 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
             [h.Class("file-name-inner")],
             [
               h.span([h.Class("file-icon"), h.AriaHidden(true)], [icon]),
-              h.span([h.Class("file-name")], [entry.name]),
+              h.span([h.Class("file-name"), h.Title(entry.name)], [entry.name]),
             ],
           ),
         ],
       ),
-      showFileInfo ? h.td([h.Class("file-size-cell")], [sizeStr]) : h.empty,
-      showFileInfo ? h.td([h.Class("file-date-cell")], [dateStr]) : h.empty,
+      showFileInfo
+        ? h.td([h.Class("file-size-cell"), h.DataAttribute("label", "Größe")], [sizeDisplay])
+        : h.empty,
+      showFileInfo
+        ? h.td(
+            [
+              h.Class("file-date-cell"),
+              h.DataAttribute("label", "Zuletzt geändert"),
+              h.DataAttribute("label-short", "Geändert"),
+            ],
+            [dateDisplay],
+          )
+        : h.empty,
       h.td(
         [h.Class("files-actions-cell")],
         [
@@ -362,15 +464,15 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
               h.button(
                 [
                   h.Type("button"),
-                  h.Class("btn btn-sm btn-secondary btn-edit-entry"),
-                  h.DataAttribute("name", entry.name),
-                  h.DataAttribute("kind", entry.kind),
-                  h.Title(entry.kind === "directory" ? "Ordner bearbeiten" : "Datei bearbeiten"),
+                  h.Class("btn btn-secondary btn-sm btn-edit-entry"),
+                  h.DataAttribute("entry", entry.name),
+                  h.Title(isDir ? "Ordner bearbeiten" : "Datei bearbeiten"),
+                  h.AriaLabel(isDir ? "Ordner bearbeiten" : "Datei bearbeiten"),
                   h.OnClick(Message.ClickedEditEntry({ entry }), {
                     propagation: "Stop",
                   }),
                 ],
-                ["✏️ Bearbeiten"],
+                ["✏️ ", h.span([h.Class("btn-label")], ["Bearbeiten"])],
               ),
             ],
           ),
@@ -388,23 +490,14 @@ const viewFilesTable = (
   if (Array.isReadonlyArrayEmpty(entries)) {
     return h.div(
       [h.Class("empty-state")],
-      [
-        h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📁"]),
-        h.h2([], ["Ordner ist leer"]),
-        h.p(
-          [],
-          [
-            "Dieser Ordner enthält noch keine Dateien. Klicken Sie auf „Neue Datei“, um eine Datei anzulegen.",
-          ],
-        ),
-      ],
+      [h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📁"]), h.h3([], ["Ordner ist leer"])],
     )
   }
 
   return h.div(
-    [h.Class("files-table-container")],
+    [],
     [
-      h.div([h.Class("files-summary")], [formatSummaryText(entries)]),
+      h.div([h.Class("files-summary")], [h.span([], [formatSummaryText(entries)])]),
       h.div(
         [h.Class("table-responsive")],
         [
@@ -417,10 +510,17 @@ const viewFilesTable = (
                   h.tr(
                     [],
                     [
-                      h.th([h.Class("th-name")], ["Name"]),
-                      showFileInfo ? h.th([h.Class("th-size")], ["Größe"]) : h.empty,
-                      showFileInfo ? h.th([h.Class("th-date")], ["Zuletzt geändert"]) : h.empty,
-                      h.th([h.Class("th-actions")], ["Aktionen"]),
+                      h.th([h.Scope("col"), h.Class("th-name")], ["Name"]),
+                      showFileInfo
+                        ? h.th([h.Scope("col"), h.Class("th-size")], ["Größe"])
+                        : h.empty,
+                      showFileInfo
+                        ? h.th([h.Scope("col"), h.Class("th-date")], ["Zuletzt geändert"])
+                        : h.empty,
+                      h.th(
+                        [h.Scope("col"), h.Class("th-actions")],
+                        [h.span([h.Class("visually-hidden")], ["Aktion"])],
+                      ),
                     ],
                   ),
                 ],
@@ -441,7 +541,7 @@ const viewFilesTable = (
 }
 
 const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
-  h.section(
+  h.div(
     [h.Id("files-content"), h.Class("files-content")],
     [
       StorageState.match(model.storageState, {
@@ -470,21 +570,21 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
             [h.Class("empty-state")],
             [
               h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📂"]),
-              h.h2([], ["Kein Ordner ausgewählt"]),
-              h.p(
-                [],
+              h.h3([], ["Kein Ordner ausgewählt"]),
+              h.p([], ["Wähle einen lokalen Ordner, in dem deine Projekte gespeichert werden."]),
+              h.div(
+                [h.Class("empty-actions")],
                 [
-                  "Wählen Sie einen lokalen Ordner auf Ihrem Gerät aus, um dessen Dateien anzuzeigen und zu verwalten.",
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Id("btn-select-folder-hero"),
+                      h.Class("btn btn-primary"),
+                      h.OnClick(Message.ClickedSelectFolder()),
+                    ],
+                    ["📂 Ordner wählen"],
+                  ),
                 ],
-              ),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Id("btn-select-folder-hero"),
-                  h.Class("btn btn-primary btn-lg"),
-                  h.OnClick(Message.ClickedSelectFolder()),
-                ],
-                ["📂 Ordner wählen"],
               ),
             ],
           ),
@@ -494,23 +594,23 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
             [h.Class("empty-state")],
             [
               h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["🔒"]),
-              h.h2([], ["Zugriff erforderlich"]),
+              h.h3([], ["Zugriff erforderlich"]),
               h.p(
                 [],
                 [
-                  "Für den zuletzt verwendeten Ordner ",
+                  "Um Ihre Dateien zu laden, bestätigen Sie bitte den dauerhaften Zugriff auf den Ordner ",
                   h.strong([], [folderName]),
-                  " muss die Berechtigung für diese Sitzung erneut bestätigt werden.",
+                  ".",
                 ],
               ),
               h.button(
                 [
                   h.Type("button"),
                   h.Id("btn-grant-permission-hero"),
-                  h.Class("btn btn-primary btn-lg"),
+                  h.Class("btn btn-primary"),
                   h.OnClick(Message.ClickedGrantPermission()),
                 ],
-                [`Zugriff auf „${folderName}“ erlauben`],
+                [`Zugriff auf "${folderName}" erlauben`],
               ),
             ],
           ),
@@ -528,16 +628,16 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
             Loaded: ({ entries }) => viewFilesTable(entries, model.showFileInfo, h),
             Error: ({ message }) =>
               h.div(
-                [h.Class("empty-state error-state")],
+                [h.Class("empty-state")],
                 [
                   h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["⚠️"]),
-                  h.h2([], ["Fehler beim Lesen der Dateien"]),
+                  h.h3([], ["Fehler beim Lesen der Dateien"]),
                   h.p([], [message]),
                   h.button(
                     [
                       h.Type("button"),
                       h.Id("btn-retry-list"),
-                      h.Class("btn btn-secondary"),
+                      h.Class("btn btn-primary"),
                       h.OnClick(Message.ClickedRetryList()),
                     ],
                     ["Erneut versuchen"],
@@ -556,33 +656,15 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
 const viewPreviewContent = (preview: PreviewContent, h: HtmlBuilder): Html.Html =>
   PreviewContent.match(preview, {
     None: () => h.empty,
-    Image: ({ objectUrl, name }) =>
-      h.div(
-        [h.Class("modal-preview-container")],
-        [
-          h.label([h.Class("form-label")], ["Vorschau"]),
-          h.div(
-            [h.Class("modal-preview-box")],
-            [
-              h.img([
-                h.Src(objectUrl),
-                h.Alt(`Vorschau von ${name}`),
-                h.Class("modal-preview-image"),
-              ]),
-            ],
-          ),
-        ],
+    Image: ({ objectUrl }) =>
+      h.figure(
+        [h.Id("modal-file-preview"), h.Class("file-preview")],
+        [h.img([h.Src(objectUrl), h.Alt("Vorschau der Datei"), h.Class("file-preview-image")])],
       ),
     Pdf: ({ objectUrl }) =>
-      h.div(
-        [h.Class("modal-preview-container")],
-        [
-          h.label([h.Class("form-label")], ["Vorschau"]),
-          h.div(
-            [h.Class("modal-preview-box modal-preview-box-pdf")],
-            [h.iframe([h.Src(objectUrl), h.Title("PDF-Vorschau"), h.Class("modal-preview-pdf")])],
-          ),
-        ],
+      h.figure(
+        [h.Id("modal-file-preview"), h.Class("file-preview")],
+        [h.iframe([h.Src(objectUrl), h.Title("Vorschau der Datei"), h.Class("file-preview-pdf")])],
       ),
   })
 
@@ -590,13 +672,13 @@ const viewEditorFileBody = (fileMode: EditorFileMode, h: HtmlBuilder): ReadonlyA
   EditorFileMode.match(fileMode, {
     Text: ({ content }) => [
       h.div(
-        [h.Class("form-group form-group-grow")],
+        [h.Class("form-group")],
         [
-          h.label([h.For("modal-file-content")], ["Inhalt (UTF-8 Text)"]),
+          h.label([h.For("modal-file-content")], ["Inhalt:"]),
           h.textarea([
             h.Id("modal-file-content"),
             h.Class("form-textarea"),
-            h.Rows(14),
+            h.Placeholder("Geben Sie hier den Dateiinhalt ein..."),
             h.Spellcheck(false),
             h.Value(content),
             h.OnInput((text) => Message.UpdatedModalTextContent({ content: text })),
@@ -605,161 +687,174 @@ const viewEditorFileBody = (fileMode: EditorFileMode, h: HtmlBuilder): ReadonlyA
       ),
     ],
 
-    Binary: ({
-      lockReason,
-      canEditBase64,
-      isBase64Enabled,
-      base64Content,
-      isLoadingBase64,
-      preview,
-    }) => [
-      viewPreviewContent(preview, h),
+    Binary: ({ canEditBase64, isBase64Enabled, base64Content, isLoadingBase64, preview }) => [
       h.div(
-        [h.Class("alert alert-warning modal-lock-notice")],
+        [h.Class("form-group")],
         [
-          h.span([h.Class("lock-icon"), h.AriaHidden(true)], ["🔒"]),
-          h.div(
-            [h.Class("lock-notice-content")],
-            [
-              h.div([], [lockReason]),
-              canEditBase64
-                ? h.label(
-                    [h.Class("checkbox-label"), h.For("modal-use-base64")],
-                    [
-                      h.input([
-                        h.Type("checkbox"),
-                        h.Id("modal-use-base64"),
-                        h.Checked(isBase64Enabled),
-                        h.Disabled(isLoadingBase64),
-                        h.OnChange(() =>
-                          Message.ToggledModalBase64({
-                            isChecked: !isBase64Enabled,
-                          }),
-                        ),
-                      ]),
-                      h.span([], ["Binärdatei bearbeiten"]),
-                    ],
-                  )
-                : h.empty,
-            ],
-          ),
+          canEditBase64
+            ? h.label(
+                [h.Class("form-check")],
+                [
+                  h.input([
+                    h.Type("checkbox"),
+                    h.Id("modal-use-base64"),
+                    h.Checked(isBase64Enabled),
+                    h.Disabled(isLoadingBase64),
+                    h.OnChange(() =>
+                      Message.ToggledModalBase64({
+                        isChecked: !isBase64Enabled,
+                      }),
+                    ),
+                  ]),
+                  h.span([], ["Binärdatei bearbeiten"]),
+                ],
+              )
+            : h.empty,
+          canEditBase64 && isBase64Enabled
+            ? h.div(
+                [h.Id("modal-base64-editor"), h.Class("form-group")],
+                [
+                  h.label([h.For("modal-file-content-b64")], ["Base64-Inhalt:"]),
+                  h.textarea([
+                    h.Id("modal-file-content-b64"),
+                    h.Class("form-textarea form-textarea-mono"),
+                    h.Spellcheck(false),
+                    h.Placeholder("Base64-Daten dieser Datei"),
+                    h.Disabled(isLoadingBase64),
+                    h.Value(base64Content),
+                    h.OnInput((value) =>
+                      Message.UpdatedModalBase64Content({
+                        base64Content: value,
+                      }),
+                    ),
+                  ]),
+                ],
+              )
+            : h.empty,
+          viewPreviewContent(preview, h),
         ],
       ),
-      canEditBase64 && isBase64Enabled
-        ? h.div(
-            [h.Id("modal-base64-group"), h.Class("form-group form-group-grow")],
-            [
-              h.label([h.For("modal-file-content-b64")], ["Inhalt (Base64-kodiert)"]),
-              h.textarea([
-                h.Id("modal-file-content-b64"),
-                h.Class("form-textarea"),
-                h.Rows(10),
-                h.Spellcheck(false),
-                h.Placeholder("Base64-kodierte Binärdaten..."),
-                h.Disabled(isLoadingBase64),
-                h.Value(base64Content),
-                h.OnInput((value) =>
-                  Message.UpdatedModalBase64Content({
-                    base64Content: value,
-                  }),
-                ),
-              ]),
-            ],
-          )
-        : h.empty,
     ],
   })
 
 const viewEditorModal = (
   titleText: string,
+  noun: "Datei" | "Ordner",
   isFolder: boolean,
   isEditingExisting: boolean,
   nameValue: string,
   extraBodyNodes: ReadonlyArray<Html.Html>,
   h: HtmlBuilder,
-): Html.Html =>
-  h.div(
-    [h.Class("modal-overlay"), h.Role("dialog"), h.AriaModal(true), h.AriaLabel(titleText)],
+): Html.Html => {
+  const saveLabel = isEditingExisting ? "Speichern" : "Erstellen"
+
+  return h.div(
+    [
+      h.Class("modal-overlay"),
+      h.Role("dialog"),
+      h.AriaModal(true),
+      h.AriaLabelledBy("modal-title"),
+    ],
     [
       h.div(
-        [h.Class("modal-dialog")],
+        [h.Class("modal-content")],
         [
           h.header(
             [h.Class("modal-header")],
             [
-              h.h2([h.Class("modal-title")], [titleText]),
+              h.h3([h.Id("modal-title"), h.Class("modal-title")], [titleText]),
               h.button(
                 [
                   h.Type("button"),
-                  h.Class("btn btn-icon modal-close-btn"),
+                  h.Class("modal-close-btn"),
                   h.AriaLabel("Schließen"),
-                  h.Title("Schließen"),
                   h.OnClick(Message.ClickedCloseModal()),
                 ],
-                ["✕"],
+                ["×"],
               ),
             ],
           ),
-          h.div(
-            [h.Class("modal-body")],
+          h.form(
+            [h.Id("modal-form")],
             [
               h.div(
-                [h.Class("form-group")],
+                [h.Class("modal-body")],
                 [
-                  h.label([h.For("modal-file-name")], [isFolder ? "Ordnername" : "Dateiname"]),
-                  h.input([
-                    h.Type("text"),
-                    h.Id("modal-file-name"),
-                    h.Class("form-input"),
-                    h.Value(nameValue),
-                    h.Autocomplete("off"),
-                    h.Spellcheck(false),
-                    h.OnInput((name) => Message.UpdatedModalName({ name })),
-                  ]),
+                  h.div(
+                    [h.Class("form-group")],
+                    [
+                      h.label([h.For("modal-file-name")], [`${noun}name:`]),
+                      h.input([
+                        h.Type("text"),
+                        h.Id("modal-file-name"),
+                        h.Class("form-input"),
+                        h.Value(nameValue),
+                        h.Required(true),
+                        h.Placeholder(isFolder ? "z. B. projekte" : "z. B. index.html, daten.json"),
+                        h.Autocomplete("off"),
+                        h.OnInput((name) => Message.UpdatedModalName({ name })),
+                      ]),
+                    ],
+                  ),
+                  ...extraBodyNodes,
                 ],
               ),
-              ...extraBodyNodes,
-            ],
-          ),
-          h.footer(
-            [h.Class("modal-footer")],
-            [
-              h.div(
-                [h.Class("modal-footer-left")],
+              h.footer(
+                [h.Class("modal-footer")],
                 [
-                  isEditingExisting
-                    ? h.button(
+                  h.div(
+                    [h.Class("modal-footer-left")],
+                    [
+                      isEditingExisting
+                        ? h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("modal-btn-delete"),
+                              h.Class("btn btn-danger icon-label-btn"),
+                              h.AriaLabel("Löschen"),
+                              h.DataAttribute("tip", "Löschen"),
+                              h.OnClick(Message.ClickedDeleteModalEntry()),
+                            ],
+                            [
+                              h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["🗑️"]),
+                              h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
+                            ],
+                          )
+                        : h.empty,
+                    ],
+                  ),
+                  h.div(
+                    [h.Class("modal-footer-right")],
+                    [
+                      h.button(
                         [
                           h.Type("button"),
-                          h.Id("modal-btn-delete"),
-                          h.Class("btn btn-danger"),
-                          h.OnClick(Message.ClickedDeleteModalEntry()),
+                          h.Id("modal-btn-cancel"),
+                          h.Class("btn btn-secondary icon-label-btn"),
+                          h.AriaLabel("Abbrechen"),
+                          h.DataAttribute("tip", "Abbrechen"),
+                          h.OnClick(Message.ClickedCloseModal()),
                         ],
-                        ["🗑️ Löschen"],
-                      )
-                    : h.empty,
-                ],
-              ),
-              h.div(
-                [h.Class("modal-footer-right")],
-                [
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Id("modal-btn-cancel"),
-                      h.Class("btn btn-secondary"),
-                      h.OnClick(Message.ClickedCloseModal()),
+                        [
+                          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                          h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
+                        ],
+                      ),
+                      h.button(
+                        [
+                          h.Type("submit"),
+                          h.Id("modal-btn-save"),
+                          h.Class("btn btn-primary icon-label-btn"),
+                          h.AriaLabel(saveLabel),
+                          h.DataAttribute("tip", saveLabel),
+                          h.OnClick(Message.ClickedSaveModal()),
+                        ],
+                        [
+                          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["💾"]),
+                          h.span([h.Class("icon-label-btn-text")], [saveLabel]),
+                        ],
+                      ),
                     ],
-                    ["Abbrechen"],
-                  ),
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Id("modal-btn-save"),
-                      h.Class("btn btn-primary"),
-                      h.OnClick(Message.ClickedSaveModal()),
-                    ],
-                    ["💾 Speichern"],
                   ),
                 ],
               ),
@@ -769,6 +864,7 @@ const viewEditorModal = (
       ),
     ],
   )
+}
 
 const viewHelpModal = (
   model: Model,
@@ -777,398 +873,526 @@ const viewHelpModal = (
   copyDtsState: CopyDtsState,
   h: HtmlBuilder,
 ): Html.Html => {
-  const fsaStatus = model.hasDirectoryPicker ? "✅ verfügbar" : "❌ nicht verfügbar"
-  const opfsStatus = model.hasOPFS ? "✅ verfügbar" : "❌ nicht verfügbar"
+  const origin = typeof window !== "undefined" ? window.location.origin : ""
 
   const copyBtnLabel = CopyDtsState.match(copyDtsState, {
-    Idle: () => "📋 /api.d.ts in Zwischenablage kopieren",
+    Idle: () => "/api.d.ts kopieren",
     Copying: () => "Wird kopiert …",
     Copied: () => "✅ Kopiert!",
-    Error: () => "📋 /api.d.ts in Zwischenablage kopieren",
+    Error: () => "/api.d.ts kopieren",
   })
-
-  const isCopying = copyDtsState._tag === "Copying"
 
   return h.div(
     [
       h.Class("modal-overlay help-modal-overlay"),
       h.Role("dialog"),
       h.AriaModal(true),
-      h.AriaLabel("Hilfe"),
+      h.AriaLabelledBy("help-modal-title"),
     ],
     [
       h.div(
-        [h.Class("modal-dialog modal-dialog-help")],
+        [h.Class("modal-content")],
         [
           h.header(
             [h.Class("modal-header")],
             [
-              h.h2([h.Class("modal-title")], ["❓ Hilfe & Dokumentation"]),
+              h.h3(
+                [h.Id("help-modal-title"), h.Class("modal-title")],
+                [h.span([h.Class("help-title-icon"), h.AriaHidden(true)], ["❓"]), " Hilfe"],
+              ),
               h.button(
                 [
                   h.Type("button"),
-                  h.Class("btn btn-icon modal-close-btn"),
+                  h.Class("modal-close-btn"),
                   h.AriaLabel("Schließen"),
-                  h.Title("Schließen"),
                   h.OnClick(Message.ClickedCloseModal()),
                 ],
-                ["✕"],
+                ["×"],
               ),
             ],
           ),
           h.div(
-            [h.Class("modal-body help-modal-body")],
+            [h.Class("modal-body")],
             [
-              // Topic 1: API
-              h.details(
+              h.div(
+                [h.Class("help-accordion")],
                 [
-                  h.Class("help-topic"),
-                  h.DataAttribute("topic", "api"),
-                  h.Open(isApiOpen),
-                  h.OnToggle((isOpen) => Message.ToggledHelpTopic({ topic: "api", isOpen })),
-                ],
-                [
-                  h.summary(
-                    [h.Class("help-topic-summary")],
+                  // Topic 1: API
+                  h.details(
                     [
-                      h.span([h.Class("help-topic-title")], ["🏝️ PWA Islands bauen"]),
-                      h.span([h.Class("help-topic-badge")], ["Insel-Architektur & API"]),
+                      h.Class("help-topic"),
+                      h.DataAttribute("topic", "api"),
+                      h.Open(isApiOpen),
+                      h.OnToggle((isOpen) => Message.ToggledHelpTopic({ topic: "api", isOpen })),
                     ],
-                  ),
-                  h.div(
-                    [h.Class("help-topic-content")],
                     [
-                      h.p(
-                        [],
+                      h.summary(
+                        [h.Class("help-topic-summary")],
                         [
-                          "Eine ",
-                          h.strong([], ["PWA Island"]),
-                          " ist eine eigenständige Mini-App – meist eine einzelne ",
-                          h.code([], [".html"]),
-                          "-Datei (oder ein Unterordner mit HTML, CSS und JS), die direkt aus deinem gewählten Speicher geladen und vom Service Worker unter ihrer echten URL ausgeliefert wird.",
-                        ],
-                      ),
-                      h.h3([], ["Schnellstart"]),
-                      h.ol(
-                        [h.Class("help-steps")],
-                        [
-                          h.li(
-                            [],
-                            [
-                              "Klicke oben auf ",
-                              h.strong([], ["📄➕ Datei"]),
-                              " und erstelle z.\u00a0B. ",
-                              h.code([], ["Notizen.html"]),
-                              ".",
-                            ],
-                          ),
-                          h.li(
-                            [],
-                            [
-                              "Binde bei Bedarf die Islands-API mit ",
-                              h.code([], ["import islands from '/api.js'"]),
-                              " ein.",
-                            ],
-                          ),
-                          h.li(
-                            [],
-                            [
-                              "Speichere die Datei und klicke in der Dateiliste darauf, um deine Island zu starten.",
-                            ],
-                          ),
-                          h.li(
-                            [],
-                            [
-                              "Um aus einer laufenden Island zur Dateiverwaltung zurückzukehren, hänge ",
-                              h.code([], ["?pwaislands"]),
-                              " an die URL an (oder ",
-                              h.code([], ["?pwaislands=edit"]),
-                              " zum direkten Bearbeiten).",
-                            ],
-                          ),
-                        ],
-                      ),
-                      h.h3([], ["Beispiel-Island"]),
-                      h.pre(
-                        [h.Class("help-code-block")],
-                        [
-                          h.code(
-                            [],
-                            [
-                              `<!doctype html>
-<html lang="de">
-<head>
-  <meta charset="utf-8" />
-  <title>Meine Island</title>
-</head>
-<body>
-  <h1 id="title">Lade…</h1>
-  <script type="module">
-    import islands from '/api.js'
-
-    // Textdatei schreiben & lesen
-    await islands.fs.writeText('hallo.txt', 'Hallo von meiner Island!')
-    const text = await islands.fs.readText('hallo.txt')
-    document.getElementById('title').textContent = text
-  </script>
-</body>
-</html>`,
-                            ],
-                          ),
-                        ],
-                      ),
-                      h.h3([], ["Überblick über /api.js"]),
-                      h.ul(
-                        [h.Class("help-list")],
-                        [
-                          h.li(
-                            [],
-                            [
-                              h.code([], ["islands.storage.getStatus()"]),
-                              " – Prüft aktiven Speicher-Typ (",
-                              h.code([], ["'fsa' | 'opfs'"]),
-                              ") und Berechtigungen.",
-                            ],
-                          ),
-                          h.li(
-                            [],
-                            [
-                              h.code([], ["islands.fs.list(path?)"]),
-                              ", ",
-                              h.code([], ["stat(path)"]),
-                              ", ",
-                              h.code([], ["exists(path)"]),
-                              " – Dateien und Ordner abfragen.",
-                            ],
-                          ),
-                          h.li(
-                            [],
-                            [
-                              h.code([], ["islands.fs.readText(path)"]),
-                              ", ",
-                              h.code([], ["readJson(path)"]),
-                              ", ",
-                              h.code([], ["readBytes(path)"]),
-                              " – Dateien lesen.",
-                            ],
-                          ),
-                          h.li(
-                            [],
-                            [
-                              h.code([], ["islands.fs.writeText(path, content)"]),
-                              ", ",
-                              h.code([], ["writeJson(path, data)"]),
-                              ", ",
-                              h.code([], ["writeBytes(path, bytes)"]),
-                              " – Dateien schreiben (erstellt fehlende Elternordner standardmäßig automatisch).",
-                            ],
-                          ),
-                          h.li(
-                            [],
-                            [
-                              h.code([], ["islands.fs.mkdir(path)"]),
-                              ", ",
-                              h.code([], ["remove(path)"]),
-                              ", ",
-                              h.code([], ["copy(from, to)"]),
-                              ", ",
-                              h.code([], ["move(from, to)"]),
-                              " – Dateisystem verwalten.",
-                            ],
-                          ),
+                          h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["🧩"]),
+                          h.span([h.Class("help-topic-title")], ["PWA Islands bauen"]),
                         ],
                       ),
                       h.div(
-                        [h.Class("help-dts-box")],
+                        [h.Class("help-topic-body")],
                         [
                           h.div(
-                            [h.Class("help-dts-info")],
+                            [h.Class("help-section")],
                             [
-                              h.strong([], ["TypeScript-Typdefinitionen ("]),
-                              h.code([], ["/api.d.ts"]),
-                              h.strong([], [")"]),
+                              h.h4([h.Class("help-heading")], ["Was ist eine Island?"]),
                               h.p(
-                                [],
+                                [h.Class("help-text")],
                                 [
-                                  "Für volle Autovervollständigung in deinem Editor oder als Kontext für KI-Assistenten kannst du die komplette Typdefinition in die Zwischenablage kopieren:",
+                                  "Eine Island ist eine einzelne HTML-Datei, die in dieser App liegt. Sie läuft im Browser wie eine kleine eigene App und kann über die Islands-API Dateien lesen, schreiben und löschen.",
                                 ],
                               ),
                             ],
                           ),
                           h.div(
-                            [h.Class("help-dts-actions")],
+                            [h.Class("help-section")],
                             [
-                              h.button(
+                              h.h4([h.Class("help-heading")], ["So entsteht eine Island"]),
+                              h.ol(
+                                [h.Class("help-list")],
                                 [
-                                  h.Type("button"),
-                                  h.Id("help-btn-copy-dts"),
-                                  h.Class("btn btn-primary"),
-                                  h.Disabled(isCopying),
-                                  h.OnClick(Message.ClickedCopyDts()),
+                                  h.li(
+                                    [],
+                                    [
+                                      "Über ",
+                                      h.strong([], ["+ Datei"]),
+                                      " eine neue ",
+                                      h.code([h.Class("help-path")], [".html"]),
+                                      "-Datei anlegen (zum Beispiel ",
+                                      h.code([h.Class("help-path")], ["uhr.html"]),
+                                      ") oder eine fertige HTML-Datei importieren.",
+                                    ],
+                                  ),
+                                  h.li(
+                                    [],
+                                    [
+                                      "Die API im eigenen Modul einbinden: ",
+                                      h.code(
+                                        [h.Class("help-path")],
+                                        ["import islands from '/api.js'"],
+                                      ),
+                                      ". Das muss in einem ",
+                                      h.code([h.Class("help-path")], ['<script type="module">']),
+                                      " stehen.",
+                                    ],
+                                  ),
+                                  h.li(
+                                    [],
+                                    [
+                                      "Die Datei in der Liste antippen. Sie wird unter ihrem eigenen Pfad geöffnet.",
+                                    ],
+                                  ),
                                 ],
-                                [copyBtnLabel],
+                              ),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("help-section")],
+                            [
+                              h.h4([h.Class("help-heading")], ["Beispiel"]),
+                              h.pre(
+                                [h.Class("help-code")],
+                                [
+                                  h.code(
+                                    [],
+                                    [
+                                      `<script type="module">\n  import islands from '/api.js'\n\n  const eintraege = await islands.list()\n  await islands.write('notizen/idee.txt', 'Hallo Welt')\n  const inhalt = await islands.read('notizen/idee.txt')\n</script>`,
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              h.p(
+                                [h.Class("help-hint")],
+                                ["Alle Pfade sind relativ zur Wurzel des gewählten Ordners."],
+                              ),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("help-section")],
+                            [
+                              h.h4(
+                                [h.Class("help-heading")],
+                                ["App-Start und Startseiten (index.html)"],
+                              ),
+                              h.p(
+                                [h.Class("help-text")],
+                                [
+                                  "Beim Öffnen der App landen Sie standardmäßig im Hauptverzeichnis (",
+                                  h.code([h.Class("help-path")], ["/"]),
+                                  ").",
+                                ],
+                              ),
+                              h.ul(
+                                [h.Class("help-list")],
+                                [
+                                  h.li(
+                                    [],
+                                    [
+                                      "Zu Beginn sehen Sie hier eine Dateiliste, da noch keine Startseite existiert.",
+                                    ],
+                                  ),
+                                  h.li(
+                                    [],
+                                    [
+                                      "Sobald Sie eine Datei namens ",
+                                      h.code([h.Class("help-path")], ["index.html"]),
+                                      " erstellen, wird diese automatisch geladen, wenn Sie die App öffnen.",
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              h.p(
+                                [h.Class("help-text")],
+                                [
+                                  "Dieses Prinzip gilt auch für alle Unterordner: Die Adresse ",
+                                  h.code([h.Class("help-path")], ["/projekte/"]),
+                                  " lädt automatisch die Datei ",
+                                  h.code([h.Class("help-path")], ["/projekte/index.html"]),
+                                  ". Fehlt die Datei (oder existiert die aufgerufene Adresse gar nicht), zeigt die App stattdessen die Dateiliste des Ordners.",
+                                ],
+                              ),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("help-section")],
+                            [
+                              h.h4(
+                                [h.Class("help-heading")],
+                                ["Der Bearbeitungsmodus (?pwaislands)"],
+                              ),
+                              h.p(
+                                [h.Class("help-text")],
+                                [
+                                  "Wenn die App eine fertige Webseite (wie die ",
+                                  h.code([h.Class("help-path")], ["index.html"]),
+                                  ") anzeigt, können Sie mit dem Parameter ",
+                                  h.code([h.Class("help-path")], ["?pwaislands"]),
+                                  " in der Adresse zurück in die Bearbeitungs-App wechseln:",
+                                ],
+                              ),
+                              h.ul(
+                                [h.Class("help-list")],
+                                [
+                                  h.li(
+                                    [],
+                                    [
+                                      h.code([h.Class("help-path")], [`${origin}/?pwaislands`]),
+                                      " → Erzwingt die Dateiliste des Hauptverzeichnisses (auch wenn eine ",
+                                      h.code([h.Class("help-path")], ["index.html"]),
+                                      " existiert).",
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("help-section")],
+                            [
+                              h.h4([h.Class("help-heading")], ["Typen für Werkzeuge und Agenten"]),
+                              h.p(
+                                [h.Class("help-text")],
+                                [
+                                  "Die Datei ",
+                                  h.code(
+                                    [h.Class("help-path")],
+                                    [
+                                      h.a(
+                                        [
+                                          h.Class("help-link"),
+                                          h.Href("/api.d.ts"),
+                                          h.Target("_blank"),
+                                          h.Rel("noopener"),
+                                        ],
+                                        [`${origin}/api.d.ts`],
+                                      ),
+                                    ],
+                                  ),
+                                  " beschreibt die komplette API mit allen Typen. Kopieren Sie sie in die Zwischenablage und geben Sie sie einem KI-Agenten als Kontext — damit kann er Islands schreiben, ohne die API zu raten.",
+                                ],
                               ),
                             ],
                           ),
                         ],
                       ),
-                      copyDtsState._tag === "Error"
-                        ? h.div(
-                            [h.Id("help-copy-error"), h.Class("alert alert-danger")],
-                            [copyDtsState.message],
-                          )
-                        : h.div([h.Id("help-copy-error"), h.Class("alert alert-danger hidden")]),
                     ],
                   ),
-                ],
-              ),
 
-              // Topic 2: FS API vs OPFS
-              h.details(
-                [
-                  h.Class("help-topic"),
-                  h.DataAttribute("topic", "fs"),
-                  h.Open(isFsOpen),
-                  h.OnToggle((isOpen) => Message.ToggledHelpTopic({ topic: "fs", isOpen })),
-                ],
-                [
-                  h.summary(
-                    [h.Class("help-topic-summary")],
+                  // Topic 2: File System & Storage
+                  h.details(
                     [
-                      h.span([h.Class("help-topic-title")], ["💾 Speicher: FS API und OPFS"]),
-                      h.span(
-                        [h.Class("help-topic-badge")],
-                        ["Unterschiede & Browser-Unterstützung"],
-                      ),
+                      h.Class("help-topic"),
+                      h.DataAttribute("topic", "fs"),
+                      h.Open(isFsOpen),
+                      h.OnToggle((isOpen) => Message.ToggledHelpTopic({ topic: "fs", isOpen })),
                     ],
-                  ),
-                  h.div(
-                    [h.Class("help-topic-content")],
                     [
-                      h.p(
-                        [],
+                      h.summary(
+                        [h.Class("help-topic-summary")],
                         [
-                          "PWA Islands unterstützt zwei verschiedene Möglichkeiten, deine Dateien lokal auf deinem Gerät zu speichern. Über das ",
-                          h.strong([], ["⚙️ Einstellungs-Menü"]),
-                          " kannst du jederzeit zwischen beiden Modi wechseln, sofern dein Browser beide unterstützt.",
+                          h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["💾"]),
+                          h.span([h.Class("help-topic-title")], ["Speicher: FS API und OPFS"]),
                         ],
                       ),
                       h.div(
-                        [h.Class("help-comparison-table-wrapper")],
+                        [h.Class("help-topic-body")],
                         [
-                          h.table(
-                            [h.Class("help-comparison-table")],
+                          h.div(
+                            [h.Class("help-section")],
                             [
-                              h.thead(
-                                [],
+                              h.p(
+                                [h.Class("help-text")],
                                 [
-                                  h.tr(
-                                    [],
-                                    [
-                                      h.th([], ["Eigenschaft"]),
-                                      h.th([], ["📁 Lokaler Ordner (FS Access API)"]),
-                                      h.th([], ["📦 App-Speicher (OPFS)"]),
-                                    ],
-                                  ),
+                                  "Beide Speicherarten beruhen auf derselben Browser-Schnittstelle, der ",
+                                  h.code([h.Class("help-path")], ["File System Access API"]),
+                                  ". Sie liefern dasselbe ",
+                                  h.code([h.Class("help-path")], ["FileSystemDirectoryHandle"]),
+                                  " — die Islands-API arbeitet in beiden Fällen ausschließlich mit Pfaden relativ zur Wurzel.",
                                 ],
                               ),
-                              h.tbody(
-                                [],
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("help-section")],
+                            [
+                              h.h4([h.Class("help-heading")], ["📁 Lokaler Ordner (FS API)"]),
+                              h.p(
+                                [h.Class("help-text")],
                                 [
-                                  h.tr(
+                                  "Ein normaler Ordner auf dem Gerät, gewählt über ",
+                                  h.code([h.Class("help-path")], ["showDirectoryPicker()"]),
+                                  ". Die Dateien lassen sich jederzeit mit anderen Programmen öffnen und liegen im Dateisystem, sind also mitsamt Ordnerstruktur leicht zu sichern.",
+                                ],
+                              ),
+                              h.ul(
+                                [h.Class("help-list")],
+                                [
+                                  h.li(
                                     [],
                                     [
-                                      h.td([], [h.strong([], ["Status in diesem Browser"])]),
-                                      h.td([], [fsaStatus]),
-                                      h.td([], [opfsStatus]),
+                                      "Der Ordner-Handle wird in IndexedDB gemerkt. Nach einem Neustart fehlt aber die ",
+                                      h.strong([], ["Berechtigung"]),
+                                      ": der Browser braucht einen Klick, um sie erneut zu erteilen („Zugriff erlauben“).",
                                     ],
                                   ),
-                                  h.tr(
+                                  h.li(
                                     [],
                                     [
-                                      h.td([], [h.strong([], ["Speicherort"])]),
-                                      h.td(
-                                        [],
-                                        ["Ein frei wählbarer Ordner auf deiner Festplatte."],
-                                      ),
-                                      h.td(
-                                        [],
-                                        [
-                                          "Abgeschotteter, privater Speicherbereich des Browsers für diese Website.",
-                                        ],
-                                      ),
+                                      "Ein Umbenennen oder Verschieben des Ordners außerhalb des Browsers macht das gemerkte Handle ungültig — dann neu auswählen.",
                                     ],
                                   ),
-                                  h.tr(
+                                  h.li(
                                     [],
                                     [
-                                      h.td([], [h.strong([], ["Zugriff mit externen Programmen"])]),
-                                      h.td(
-                                        [],
-                                        [
-                                          "Direkt möglich (z.\u00a0B. VS Code, Git, Datei-Explorer).",
-                                        ],
-                                      ),
-                                      h.td(
-                                        [],
-                                        [
-                                          "Nur innerhalb der App (oder über Datei-Upload/-Download).",
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                  h.tr(
-                                    [],
-                                    [
-                                      h.td([], [h.strong([], ["Berechtigungen"])]),
-                                      h.td(
-                                        [],
-                                        [
-                                          "Browser fragt beim Öffnen/Neustart nach Lese-/Schreibrechten.",
-                                        ],
-                                      ),
-                                      h.td([], ["Sofort ohne Rückfrage verfügbar."]),
-                                    ],
-                                  ),
-                                  h.tr(
-                                    [],
-                                    [
-                                      h.td([], [h.strong([], ["Typische Unterstützung"])]),
-                                      h.td(
-                                        [],
-                                        [
-                                          "Desktop-Browser auf Chromium-Basis (Chrome, Edge, Brave, Opera).",
-                                        ],
-                                      ),
-                                      h.td(
-                                        [],
-                                        [
-                                          "Nahezu alle modernen Browser (Chrome, Edge, Firefox, Safari / iOS, Android).",
-                                        ],
-                                      ),
+                                      "Nur in Browsern mit ",
+                                      h.code([h.Class("help-path")], ["showDirectoryPicker"]),
+                                      " (Chromium-basiert).",
                                     ],
                                   ),
                                 ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                      h.p(
-                        [h.Class("help-note")],
-                        [
-                          h.strong([], ["Tipp:"]),
-                          " Für die Entwicklung am Desktop empfiehlt sich ein ",
-                          h.em([], ["lokaler Ordner"]),
-                          ", damit du Dateien direkt in deinem gewohnten Code-Editor bearbeiten und mit Git versionieren kannst. Auf Mobilgeräten oder in Browsern wie Firefox und Safari sorgt ",
-                          h.em([], ["OPFS"]),
-                          " dafür, dass alle Islands trotzdem vollständig offline funktionieren.",
+                          h.div(
+                            [h.Class("help-section")],
+                            [
+                              h.h4([h.Class("help-heading")], ["📦 App-Speicher (OPFS)"]),
+                              h.p(
+                                [h.Class("help-text")],
+                                [
+                                  "Das ",
+                                  h.em([], ["Origin Private File System"]),
+                                  " ist ein privater Speicherbereich des Browsers, erreichbar über ",
+                                  h.code(
+                                    [h.Class("help-path")],
+                                    ["navigator.storage.getDirectory()"],
+                                  ),
+                                  ". Hier liegt alles unter dem Ordner ",
+                                  h.code([h.Class("help-path")], [OPFS_APP_FOLDER]),
+                                  ".",
+                                ],
+                              ),
+                              h.ul(
+                                [h.Class("help-list")],
+                                [
+                                  h.li(
+                                    [],
+                                    [
+                                      "Braucht ",
+                                      h.strong([], ["keine Ordnerauswahl und keine Berechtigung"]),
+                                      " — die App ist nach dem Start sofort einsatzbereit.",
+                                    ],
+                                  ),
+                                  h.li(
+                                    [],
+                                    [
+                                      "Die Dateien sind ",
+                                      h.strong([], ["an diesen Browser gebunden"]),
+                                      ": in einem anderen Browser oder Profil sind sie nicht sichtbar, und mit dem Löschen der Websitedaten sind sie weg.",
+                                    ],
+                                  ),
+                                  h.li(
+                                    [],
+                                    [
+                                      "Ein Export auf die Festplatte ist von Hand nötig (Datei herunterladen).",
+                                    ],
+                                  ),
+                                  h.li(
+                                    [],
+                                    [
+                                      "Der Browser darf den Speicher bei Platzmangel räumen; eine dauerhafte Ablage ist es nicht.",
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("help-section")],
+                            [
+                              h.h4([h.Class("help-heading")], ["Welche Art wann?"]),
+                              h.div(
+                                [h.Class("help-table-wrap")],
+                                [
+                                  h.table(
+                                    [h.Class("help-table")],
+                                    [
+                                      h.thead(
+                                        [],
+                                        [
+                                          h.tr(
+                                            [],
+                                            [
+                                              h.th([], []),
+                                              h.th([], ["📁 Lokaler Ordner"]),
+                                              h.th([], ["📦 App-Speicher"]),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                      h.tbody(
+                                        [],
+                                        [
+                                          h.tr(
+                                            [],
+                                            [
+                                              h.td([], ["Berechtigung nötig"]),
+                                              h.td([], ["ja, bei jedem Start"]),
+                                              h.td([], ["nein"]),
+                                            ],
+                                          ),
+                                          h.tr(
+                                            [],
+                                            [
+                                              h.td([], ["Andere Programme"]),
+                                              h.td([], ["ja"]),
+                                              h.td([], ["nein"]),
+                                            ],
+                                          ),
+                                          h.tr(
+                                            [],
+                                            [
+                                              h.td([], ["Anderer Browser"]),
+                                              h.td([], ["ja, Ordner erneut wählen"]),
+                                              h.td([], ["nein"]),
+                                            ],
+                                          ),
+                                          h.tr(
+                                            [],
+                                            [
+                                              h.td([], ["Sicherung"]),
+                                              h.td([], ["Dateisystem-Backup"]),
+                                              h.td([], ["von Hand"]),
+                                            ],
+                                          ),
+                                          h.tr(
+                                            [],
+                                            [
+                                              h.td([], ["Verfügbar in"]),
+                                              h.td([], ["nur Chromium"]),
+                                              h.td([], ["allen modernen Browsern"]),
+                                            ],
+                                          ),
+                                          h.tr(
+                                            [h.Class("help-supported-row")],
+                                            [
+                                              h.td([], ["In diesem Browser"]),
+                                              h.td(
+                                                [h.DataAttribute("support", "fsa")],
+                                                [
+                                                  h.span(
+                                                    [
+                                                      h.Class("help-supported"),
+                                                      h.DataAttribute(
+                                                        "supported",
+                                                        model.hasDirectoryPicker ? "yes" : "no",
+                                                      ),
+                                                    ],
+                                                    [
+                                                      model.hasDirectoryPicker
+                                                        ? "✅ verfügbar"
+                                                        : "❌ nicht verfügbar",
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                              h.td(
+                                                [h.DataAttribute("support", "opfs")],
+                                                [
+                                                  h.span(
+                                                    [
+                                                      h.Class("help-supported"),
+                                                      h.DataAttribute(
+                                                        "supported",
+                                                        model.hasOPFS ? "yes" : "no",
+                                                      ),
+                                                    ],
+                                                    [
+                                                      model.hasOPFS
+                                                        ? "✅ verfügbar"
+                                                        : "❌ nicht verfügbar",
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              h.p(
+                                [h.Class("help-hint")],
+                                [
+                                  "Wechseln lässt sich die Art jederzeit über das Zahnrad ⚙️. Die Wahl wird gemerkt, die Dateien der jeweils anderen Art bleiben dabei unangetastet.",
+                                ],
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ],
                   ),
                 ],
               ),
+              CopyDtsState.match(copyDtsState, {
+                Error: ({ message }) =>
+                  h.div(
+                    [h.Id("help-copy-error"), h.Class("alert alert-danger")],
+                    [
+                      `Kopieren hat nicht geklappt: ${message} Öffnen Sie ${origin}/api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`,
+                    ],
+                  ),
+                Copied: () => h.empty,
+                Copying: () => h.empty,
+                Idle: () => h.empty,
+              }),
             ],
           ),
           h.footer(
@@ -1181,11 +1405,31 @@ const viewHelpModal = (
                   h.button(
                     [
                       h.Type("button"),
+                      h.Id("help-btn-copy-dts"),
+                      h.Class("btn btn-primary icon-label-btn"),
+                      h.AriaLabel("/api.d.ts kopieren"),
+                      h.DataAttribute("tip", "/api.d.ts kopieren"),
+                      h.Disabled(copyDtsState._tag === "Copying"),
+                      h.OnClick(Message.ClickedCopyDts()),
+                    ],
+                    [
+                      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["📋"]),
+                      h.span([h.Class("icon-label-btn-text")], [copyBtnLabel]),
+                    ],
+                  ),
+                  h.button(
+                    [
+                      h.Type("button"),
                       h.Id("help-btn-close"),
-                      h.Class("btn btn-primary"),
+                      h.Class("btn btn-secondary icon-label-btn"),
+                      h.AriaLabel("Schließen"),
+                      h.DataAttribute("tip", "Schließen"),
                       h.OnClick(Message.ClickedCloseModal()),
                     ],
-                    ["Schließen"],
+                    [
+                      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                      h.span([h.Class("icon-label-btn-text")], ["Schließen"]),
+                    ],
                   ),
                 ],
               ),
@@ -1207,6 +1451,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
         CreateFile: ({ name, content }) =>
           viewEditorModal(
             "Neue Datei erstellen",
+            "Datei",
             false,
             false,
             name,
@@ -1215,14 +1460,15 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
           ),
 
         CreateFolder: ({ name }) =>
-          viewEditorModal("Neuen Ordner erstellen", true, false, name, [], h),
+          viewEditorModal("Neuen Ordner erstellen", "Ordner", true, false, name, [], h),
 
         EditFolder: ({ originalName, name }) =>
-          viewEditorModal(`Ordner bearbeiten: ${originalName}`, true, true, name, [], h),
+          viewEditorModal(`Ordner bearbeiten: ${originalName}`, "Ordner", true, true, name, [], h),
 
         EditFile: ({ originalName, name, fileMode }) =>
           viewEditorModal(
             `Datei bearbeiten: ${originalName}`,
+            "Datei",
             false,
             true,
             name,
@@ -1244,7 +1490,7 @@ const viewPwaToast = (model: Model, h: HtmlBuilder): Html.Html =>
   PwaToastState.match(model.pwaToastState, {
     Hidden: () =>
       h.div(
-        [h.Id("pwa-toast"), h.Role("alert"), h.AriaLive("assertive")],
+        [h.Id("pwa-toast"), h.Role("alert"), h.AriaLabelledBy("toast-message")],
         [
           h.div([h.Class("message")], [h.span([h.Id("toast-message")])]),
           h.div(
@@ -1265,7 +1511,7 @@ const viewPwaToast = (model: Model, h: HtmlBuilder): Html.Html =>
 
     OfflineReady: () =>
       h.div(
-        [h.Id("pwa-toast"), h.Class("show"), h.Role("alert"), h.AriaLive("assertive")],
+        [h.Id("pwa-toast"), h.Class("show"), h.Role("alert"), h.AriaLabelledBy("toast-message")],
         [
           h.div(
             [h.Class("message")],
@@ -1289,7 +1535,12 @@ const viewPwaToast = (model: Model, h: HtmlBuilder): Html.Html =>
 
     NeedRefresh: () =>
       h.div(
-        [h.Id("pwa-toast"), h.Class("show refresh"), h.Role("alert"), h.AriaLive("assertive")],
+        [
+          h.Id("pwa-toast"),
+          h.Class("show refresh"),
+          h.Role("alert"),
+          h.AriaLabelledBy("toast-message"),
+        ],
         [
           h.div(
             [h.Class("message")],
@@ -1327,12 +1578,17 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
     [h.Id("app")],
     [
       h.main(
-        [h.Class("files-app")],
+        [h.Id("router-view"), h.Class("router-view")],
         [
-          viewHeader(model, h),
-          viewAlertContainer(model, h),
-          viewContentSection(model, h),
-          viewModalContainer(model, h),
+          h.div(
+            [h.Class("files-page")],
+            [
+              viewAlertContainer(model, h),
+              viewToolbar(model, h),
+              viewContentSection(model, h),
+              viewModalContainer(model, h),
+            ],
+          ),
         ],
       ),
       viewPwaToast(model, h),
