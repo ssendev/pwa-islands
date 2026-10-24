@@ -731,7 +731,7 @@ const viewEditorFileBody = (fileMode: EditorFileMode, h: HtmlBuilder): ReadonlyA
                 ],
               )
             : h.empty,
-          viewPreviewContent(preview, h),
+          isBase64Enabled ? h.empty : viewPreviewContent(preview, h),
         ],
       ),
     ],
@@ -775,7 +775,7 @@ const viewEditorModal = (
             ],
           ),
           h.form(
-            [h.Id("modal-form")],
+            [h.Id("modal-form"), h.OnSubmit(Message.ClickedSaveModal())],
             [
               h.div(
                 [h.Class("modal-body")],
@@ -847,7 +847,7 @@ const viewEditorModal = (
                           h.Class("btn btn-primary icon-label-btn"),
                           h.AriaLabel(saveLabel),
                           h.DataAttribute("tip", saveLabel),
-                          h.OnClick(Message.ClickedSaveModal()),
+                          h.OnClick(Message.ClickedSaveModal(), { defaultAction: "Prevent" }),
                         ],
                         [
                           h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["💾"]),

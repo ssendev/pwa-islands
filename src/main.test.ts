@@ -7,6 +7,7 @@ import {
   DelayResetCopyDtsStatus,
   FocusModalNameInput,
   LoadFileInfoPreference,
+  LoadModalBase64,
   NavigateToSubfolder,
   SaveFileInfoPreference,
   SaveModalChanges,
@@ -16,10 +17,12 @@ import {
 import { Message, init, update, view } from "./main"
 import {
   CopyDtsState,
+  EditorFileMode,
   EntriesState,
   type FileEntry,
   type Model,
   ModalState,
+  PreviewContent,
   PwaToastState,
   StorageState,
 } from "./model"
@@ -282,6 +285,42 @@ describe("PWA Islands Foldkit App", () => {
         Scene.click(Scene.selector("#pwa-refresh")),
         Scene.Command.expectExact(TriggerPwaRefresh()),
         Scene.Command.resolve(TriggerPwaRefresh, Message.CompletedPwaRefresh()),
+      )
+    })
+
+    it("hides binary preview when checking Binärdatei bearbeiten", () => {
+      const binaryModel: Model = {
+        ...readyModel,
+        modalState: ModalState.EditFile({
+          originalName: "bild.png",
+          name: "bild.png",
+          fileMode: EditorFileMode.Binary({
+            lockReason: "Binärdatei",
+            canEditBase64: true,
+            isBase64Enabled: false,
+            base64Content: "",
+            isLoadingBase64: false,
+            preview: PreviewContent.Image({ objectUrl: "blob:preview-url", name: "bild.png" }),
+          }),
+        }),
+      }
+
+      Scene.scene(
+        { update, view },
+        Scene.given(binaryModel),
+        Scene.expect(Scene.selector("#modal-file-preview")).toExist(),
+        Scene.expect(Scene.selector("#modal-base64-editor")).toBeAbsent(),
+        Scene.change(Scene.selector("#modal-use-base64"), "true"),
+        Scene.Command.expectExact(LoadModalBase64({ entryName: "bild.png" })),
+        Scene.Command.resolve(
+          LoadModalBase64,
+          Message.LoadedModalBase64Content({ base64Content: "iVBORw0KGgo=" }),
+        ),
+        Scene.expect(Scene.selector("#modal-base64-editor")).toExist(),
+        Scene.expect(Scene.selector("#modal-file-preview")).toBeAbsent(),
+        Scene.change(Scene.selector("#modal-use-base64"), "false"),
+        Scene.expect(Scene.selector("#modal-base64-editor")).toBeAbsent(),
+        Scene.expect(Scene.selector("#modal-file-preview")).toExist(),
       )
     })
   })
