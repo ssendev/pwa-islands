@@ -1,3 +1,5 @@
+import { Array } from "effect"
+
 export const DB_NAME = "pwa-islands-db"
 export const DB_VERSION = 1
 export const STORE_NAME = "handles"
@@ -223,7 +225,7 @@ const MISS_ERRORS = new Set(["NotFoundError", "TypeMismatchError"])
  */
 async function walkToParent(
   root: FileSystemDirectoryHandle,
-  segments: string[],
+  segments: ReadonlyArray<string>,
 ): Promise<FileSystemDirectoryHandle | null> {
   let current = root
   for (const segment of segments) {
@@ -254,7 +256,7 @@ export async function resolveFileInDirectory(
   indexFile = DEFAULT_INDEX_FILE,
 ): Promise<SavedFile | null> {
   const parts = splitPath(relativePath)
-  if (parts.length === 0) return null
+  if (Array.isReadonlyArrayEmpty(parts)) return null
 
   const parent = await walkToParent(root, parts.slice(0, -1))
   if (!parent) return null
@@ -319,7 +321,7 @@ export async function findSavedFile(
   relativePath: string,
   indexFile = DEFAULT_INDEX_FILE,
 ): Promise<SavedFile | null> {
-  if (splitPath(relativePath).length === 0) return null
+  if (Array.isReadonlyArrayEmpty(splitPath(relativePath))) return null
 
   try {
     const root = await findCachedActiveStorage()
@@ -363,7 +365,7 @@ export function normalizePath(path: string): string {
   return (path ?? "").replace(/^\/+|\/+$/g, "").replace(/\/+/g, "/")
 }
 
-export function splitPath(path: string): string[] {
+export function splitPath(path: string): ReadonlyArray<string> {
   const clean = normalizePath(path)
   return clean ? clean.split("/").filter(Boolean) : []
 }
@@ -405,7 +407,7 @@ export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | n
  */
 export async function getDirectory(
   root: FileSystemDirectoryHandle,
-  dirs: string[],
+  dirs: ReadonlyArray<string>,
   create = false,
 ): Promise<FileSystemDirectoryHandle> {
   let current = root
@@ -423,5 +425,5 @@ export function getMimeType(filename: string, fallback?: string): string {
       return MIME_TYPES[ext]
     }
   }
-  return fallback && fallback.length > 0 ? fallback : "application/octet-stream"
+  return fallback && fallback !== "" ? fallback : "application/octet-stream"
 }

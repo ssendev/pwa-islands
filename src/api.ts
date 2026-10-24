@@ -56,8 +56,8 @@ async function requireRoot(): Promise<FileSystemDirectoryHandle> {
   return root
 }
 
-function splitEntryPath(path: string): { dirs: string[]; name: string } {
-  const parts = splitPath(normalizePath(path))
+function splitEntryPath(path: string): { dirs: ReadonlyArray<string>; name: string } {
+  const parts = [...splitPath(normalizePath(path))]
   const name = parts.pop()
   if (!name) {
     throw new Error("Ungültiger Pfad: Datei- oder Ordnername fehlt.")
@@ -68,7 +68,7 @@ function splitEntryPath(path: string): { dirs: string[]; name: string } {
 const api: IslandsApi = {
   async list(path = "") {
     const dir = await resolveDirectory(path)
-    const entries: IslandEntry[] = []
+    const entries: Array<IslandEntry> = []
 
     for await (const entry of dir.values()) {
       const entryPath = path ? `${normalizePath(path)}/${entry.name}` : entry.name

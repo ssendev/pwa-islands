@@ -1,10 +1,10 @@
 import { Array, Option, Schema, pipe } from "effect"
+import { defineRouteUnion } from "foldkit/route"
 import { defineTaggedUnion } from "foldkit/schema"
+import type { Url } from "foldkit/url"
 import { OPFS_APP_FOLDER } from "./storage"
 
-// ---------------------------------------------------------------------------
-// Storage & File Entry Schemas
-// ---------------------------------------------------------------------------
+// MODEL
 
 export const StorageType = Schema.Literals(["fsa", "opfs"])
 export type StorageType = typeof StorageType.Type
@@ -48,9 +48,14 @@ export const StorageState = defineTaggedUnion({
 })
 export type StorageState = typeof StorageState.Type
 
-// ---------------------------------------------------------------------------
-// Modal & Toast Schemas
-// ---------------------------------------------------------------------------
+export const currentSubPathFromStorageState = (storageState: StorageState): ReadonlyArray<string> =>
+  StorageState.match(storageState, {
+    Initializing: () => [],
+    Unsupported: () => [],
+    NoFolderSelected: () => [],
+    PermissionRequired: () => [],
+    Ready: ({ subPath }) => subPath,
+  })
 
 export const PreviewContent = defineTaggedUnion({
   None: {},
@@ -64,17 +69,25 @@ export const PreviewContent = defineTaggedUnion({
 })
 export type PreviewContent = typeof PreviewContent.Type
 
+export const BinaryEdit = defineTaggedUnion({
+  Locked: {
+    reason: Schema.String,
+  },
+  Disabled: {},
+  Loading: {},
+  Editing: {
+    content: Schema.String,
+  },
+})
+export type BinaryEdit = typeof BinaryEdit.Type
+
 export const EditorFileMode = defineTaggedUnion({
   Text: {
     content: Schema.String,
   },
   Binary: {
-    lockReason: Schema.String,
-    canEditBase64: Schema.Boolean,
-    isBase64Enabled: Schema.Boolean,
-    base64Content: Schema.String,
-    isLoadingBase64: Schema.Boolean,
     preview: PreviewContent,
+    edit: BinaryEdit,
   },
 })
 export type EditorFileMode = typeof EditorFileMode.Type
@@ -92,23 +105,69 @@ export const CopyDtsState = defineTaggedUnion({
 })
 export type CopyDtsState = typeof CopyDtsState.Type
 
+export const InstallPrompt = defineTaggedUnion({
+  Unavailable: {},
+  Available: {},
+  Prompting: {},
+})
+export type InstallPrompt = typeof InstallPrompt.Type
+
+export const PendingImportFile = Schema.Struct({
+  name: Schema.String,
+  size: Schema.Number,
+  lastModified: Schema.Number,
+})
+export type PendingImportFile = typeof PendingImportFile.Type
+
+export const ImportCollisionAction = Schema.Literals(["replace", "rename", "skip"])
+export type ImportCollisionAction = typeof ImportCollisionAction.Type
+
+export const ResolvedImportItem = Schema.Struct({
+  sourceName: Schema.String,
+  targetName: Schema.String,
+  action: ImportCollisionAction,
+})
+export type ResolvedImportItem = typeof ResolvedImportItem.Type
+
 export const ModalState = defineTaggedUnion({
   Closed: {},
   CreateFile: {
     name: Schema.String,
     content: Schema.String,
+    maybeValidationError: Schema.Option(Schema.String),
   },
   CreateFolder: {
     name: Schema.String,
+    maybeValidationError: Schema.Option(Schema.String),
   },
   EditFolder: {
     originalName: Schema.String,
     name: Schema.String,
+    maybeValidationError: Schema.Option(Schema.String),
   },
   EditFile: {
     originalName: Schema.String,
     name: Schema.String,
     fileMode: EditorFileMode,
+    maybeValidationError: Schema.Option(Schema.String),
+  },
+  ConfirmDelete: {
+    entryName: Schema.String,
+    isFolder: Schema.Boolean,
+  },
+  ConfirmOverwrite: {
+    targetName: Schema.String,
+    originalName: Schema.String,
+    content: Schema.String,
+    isBase64: Schema.Boolean,
+    isEditing: Schema.Boolean,
+  },
+  ImportConflict: {
+    current: PendingImportFile,
+    suggestedName: Schema.String,
+    queue: Schema.Array(PendingImportFile),
+    resolved: Schema.Array(ResolvedImportItem),
+    applyToAll: Schema.Boolean,
   },
   Help: {
     isApiOpen: Schema.Boolean,
@@ -127,33 +186,40 @@ export const AlertBanner = Schema.Struct({
 })
 export type AlertBanner = typeof AlertBanner.Type
 
-// ---------------------------------------------------------------------------
-// Flags & Model
-// ---------------------------------------------------------------------------
-
 export const Flags = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
-  initialPathname: Schema.String,
-  initialSearch: Schema.String,
+  origin: Schema.String,
 })
 export type Flags = typeof Flags.Type
+
+export const AppRoute = defineRouteUnion({
+  Folder: {
+    subPath: Schema.Array(Schema.String),
+  },
+  Edit: {
+    subPath: Schema.Array(Schema.String),
+    name: Schema.String,
+  },
+  Help: {
+    subPath: Schema.Array(Schema.String),
+    maybeTopic: Schema.Option(HelpTopic),
+  },
+})
+export type AppRoute = typeof AppRoute.Type
 
 export const Model = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
+  origin: Schema.String,
   storageState: StorageState,
   showFileInfo: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
-  canInstallApp: Schema.Boolean,
+  installPrompt: InstallPrompt,
   modalState: ModalState,
   maybeAlertBanner: Schema.Option(AlertBanner),
 })
 export type Model = typeof Model.Type
-
-// ---------------------------------------------------------------------------
-// Pure Helpers (Formatting, URL, Title)
-// ---------------------------------------------------------------------------
 
 const APP_TITLE = OPFS_APP_FOLDER
 
@@ -190,13 +256,10 @@ export const formatSummaryText = (entries: ReadonlyArray<FileEntry>): string => 
     Array.filter((entry) => entry.kind === "directory"),
     Array.length,
   )
-  const parts: Array<string> = []
-  if (fileCount > 0) {
-    parts.push(`${fileCount} ${fileCount === 1 ? "Datei" : "Dateien"}`)
-  }
-  if (dirCount > 0) {
-    parts.push(`${dirCount} ${dirCount === 1 ? "Ordner" : "Ordner"}`)
-  }
+  const parts: ReadonlyArray<string> = [
+    ...(fileCount > 0 ? [`${fileCount} ${fileCount === 1 ? "Datei" : "Dateien"}`] : []),
+    ...(dirCount > 0 ? [`${dirCount} ${dirCount === 1 ? "Ordner" : "Ordner"}`] : []),
+  ]
   return Array.join(parts, ", ")
 }
 
@@ -245,6 +308,71 @@ export const parseHelpParam = (
   return Option.none()
 }
 
+export const decodeUrlPathnameSegments = (pathname: string): ReadonlyArray<string> =>
+  pipe(
+    pathname.split("/"),
+    Array.filter((segment) => segment !== ""),
+    Array.map((segment) => {
+      try {
+        return decodeURIComponent(segment)
+      } catch {
+        return segment
+      }
+    }),
+  )
+
+export const parseUrlToRoute = (url: Url): AppRoute => {
+  const segments = decodeUrlPathnameSegments(url.pathname)
+  const searchStr = Option.getOrElse(url.search, () => "")
+  const searchParams = new URLSearchParams(searchStr.startsWith("?") ? searchStr : `?${searchStr}`)
+  const pwaislandsParam = searchParams.get("pwaislands")
+
+  const maybeHelp = parseHelpParam(pwaislandsParam)
+  if (Option.isSome(maybeHelp)) {
+    return AppRoute.Help({
+      subPath: segments,
+      maybeTopic: maybeHelp.value.maybeTopic,
+    })
+  }
+
+  if (isEditActionParam(pwaislandsParam)) {
+    if (Array.isReadonlyArrayNonEmpty(segments)) {
+      const name = Array.lastNonEmpty(segments)
+      const subPath = Array.dropRight(segments, 1)
+      return AppRoute.Edit({ subPath, name })
+    }
+  }
+
+  return AppRoute.Folder({ subPath: segments })
+}
+
+export const routeToUrl = (route: AppRoute): string =>
+  AppRoute.match(route, {
+    Folder: ({ subPath }) => buildFolderUrl(subPath),
+    Edit: ({ subPath, name }) => buildEditUrl(subPath, name),
+    Help: ({ subPath, maybeTopic }) => buildHelpUrl(subPath, maybeTopic),
+  })
+
+export const initialHelpModalFromSearch = (initialSearch: string): Option.Option<ModalState> => {
+  const params = new URLSearchParams(
+    initialSearch.startsWith("?") ? initialSearch : `?${initialSearch}`,
+  )
+  const maybeHelp = parseHelpParam(params.get("pwaislands"))
+  return Option.map(maybeHelp, ({ maybeTopic }) =>
+    ModalState.Help({
+      isApiOpen: Option.match(maybeTopic, {
+        onNone: () => true,
+        onSome: (topic) => topic === "api",
+      }),
+      isFsOpen: Option.match(maybeTopic, {
+        onNone: () => false,
+        onSome: (topic) => topic === "fs",
+      }),
+      copyDtsState: CopyDtsState.Idle(),
+    }),
+  )
+}
+
 export const isEditActionParam = (raw: string | null): boolean => {
   if (raw === null) {
     return false
@@ -259,14 +387,7 @@ export const isEditActionParam = (raw: string | null): boolean => {
 }
 
 export const computeDocumentTitle = (model: Model): string => {
-  const subPath: ReadonlyArray<string> = StorageState.match(model.storageState, {
-    Initializing: () => [],
-    Unsupported: () => [],
-    NoFolderSelected: () => [],
-    PermissionRequired: () => [],
-    Ready: ({ subPath: readySubPath }) => readySubPath,
-  })
-
+  const subPath = currentSubPathFromStorageState(model.storageState)
   const folderParts = [...Array.reverse(subPath), APP_TITLE]
   const folderTitle = Array.join(folderParts, " — ")
 
@@ -276,6 +397,9 @@ export const computeDocumentTitle = (model: Model): string => {
     CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
     EditFolder: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
     EditFile: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
+    ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
+    ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
+    ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
     Help: ({ isApiOpen, isFsOpen }) => {
       if (isApiOpen && !isFsOpen) {
         return `${HELP_TOPIC_TITLES.api} — Hilfe — ${folderTitle}`

@@ -2,10 +2,22 @@ import "./style.css"
 import { Effect } from "effect"
 import * as Runtime from "foldkit/runtime"
 import { registerSW } from "virtual:pwa-register"
-import { setRegisterServiceWorker, supportsDirectoryPicker, supportsOPFS } from "./files"
+import { supportsDirectoryPicker, supportsOPFS } from "./files"
 import { Flags, Model, init, subscriptions, update, view } from "./main"
+import { Message } from "./message"
 
-setRegisterServiceWorker(registerSW)
+registerSW({
+  immediate: true,
+  onNeedReload() {
+    console.log("PWA: onNeedReload - Service Worker aktualisiert")
+  },
+  onOfflineReady() {
+    console.log("PWA: onOfflineReady - App ist bereit für die Offline-Nutzung")
+  },
+  onRegisterError(error) {
+    console.error("PWA: onRegisterError - Fehler bei der Service-Worker-Registrierung:", error)
+  },
+})
 
 const container = document.getElementById("app")
 if (!container) {
@@ -20,13 +32,16 @@ const application = Runtime.makeApplication({
   view,
   subscriptions,
   container,
+  routing: {
+    onUrlRequest: (request) => Message.RequestedUrl({ request }),
+    onUrlChange: (url) => Message.ChangedUrl({ url }),
+  },
 })
 
 Runtime.run(application, {
   flags: Effect.sync(() => ({
     hasDirectoryPicker: supportsDirectoryPicker(),
     hasOPFS: supportsOPFS(),
-    initialPathname: window.location.pathname,
-    initialSearch: window.location.search,
+    origin: window.location.origin,
   })),
 })

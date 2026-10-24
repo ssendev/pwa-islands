@@ -1,11 +1,24 @@
 import { Schema } from "effect"
 import { defineMessageUnion } from "foldkit/message"
-import { AlertBanner, EditorFileMode, FileEntry, HelpTopic, ModalState, StorageType } from "./model"
+import { UrlRequest } from "foldkit/navigation"
+import { Url } from "foldkit/url"
+import {
+  AlertBanner,
+  EditorFileMode,
+  FileEntry,
+  HelpTopic,
+  ImportCollisionAction,
+  ModalState,
+  PendingImportFile,
+  StorageType,
+} from "./model"
+
+// MESSAGE
 
 export const Message = defineMessageUnion({
   // Initialization & Storage Backend Lifecycle
-  CompletedStorageInit: {
-    storageType: Schema.Option(StorageType),
+  SucceededInitializeStorage: {
+    storageType: StorageType,
     rootName: Schema.String,
     subPath: Schema.Array(Schema.String),
     isFallback: Schema.Boolean,
@@ -17,13 +30,13 @@ export const Message = defineMessageUnion({
     folderName: Schema.String,
   },
   DetectedNoFolderSelected: {},
-  FailedStorageInit: {
+  FailedInitializeStorage: {
     message: Schema.String,
   },
-  LoadedFileInfoPreference: {
+  CompletedLoadFileInfoPreference: {
     visible: Schema.Boolean,
   },
-  SavedFileInfoPreference: {},
+  CompletedSaveFileInfoPreference: {},
 
   // Directory Listing & Navigation
   SucceededListEntries: {
@@ -41,16 +54,21 @@ export const Message = defineMessageUnion({
   ClickedEntryRow: {
     entry: FileEntry,
   },
-  CompletedOpenFile: {},
-  NavigatedPopState: {
-    pathname: Schema.String,
-    search: Schema.String,
+  CompletedOpenFileInBrowser: {},
+  RequestedUrl: {
+    request: UrlRequest,
   },
-  CompletedHistorySync: {},
+  ChangedUrl: {
+    url: Url,
+  },
+  CompletedPushUrl: {},
+  CompletedReplaceUrl: {},
+  CompletedLoadUrl: {},
+  CompletedFocusModalNameInput: {},
 
   // Settings & Storage Actions
   ClickedToggleSettings: {},
-  ClosedSettingsMenu: {},
+  ClickedOutsideSettingsMenu: {},
   ClickedToggleFileInfo: {},
   ClickedSelectFolder: {},
   ClickedChangeFolder: {},
@@ -58,16 +76,36 @@ export const Message = defineMessageUnion({
   ClickedUseOpfs: {},
   ClickedDisconnectFolder: {},
   CancelledFolderSelection: {},
-
-  // Alerts
-  ShownAlertBanner: {
-    banner: AlertBanner,
+  FailedPickLocalDirectory: {
+    message: Schema.String,
+  },
+  FailedGrantDirectoryPermission: {
+    message: Schema.String,
+  },
+  FailedActivateOpfsBackend: {
+    message: Schema.String,
+  },
+  FailedDisconnectStorage: {
+    message: Schema.String,
+  },
+  FailedNavigateToSubfolder: {
+    message: Schema.String,
   },
 
   // Toolbar & File/Folder Creation
   ClickedNewFile: {},
   ClickedNewFolder: {},
   ClickedImportFiles: {},
+  SelectedImportFiles: {
+    files: Schema.Array(PendingImportFile),
+  },
+  SelectedImportConflictAction: {
+    action: ImportCollisionAction,
+  },
+  ToggledImportConflictApplyToAll: {
+    applyToAll: Schema.Boolean,
+  },
+  CancelledImportConflict: {},
   CompletedImportFiles: {
     entries: Schema.Array(FileEntry),
     maybeAlertBanner: Schema.Option(AlertBanner),
@@ -77,11 +115,11 @@ export const Message = defineMessageUnion({
   ClickedEditEntry: {
     entry: FileEntry,
   },
-  OpenedEditFileModal: {
+  SucceededInspectFileForEditor: {
     originalName: Schema.String,
     fileMode: EditorFileMode,
   },
-  FailedOpenEditModal: {
+  FailedInspectFileForEditor: {
     message: Schema.String,
   },
   UpdatedModalName: {
@@ -93,17 +131,21 @@ export const Message = defineMessageUnion({
   ToggledModalBase64: {
     isChecked: Schema.Boolean,
   },
-  LoadedModalBase64Content: {
+  SucceededLoadModalBase64: {
     base64Content: Schema.String,
   },
-  FailedLoadModalBase64Content: {
+  FailedLoadModalBase64: {
     message: Schema.String,
   },
   UpdatedModalBase64Content: {
     base64Content: Schema.String,
   },
   ClickedSaveModal: {},
+  ClickedConfirmOverwrite: {},
+  ClickedCancelOverwrite: {},
   ClickedDeleteModalEntry: {},
+  ConfirmedDeleteModalEntry: {},
+  ClickedCancelDeleteModal: {},
   ClickedCloseModal: {},
   PressedEscape: {},
   SucceededModalMutation: {
@@ -122,7 +164,7 @@ export const Message = defineMessageUnion({
   },
   ClickedCopyDts: {},
   SucceededCopyDts: {},
-  ResetCopyDtsStatus: {},
+  CompletedWaitBeforeResetCopyDts: {},
   FailedCopyDts: {
     message: Schema.String,
   },
@@ -131,7 +173,7 @@ export const Message = defineMessageUnion({
   CapturedInstallPrompt: {},
   InstalledApp: {},
   ClickedInstallApp: {},
-  CompletedInstallApp: {
+  CompletedTriggerInstallAppPrompt: {
     didAccept: Schema.Boolean,
   },
 })

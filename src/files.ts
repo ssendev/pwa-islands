@@ -1,5 +1,11 @@
 import { Array, Option, pipe } from "effect"
-import { EditorFileMode, type FileEntry, PreviewContent, type StorageType } from "./model"
+import {
+  BinaryEdit,
+  EditorFileMode,
+  type FileEntry,
+  PreviewContent,
+  type StorageType,
+} from "./model"
 import {
   OPFS_APP_FOLDER,
   clearStoredDirectoryHandle,
@@ -120,7 +126,7 @@ export const saveFileInfoVisible = storeFileInfoVisible
 
 export const MAX_TEXT_EDIT_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 
-const PREVIEWABLE_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
+export const PREVIEWABLE_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   "png",
   "jpg",
   "jpeg",
@@ -140,38 +146,34 @@ const getFileExtension = (fileName: string): string => {
   return fileName.slice(dotIdx + 1).toLowerCase()
 }
 
-export const getPreviewType = (fileName: string): "image" | "pdf" | null => {
+export const getPreviewType = (fileName: string): Option.Option<"image" | "pdf"> => {
   const ext = getFileExtension(fileName)
   if (PREVIEWABLE_IMAGE_EXTENSIONS.has(ext)) {
-    return "image"
+    return Option.some("image")
   }
   if (ext === "pdf") {
-    return "pdf"
+    return Option.some("pdf")
   }
-  return null
+  return Option.none()
 }
 
 const BASE64_CHUNK_SIZE = 0x8000 // 32 KB
 
 export const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer)
-  const chunks: Array<string> = []
-  for (let i = 0; i < bytes.length; i += BASE64_CHUNK_SIZE) {
-    const slice = bytes.subarray(i, i + BASE64_CHUNK_SIZE)
-    chunks.push(String.fromCharCode(...slice))
-  }
-  return btoa(chunks.join(""))
+  const chunkCount = Math.ceil(bytes.length / BASE64_CHUNK_SIZE)
+  const chunks = Array.makeBy(chunkCount, (i) => {
+    const start = i * BASE64_CHUNK_SIZE
+    const slice = bytes.subarray(start, start + BASE64_CHUNK_SIZE)
+    return String.fromCharCode(...slice)
+  })
+  return btoa(Array.join(chunks, ""))
 }
 
 export const base64ToUint8Array = (base64: string): Uint8Array<ArrayBuffer> => {
   const cleaned = base64.replace(/\s+/g, "")
   const binaryString = atob(cleaned)
-  const buffer = new ArrayBuffer(binaryString.length)
-  const bytes = new Uint8Array(buffer)
-  for (let i = 0; i < binaryString.length; i++) {
-    bytes[i] = binaryString.charCodeAt(i)
-  }
-  return bytes
+  return Uint8Array.from(binaryString, (char) => char.charCodeAt(0))
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +187,7 @@ export const base64ToUint8Array = (base64: string): Uint8Array<ArrayBuffer> => {
  */
 export class FileSystemHandleStorage {
   readonly type: StorageType
-  private rootHandle: FileSystemDirectoryHandle
-  private currentSubPath: Array<string> = []
+  readonly rootHandle: FileSystemDirectoryHandle
 
   constructor(handle: FileSystemDirectoryHandle, type: StorageType) {
     this.rootHandle = handle
@@ -197,24 +198,15 @@ export class FileSystemHandleStorage {
     return this.type === "opfs" ? OPFS_APP_FOLDER : this.rootHandle.name || "Lokaler Ordner"
   }
 
-  get subPath(): ReadonlyArray<string> {
-    return this.currentSubPath
-  }
-
-  async navigateToSubPath(segments: ReadonlyArray<string>): Promise<void> {
-    let dir = this.rootHandle
-    for (const seg of segments) {
-      dir = await dir.getDirectoryHandle(seg)
-    }
-    this.currentSubPath = [...segments]
-  }
-
-  private async getCurrentDirectoryHandle(): Promise<FileSystemDirectoryHandle> {
-    let dir = this.rootHandle
-    for (const seg of this.currentSubPath) {
-      dir = await dir.getDirectoryHandle(seg)
-    }
-    return dir
+  async getDirectoryHandle(subPath: ReadonlyArray<string>): Promise<FileSystemDirectoryHandle> {
+    return await Array.reduce(
+      subPath,
+      Promise.resolve(this.rootHandle),
+      async (accPromise, seg) => {
+        const dir = await accPromise
+        return await dir.getDirectoryHandle(seg)
+      },
+    )
   }
 
   private async copyDirectoryRecursive(
@@ -252,9 +244,8 @@ export class FileSystemHandleStorage {
     }
   }
 
-  async listEntries(): Promise<Array<FileEntry>> {
-    const dir = await this.getCurrentDirectoryHandle()
-    const entries: Array<FileEntry> = []
+  async listEntries(subPath: ReadonlyArray<string>): Promise<ReadonlyArray<FileEntry>> {
+    const dir = await this.getDirectoryHandle(subPath)
     const iterable = dir as unknown as IterableDirectoryCapable
 
     const rawHandles: Array<FileSystemDirectoryHandle | FileSystemFileHandle> = []
@@ -270,50 +261,54 @@ export class FileSystemHandleStorage {
       throw new Error("Das Verzeichnis-Handle unterstützt keine Iteration über Einträge.")
     }
 
-    for (const entry of rawHandles) {
-      if (entry.kind === "file") {
-        try {
-          const file = await entry.getFile()
-          entries.push({
-            name: entry.name,
-            kind: "file",
-            maybeSize: Option.some(file.size),
-            maybeLastModified: Option.some(file.lastModified),
-          })
-        } catch {
-          entries.push({
-            name: entry.name,
-            kind: "file",
-            maybeSize: Option.none(),
-            maybeLastModified: Option.none(),
-          })
+    const entries: ReadonlyArray<FileEntry> = await Promise.all(
+      Array.map(rawHandles, async (entry) => {
+        if (entry.kind === "file") {
+          try {
+            const file = await entry.getFile()
+            return {
+              name: entry.name,
+              kind: "file" as const,
+              maybeSize: Option.some(file.size),
+              maybeLastModified: Option.some(file.lastModified),
+            }
+          } catch {
+            return {
+              name: entry.name,
+              kind: "file" as const,
+              maybeSize: Option.none(),
+              maybeLastModified: Option.none(),
+            }
+          }
         }
-      } else {
-        entries.push({
+        return {
           name: entry.name,
-          kind: "directory",
+          kind: "directory" as const,
           maybeSize: Option.none(),
           maybeLastModified: Option.none(),
-        })
-      }
-    }
+        }
+      }),
+    )
 
-    entries.sort((a, b) => {
+    const sortedEntries = [...entries].sort((a, b) => {
       if (a.kind !== b.kind) {
         return a.kind === "directory" ? -1 : 1
       }
       return a.name.localeCompare(b.name, "de", { sensitivity: "base" })
     })
 
-    return entries
+    return sortedEntries
   }
 
-  async inspectFile(name: string): Promise<{
+  async inspectFile(
+    subPath: ReadonlyArray<string>,
+    name: string,
+  ): Promise<{
     size: number
     isEditableText: boolean
     text?: string
   }> {
-    const dir = await this.getCurrentDirectoryHandle()
+    const dir = await this.getDirectoryHandle(subPath)
     const fileHandle = await dir.getFileHandle(name)
     const file = await fileHandle.getFile()
 
@@ -341,40 +336,48 @@ export class FileSystemHandleStorage {
     }
   }
 
-  async readFileBuffer(name: string): Promise<ArrayBuffer> {
-    const dir = await this.getCurrentDirectoryHandle()
+  async readFileBuffer(subPath: ReadonlyArray<string>, name: string): Promise<ArrayBuffer> {
+    const dir = await this.getDirectoryHandle(subPath)
     const fileHandle = await dir.getFileHandle(name)
     const file = await fileHandle.getFile()
     return await file.arrayBuffer()
   }
 
-  async getFileObject(name: string): Promise<globalThis.File> {
-    const dir = await this.getCurrentDirectoryHandle()
+  async getFileObject(subPath: ReadonlyArray<string>, name: string): Promise<globalThis.File> {
+    const dir = await this.getDirectoryHandle(subPath)
     const fileHandle = await dir.getFileHandle(name)
     return await fileHandle.getFile()
   }
 
-  async writeFile(name: string, content: string): Promise<void> {
-    const dir = await this.getCurrentDirectoryHandle()
+  async writeFile(subPath: ReadonlyArray<string>, name: string, content: string): Promise<void> {
+    const dir = await this.getDirectoryHandle(subPath)
     const fileHandle = await dir.getFileHandle(name, { create: true })
     const writable = await fileHandle.createWritable()
     await writable.write(content)
     await writable.close()
   }
 
-  async writeFileBuffer(name: string, data: ArrayBuffer | Uint8Array<ArrayBuffer>): Promise<void> {
-    const dir = await this.getCurrentDirectoryHandle()
+  async writeFileBuffer(
+    subPath: ReadonlyArray<string>,
+    name: string,
+    data: ArrayBuffer | Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
+    const dir = await this.getDirectoryHandle(subPath)
     const fileHandle = await dir.getFileHandle(name, { create: true })
     const writable = await fileHandle.createWritable()
     await writable.write(data)
     await writable.close()
   }
 
-  async renameBinaryFile(oldName: string, newName: string): Promise<void> {
+  async renameBinaryFile(
+    subPath: ReadonlyArray<string>,
+    oldName: string,
+    newName: string,
+  ): Promise<void> {
     if (oldName === newName) {
       return
     }
-    const dir = await this.getCurrentDirectoryHandle()
+    const dir = await this.getDirectoryHandle(subPath)
     const oldFileHandle = await dir.getFileHandle(oldName)
     const file = await oldFileHandle.getFile()
     const buffer = await file.arrayBuffer()
@@ -387,24 +390,32 @@ export class FileSystemHandleStorage {
     await dir.removeEntry(oldName)
   }
 
-  async createDirectory(name: string): Promise<void> {
-    const dir = await this.getCurrentDirectoryHandle()
+  async createDirectory(subPath: ReadonlyArray<string>, name: string): Promise<void> {
+    const dir = await this.getDirectoryHandle(subPath)
     await dir.getDirectoryHandle(name, { create: true })
   }
 
-  async renameDirectory(oldName: string, newName: string): Promise<void> {
+  async renameDirectory(
+    subPath: ReadonlyArray<string>,
+    oldName: string,
+    newName: string,
+  ): Promise<void> {
     if (oldName === newName) {
       return
     }
-    const dir = await this.getCurrentDirectoryHandle()
+    const dir = await this.getDirectoryHandle(subPath)
     const oldDirHandle = await dir.getDirectoryHandle(oldName)
     const newDirHandle = await dir.getDirectoryHandle(newName, { create: true })
     await this.copyDirectoryRecursive(oldDirHandle, newDirHandle)
     await dir.removeEntry(oldName, { recursive: true })
   }
 
-  async deleteEntry(name: string, kind: "file" | "directory" = "file"): Promise<void> {
-    const dir = await this.getCurrentDirectoryHandle()
+  async deleteEntry(
+    subPath: ReadonlyArray<string>,
+    name: string,
+    kind: "file" | "directory" = "file",
+  ): Promise<void> {
+    const dir = await this.getDirectoryHandle(subPath)
     await dir.removeEntry(name, { recursive: kind === "directory" })
   }
 
@@ -417,42 +428,25 @@ export class FileSystemHandleStorage {
 // Imperative Runtime Bridge (Non-Serializable Handles)
 // ---------------------------------------------------------------------------
 
-export type RegisterSWOptions = {
-  immediate?: boolean
-  onNeedReload?: () => void
-  onOfflineReady?: () => void
-  onNeedRefresh?: () => void
-  onRegistered?: (registration: ServiceWorkerRegistration | undefined) => void
-  onRegisteredSW?: (
-    swScriptUrl: string,
-    registration: ServiceWorkerRegistration | undefined,
-  ) => void
-  onRegisterError?: (error: unknown) => void
-}
-
-export type RegisterSWFn = (options?: RegisterSWOptions) => (reloadPage?: boolean) => Promise<void>
-
 const runtimeBridge: {
   activeStorage: FileSystemHandleStorage | null
   pendingHandle: FileSystemDirectoryHandle | null
   activePreviewObjectUrl: string | null
   deferredInstallPrompt: BeforeInstallPromptEvent | null
-  registerServiceWorker: RegisterSWFn | null
-  refreshServiceWorker: ((reloadPage?: boolean) => Promise<void>) | null
+  pendingImportFiles: ReadonlyArray<globalThis.File>
 } = {
   activeStorage: null,
   pendingHandle: null,
   activePreviewObjectUrl: null,
   deferredInstallPrompt: null,
-  registerServiceWorker: null,
-  refreshServiceWorker: null,
+  pendingImportFiles: [],
 }
 
-export const getRegisterServiceWorker = (): RegisterSWFn | null =>
-  runtimeBridge.registerServiceWorker
+export const getPendingImportFiles = (): ReadonlyArray<globalThis.File> =>
+  runtimeBridge.pendingImportFiles
 
-export const setRegisterServiceWorker = (fn: RegisterSWFn | null): void => {
-  runtimeBridge.registerServiceWorker = fn
+export const setPendingImportFiles = (files: ReadonlyArray<globalThis.File>): void => {
+  runtimeBridge.pendingImportFiles = files
 }
 
 export const getActiveStorage = (): FileSystemHandleStorage | null => runtimeBridge.activeStorage
@@ -486,56 +480,46 @@ export const setDeferredInstallPrompt = (prompt: BeforeInstallPromptEvent | null
   runtimeBridge.deferredInstallPrompt = prompt
 }
 
-export const getRefreshServiceWorker = (): ((reloadPage?: boolean) => Promise<void>) | null =>
-  runtimeBridge.refreshServiceWorker
-
-export const setRefreshServiceWorker = (
-  fn: ((reloadPage?: boolean) => Promise<void>) | null,
-): void => {
-  runtimeBridge.refreshServiceWorker = fn
-}
-
 export const loadEditorFileModeForEntry = async (
   storage: FileSystemHandleStorage,
+  subPath: ReadonlyArray<string>,
   entryName: string,
 ): Promise<EditorFileMode> => {
   revokeActivePreviewUrl()
-  const inspection = await storage.inspectFile(entryName)
+  const inspection = await storage.inspectFile(subPath, entryName)
   if (inspection.isEditableText) {
     return EditorFileMode.Text({
       content: inspection.text ?? "",
     })
   }
 
-  const canEditBase64 = inspection.size <= MAX_TEXT_EDIT_SIZE_BYTES
-  const lockReason =
-    inspection.size > MAX_TEXT_EDIT_SIZE_BYTES
-      ? `Die Datei ist größer als 10 MB (${(inspection.size / (1024 * 1024)).toFixed(1)} MB) und kann nicht im Texteditor bearbeitet werden.`
-      : "Binärdatei erkannt – Inhalt kann als Base64 bearbeitet werden."
-
-  const previewKind = getPreviewType(entryName)
-  let preview: PreviewContent = PreviewContent.None()
-  if (previewKind !== null) {
-    try {
-      const file = await storage.getFileObject(entryName)
-      const objectUrl = URL.createObjectURL(file)
-      setActivePreviewUrl(objectUrl)
-      preview =
-        previewKind === "image"
+  const maybePreviewKind = getPreviewType(entryName)
+  const preview = await Option.match(maybePreviewKind, {
+    onNone: () => Promise.resolve(PreviewContent.None()),
+    onSome: async (previewKind) => {
+      try {
+        const file = await storage.getFileObject(subPath, entryName)
+        const objectUrl = URL.createObjectURL(file)
+        setActivePreviewUrl(objectUrl)
+        return previewKind === "image"
           ? PreviewContent.Image({ objectUrl, name: entryName })
           : PreviewContent.Pdf({ objectUrl })
-    } catch {
-      preview = PreviewContent.None()
-    }
-  }
+      } catch {
+        return PreviewContent.None()
+      }
+    },
+  })
+
+  const edit =
+    inspection.size > MAX_TEXT_EDIT_SIZE_BYTES
+      ? BinaryEdit.Locked({
+          reason: `Die Datei ist größer als 10 MB (${(inspection.size / (1024 * 1024)).toFixed(1)} MB) und kann nicht im Texteditor bearbeitet werden.`,
+        })
+      : BinaryEdit.Disabled()
 
   return EditorFileMode.Binary({
-    lockReason,
-    canEditBase64,
-    isBase64Enabled: false,
-    base64Content: "",
-    isLoadingBase64: false,
     preview,
+    edit,
   })
 }
 
@@ -560,17 +544,17 @@ export const findFreeFileName = (
     return desiredName
   }
   const { base, ext } = splitFileNameAndExt(desiredName)
-  let counter = 1
-  while (existingNames.has(`${base} (${counter})${ext}`)) {
-    counter++
+  const findCandidate = (counter: number): string => {
+    const candidate = `${base} (${counter})${ext}`
+    return existingNames.has(candidate) ? findCandidate(counter + 1) : candidate
   }
-  return `${base} (${counter})${ext}`
+  return findCandidate(1)
 }
 
 export const decodeUrlPathnameSegments = (pathname: string): ReadonlyArray<string> =>
   pipe(
     pathname.split("/"),
-    Array.filter((segment) => segment.length > 0),
+    Array.filter((segment) => segment !== ""),
     Array.map((segment) => {
       try {
         return decodeURIComponent(segment)
