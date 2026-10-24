@@ -5,17 +5,30 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "oxfmt --check && oxlint && vite build",
+    "build": "vite build",
     "preview": "vite preview",
-    "lint": "oxlint --fix",
-    "lint:check": "oxlint",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
-    "fix": "oxfmt && oxlint --fix"
+    "typecheck": "tsc --noEmit",
+    "format": "oxfmt",
+    "test": "vitest run",
+    "lint": "oxlint src && npm run -s patch:effect && oxlint --config .oxlintrc.effect.json --deny-warnings src",
+    "patch:effect": "effect-tsgo patch --no-typescript --oxlint &>/dev/null || effect-tsgo patch --no-typescript --oxlint",
+    "fix": "npm run -s format && npm run -s lint && npm run -s typecheck"
+  },
+  "dependencies": {
+    "@effect/platform-browser": "^4.0.0",
+    "@foldkit/ui": "^0.169.0",
+    "effect": "^4.0.0",
+    "foldkit": "^0.169.0"
   },
   "devDependencies": {
+    "@effect/tsgo": "^0.56.0",
+    "@foldkit/devtools": "^0.169.0",
+    "@foldkit/devtools-mcp": "^0.25.0",
+    "@foldkit/oxlint-plugin": "^0.15.3",
+    "@foldkit/vite-plugin": "^0.28.0",
     "@types/node": "^26.6.5",
     "@vite-pwa/assets-generator": "^2.0.0",
+    "happy-dom": "^20.14.6",
     "oxfmt": "^0.74.0",
     "oxlint": "^1.89.0",
     "oxlint-tsgolint": "^7.0.2004",
@@ -23,6 +36,7 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.0",
     "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.0.5",
     "workbox-window": "^7.4.1"
   }
 }

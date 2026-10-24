@@ -1,5 +1,6 @@
 import { VitePWA } from "vite-plugin-pwa"
 import { defineConfig, build, type Plugin } from "vite"
+import { foldkit } from "@foldkit/vite-plugin"
 import { execFileSync } from "node:child_process"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -207,6 +208,7 @@ export default defineConfig({
   },
 
   plugins: [
+    foldkit(),
     ...islandsApiPlugin(),
     maskableIcon(),
     VitePWA({

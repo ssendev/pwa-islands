@@ -4,12 +4,18 @@
   "categories": {
     "correctness": "error"
   },
-  "options": {
-    "typeAware": true,
-    "typeCheck": true,
-    "denyWarnings": true
-  },
   "rules": {},
+  "ignorePatterns": [
+    "dist/",
+    "node_modules/",
+    "repos/",
+    "foldkitapp/**",
+    "**/*.d.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "**/*.config.js",
+    "**/*.config.mjs"
+  ],
   "env": {
     "builtin": true
   }
