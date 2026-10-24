@@ -234,13 +234,6 @@ const activateStorageBackend = async (
   setPendingHandle(null)
 
   const resolved = await resolveUrlDeepLink(storage, pathname, search, "replace")
-  const fallbackBanner: Option.Option<AlertBanner> = isFallback
-    ? Option.some({
-        message:
-          "Hinweis: Dieser Browser unterstützt keinen direkten Ordner-Zugriff (File System Access API). Dateien werden im internen Browser-Speicher (OPFS) gespeichert.",
-        variant: "info",
-      })
-    : Option.none()
 
   return Message.CompletedStorageInit({
     storageType: Option.some(type),
@@ -249,7 +242,7 @@ const activateStorageBackend = async (
     isFallback,
     entries: resolved.entries,
     maybeModalState: resolved.maybeModalState,
-    maybeAlertBanner: Option.orElse(resolved.maybeAlertBanner, () => fallbackBanner),
+    maybeAlertBanner: resolved.maybeAlertBanner,
   })
 }
 

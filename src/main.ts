@@ -226,7 +226,7 @@ export const update = (model: Model, message: Message): Update.Return<Model, Mes
               subPath: () => subPath,
               entriesState: () => EntriesState.Loaded({ entries }),
             }),
-          maybeAlertBanner: () => (readyState.isFallback ? model.maybeAlertBanner : Option.none()),
+          maybeAlertBanner: () => Option.none(),
         }),
       }
     },
