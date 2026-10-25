@@ -119,53 +119,54 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
     PermissionRequired: () =>
       viewBreadcrumbNav([h.span([h.Class("breadcrumb-current")], ["PWA Islands"])], h),
 
-    Ready: ({ subPath }) => {
-      if (Array.isReadonlyArrayEmpty(subPath)) {
-        return viewBreadcrumbNav(
-          [h.span([h.Class("breadcrumb-current"), h.Title("PWA Islands")], ["PWA Islands"])],
-          h,
-        )
-      }
+    Ready: ({ subPath }) =>
+      Array.match(subPath, {
+        onEmpty: () =>
+          viewBreadcrumbNav(
+            [h.span([h.Class("breadcrumb-current"), h.Title("PWA Islands")], ["PWA Islands"])],
+            h,
+          ),
+        onNonEmpty: (subPath) => {
+          const segmentNodes = pipe(
+            subPath,
+            Array.flatMap((segment, i) => {
+              const isLast = i === subPath.length - 1
+              const accumulatedPath = pipe(Array.take(subPath, i + 1), Array.join("/"))
+              const separator = h.span([h.Class("breadcrumb-separator"), h.AriaHidden(true)], ["/"])
+              const item = isLast
+                ? h.span([h.Class("breadcrumb-current"), h.Title(segment)], [segment])
+                : h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("breadcrumb-item"),
+                      h.Title(segment),
+                      h.DataAttribute("segment", accumulatedPath),
+                      h.OnClick(Message.ClickedBreadcrumbSegment({ index: i })),
+                    ],
+                    [segment],
+                  )
+              return [separator, item]
+            }),
+          )
 
-      const segmentNodes = pipe(
-        subPath,
-        Array.flatMap((segment, i) => {
-          const isLast = i === subPath.length - 1
-          const accumulatedPath = pipe(Array.take(subPath, i + 1), Array.join("/"))
-          const separator = h.span([h.Class("breadcrumb-separator"), h.AriaHidden(true)], ["/"])
-          const item = isLast
-            ? h.span([h.Class("breadcrumb-current"), h.Title(segment)], [segment])
-            : h.button(
+          return viewBreadcrumbNav(
+            [
+              h.button(
                 [
                   h.Type("button"),
                   h.Class("breadcrumb-item"),
-                  h.Title(segment),
-                  h.DataAttribute("segment", accumulatedPath),
-                  h.OnClick(Message.ClickedBreadcrumbSegment({ index: i })),
+                  h.Title("PWA Islands"),
+                  h.DataAttribute("segment", ""),
+                  h.OnClick(Message.ClickedBreadcrumbRoot()),
                 ],
-                [segment],
-              )
-          return [separator, item]
-        }),
-      )
-
-      return viewBreadcrumbNav(
-        [
-          h.button(
-            [
-              h.Type("button"),
-              h.Class("breadcrumb-item"),
-              h.Title("PWA Islands"),
-              h.DataAttribute("segment", ""),
-              h.OnClick(Message.ClickedBreadcrumbRoot()),
+                ["PWA Islands"],
+              ),
+              ...segmentNodes,
             ],
-            ["PWA Islands"],
-          ),
-          ...segmentNodes,
-        ],
-        h,
-      )
-    },
+            h,
+          )
+        },
+      }),
   })
 
 const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
@@ -533,14 +534,22 @@ const viewFilesTable = (
   showFileInfo: boolean,
   h: HtmlBuilder,
 ): Html.Html => {
-  if (Array.isReadonlyArrayEmpty(entries)) {
-    return h.div(
-      [h.Class("empty-state")],
-      [h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📁"]), h.h3([], ["Ordner ist leer"])],
-    )
-  }
+  return Array.match(entries, {
+    onEmpty: () =>
+      h.div(
+        [h.Class("empty-state")],
+        [h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📁"]), h.h3([], ["Ordner ist leer"])],
+      ),
+    onNonEmpty: (entries) => viewFilesTableContent(entries, showFileInfo, h),
+  })
+}
 
-  return h.div(
+const viewFilesTableContent = (
+  entries: ReadonlyArray<FileEntry>,
+  showFileInfo: boolean,
+  h: HtmlBuilder,
+): Html.Html =>
+  h.div(
     [],
     [
       h.div([h.Class("files-summary")], [h.span([], [formatSummaryText(entries)])]),
@@ -584,7 +593,6 @@ const viewFilesTable = (
       ),
     ],
   )
-}
 
 const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
   h.div(
@@ -1612,7 +1620,7 @@ const viewConfirmDeleteModal = (
           h.footer(
             [h.Class("modal-footer")],
             [
-              h.div([h.Class("modal-footer-left")], []),
+              h.div([h.Class("modal-footer-left")]),
               h.div(
                 [h.Class("modal-footer-right")],
                 [
@@ -1683,7 +1691,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: HtmlBuilder): Html.Htm
           h.footer(
             [h.Class("modal-footer")],
             [
-              h.div([h.Class("modal-footer-left")], []),
+              h.div([h.Class("modal-footer-left")]),
               h.div(
                 [h.Class("modal-footer-right")],
                 [
@@ -1778,7 +1786,7 @@ const viewImportConflictModal = (
           h.footer(
             [h.Class("modal-footer")],
             [
-              h.div([h.Class("modal-footer-left")], []),
+              h.div([h.Class("modal-footer-left")]),
               h.div(
                 [h.Class("modal-footer-right")],
                 [
