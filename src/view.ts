@@ -20,7 +20,7 @@ import {
   formatDate,
   formatSize,
   formatSummaryText,
-} from "./model"
+} from "./route"
 import { OPFS_APP_FOLDER } from "./storage"
 import rootIconUrl from "./assets/pwa-islands.svg"
 

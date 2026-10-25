@@ -46,7 +46,7 @@ import {
   ResolvedImportItem,
   SavedBackend,
   encodeSubPath,
-} from "./model"
+} from "./route"
 
 const requireActiveStorage = (): FileSystemHandleStorage =>
   Option.match(getActiveStorage(), {

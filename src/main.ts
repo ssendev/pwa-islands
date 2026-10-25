@@ -58,7 +58,7 @@ import {
   buildNewUrl,
   currentSubPathFromStorageState,
   parseUrlToRoute,
-} from "./model"
+} from "./route"
 import { subscriptions } from "./subscription"
 import { view } from "./view"
 

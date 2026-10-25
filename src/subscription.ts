@@ -3,7 +3,7 @@ import * as Dom from "foldkit/dom"
 import * as Subscription from "foldkit/subscription"
 import { setDeferredInstallPrompt } from "./files"
 import { Message } from "./message"
-import { type Model, ModalState } from "./model"
+import { type Model, ModalState } from "./route"
 
 const isBeforeInstallPromptEvent = (event: Event): event is BeforeInstallPromptEvent =>
   "prompt" in event && typeof event.prompt === "function" && "userChoice" in event

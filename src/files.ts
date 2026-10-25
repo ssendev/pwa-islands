@@ -6,7 +6,7 @@ import {
   FileInspection,
   PreviewContent,
   type StorageType,
-} from "./model"
+} from "./route"
 import {
   OPFS_APP_FOLDER,
   checkTextBytes,

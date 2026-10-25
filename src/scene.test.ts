@@ -32,7 +32,7 @@ import {
   PreviewContent,
   SavedBackend,
   StorageState,
-} from "./model"
+} from "./route"
 
 const sampleEntries: ReadonlyArray<FileEntry> = [
   {
