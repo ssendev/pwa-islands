@@ -90,6 +90,7 @@ export const clearSavedDirectoryHandle = async (): Promise<void> => {
 
 export const getSavedDirectoryHandle = getStoredDirectoryHandle
 export const getSavedStorageType = getStoredStorageType
+export const saveStorageType = storeStorageType
 export const getSavedFileInfoVisible = getStoredFileInfoVisible
 export const saveFileInfoVisible = storeFileInfoVisible
 

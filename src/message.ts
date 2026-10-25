@@ -49,6 +49,7 @@ export const Message = defineMessageUnion({
     visible: Schema.Boolean,
   },
   CompletedSaveFileInfoPreference: {},
+  CompletedSaveStorageTypePreference: {},
 
   // Directory Listing & Navigation
   SucceededRefreshEntries: {

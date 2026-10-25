@@ -23,6 +23,7 @@ import {
   revokeActivePreviewUrl,
   saveDirectoryHandle,
   saveFileInfoVisible,
+  saveStorageType,
   setActiveStorage,
   setDeferredInstallPrompt,
   setPendingHandle,
@@ -400,6 +401,18 @@ export const InitializeStorage = Command.define("InitializeStorage", {
           }),
         ),
       ),
+    ),
+})
+
+export const SaveStorageTypePreference = Command.define("SaveStorageTypePreference", {
+  args: {
+    storageType: Schema.Literals(["fsa", "opfs"]),
+  },
+  messages: [Message.CompletedSaveStorageTypePreference],
+  execute: ({ storageType }) =>
+    Effect.tryPromise(() => saveStorageType(storageType)).pipe(
+      Effect.map(() => Message.CompletedSaveStorageTypePreference()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveStorageTypePreference())),
     ),
 })
 

@@ -24,6 +24,7 @@ import {
   ReplaceUrl,
   RevokeActivePreviewUrl,
   SaveFileInfoPreference,
+  SaveStorageTypePreference,
   SaveModalChanges,
   ScrollHelpTopicIntoView,
   SelectImportFiles,
@@ -180,7 +181,10 @@ const handleUseFsa = (model: Model): Update.Return<Model, Message> => {
           }),
         isSettingsOpen: () => false,
       }),
-      commands: [PushUrl({ url: buildFolderUrl([]) })],
+      commands: [
+        SaveStorageTypePreference({ storageType: "fsa" }),
+        PushUrl({ url: buildFolderUrl([]) }),
+      ],
     }),
     Granted: () => ({
       model: modifyFields(model, { isSettingsOpen: () => false }),
@@ -384,6 +388,7 @@ export const update = (model: Model, message: Message) =>
     }),
 
     CompletedSaveFileInfoPreference: () => ({ model }),
+    CompletedSaveStorageTypePreference: () => ({ model }),
 
     // Directory Listing & Navigation
     SucceededRefreshEntries: (payload) => handleEntriesListed(model, payload),

@@ -15,6 +15,7 @@ import {
   ReplaceUrl,
   RevokeActivePreviewUrl,
   SaveFileInfoPreference,
+  SaveStorageTypePreference,
   SaveModalChanges,
   ScrollHelpTopicIntoView,
   WaitBeforeResetCopyDts,
@@ -838,7 +839,11 @@ describe("PWA Islands Story Tests", () => {
           update,
           given(opfsModel),
           message(Message.ClickedUseFsa()),
-          Command.expectExact(PushUrl({ url: "/?pwaislands" })),
+          Command.expectExact(
+            SaveStorageTypePreference({ storageType: "fsa" }),
+            PushUrl({ url: "/?pwaislands" }),
+          ),
+          Command.resolve(SaveStorageTypePreference, Message.CompletedSaveStorageTypePreference()),
           Command.resolve(PushUrl, Message.CompletedPushUrl()),
           model((m) => {
             expect(m.storageState).toEqual(
