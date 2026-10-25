@@ -25,6 +25,7 @@ import {
   update,
   view,
 } from "./main"
+import * as Editor from "./editor"
 import * as Modal from "./modal"
 import { BinaryEdit, EditorFileMode, ModalState, PreviewContent } from "./modal"
 import type { FileEntry } from "./files"
@@ -92,10 +93,7 @@ describe("PWA Islands Scene Tests", () => {
       type(selector("#modal-file-content"), "<h1>Hallo Welt</h1>"),
       click(selector("#modal-btn-save")),
       Command.resolveAll(
-        [
-          Modal.SaveModalChanges,
-          Modal.Message.SucceededSaveModalChanges({ entries: updatedEntries }),
-        ],
+        [Editor.SaveChanges, Editor.Message.SucceededSaveChanges({ entries: updatedEntries })],
         [ReplaceUrl, Message.CompletedReplaceUrl()],
       ),
       sceneExpect(selector(".modal-overlay")).toBeAbsent(),
@@ -106,14 +104,16 @@ describe("PWA Islands Scene Tests", () => {
   it("hides binary preview when checking Binärdatei bearbeiten", () => {
     const binaryModel: Model = {
       ...readyModel,
-      modalState: ModalState.EditFile({
-        originalName: "bild.png",
-        name: "bild.png",
-        fileMode: EditorFileMode.Binary({
-          preview: PreviewContent.Image({ objectUrl: "blob:preview-url" }),
-          edit: BinaryEdit.Disabled(),
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "bild.png",
+          name: "bild.png",
+          fileMode: EditorFileMode.Binary({
+            preview: PreviewContent.Image({ objectUrl: "blob:preview-url" }),
+            edit: BinaryEdit.Disabled(),
+          }),
+          maybeValidationError: Option.none(),
         }),
-        maybeValidationError: Option.none(),
       }),
     }
 
@@ -123,10 +123,10 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-file-preview")).toExist(),
       sceneExpect(selector("#modal-base64-editor")).toBeAbsent(),
       change(selector("#modal-use-base64"), "true"),
-      Command.expectExact(Modal.LoadModalBase64({ entryName: "bild.png", subPath: [] })),
+      Command.expectExact(Editor.LoadBase64({ entryName: "bild.png", subPath: [] })),
       Command.resolve(
-        Modal.LoadModalBase64,
-        Modal.Message.SucceededLoadModalBase64({ base64Content: "iVBORw0KGgo=" }),
+        Editor.LoadBase64,
+        Editor.Message.SucceededLoadBase64({ base64Content: "iVBORw0KGgo=" }),
       ),
       sceneExpect(selector("#modal-base64-editor")).toExist(),
       sceneExpect(selector("#modal-file-preview")).toBeAbsent(),
@@ -139,10 +139,12 @@ describe("PWA Islands Scene Tests", () => {
   it("shows overwrite confirmation dialog when saving file with existing name", () => {
     const modelWithDuplicateFile: Model = {
       ...readyModel,
-      modalState: ModalState.CreateFile({
-        name: "index.html",
-        content: "<h1>Duplicate</h1>",
-        maybeValidationError: Option.none(),
+      modalState: ModalState.Editor({
+        editor: Editor.Model.CreateFile({
+          name: "index.html",
+          content: "<h1>Duplicate</h1>",
+          maybeValidationError: Option.none(),
+        }),
       }),
     }
 
@@ -159,11 +161,13 @@ describe("PWA Islands Scene Tests", () => {
   it("shows delete confirmation dialog when clicking delete button in file edit modal", () => {
     const modelWithEditFile: Model = {
       ...readyModel,
-      modalState: ModalState.EditFile({
-        originalName: "index.html",
-        name: "index.html",
-        fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
-        maybeValidationError: Option.none(),
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
+          maybeValidationError: Option.none(),
+        }),
       }),
     }
 

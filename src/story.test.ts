@@ -2,6 +2,8 @@ import { Option } from "effect"
 import { Command, given, message, model, story } from "foldkit/story"
 import { fromString } from "foldkit/url"
 import { describe, expect, it } from "vitest"
+import * as Editor from "./editor"
+import { DeleteEntry, EditorFileMode, OverwriteSource, SaveChanges } from "./editor"
 import * as Help from "./help"
 import {
   CopyApiDtsToClipboard,
@@ -30,13 +32,9 @@ import {
 } from "./main"
 import * as Modal from "./modal"
 import {
-  DeleteModalEntry,
-  EditorFileMode,
   FocusModalNameInput,
   ModalState,
-  OverwriteSource,
   RevokeActivePreviewUrl,
-  SaveModalChanges,
   WritePendingImportFiles,
 } from "./modal"
 import type { FileEntry } from "./files"
@@ -44,6 +42,8 @@ import { AppRoute } from "./route"
 import { OPFS_APP_FOLDER } from "./storage"
 
 const modalMsg = (m: Modal.Message) => Message.GotModalMessage({ message: m })
+const editorMsg = (m: Editor.Message) =>
+  Message.GotModalMessage({ message: Modal.Message.GotEditorMessage({ message: m }) })
 const helpMsg = (m: Help.Message) =>
   Message.GotModalMessage({ message: Modal.Message.GotHelpMessage({ message: m }) })
 
@@ -361,35 +361,41 @@ describe("PWA Islands Story Tests", () => {
     it("validates empty name and slash in folder name", () => {
       const modelWithNewFolder: Model = {
         ...readyModel,
-        modalState: ModalState.CreateFolder({
-          name: "",
-          maybeValidationError: Option.none(),
+        modalState: ModalState.Editor({
+          editor: Editor.Model.CreateFolder({
+            name: "",
+            maybeValidationError: Option.none(),
+          }),
         }),
       }
 
       story(
         update,
         given(modelWithNewFolder),
-        message(modalMsg(Modal.Message.ClickedSaveModal())),
+        message(editorMsg(Editor.Message.ClickedSave())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.CreateFolder({
-              name: "",
-              maybeValidationError: Option.some("Bitte geben Sie einen Ordnernamen ein."),
+            ModalState.Editor({
+              editor: Editor.Model.CreateFolder({
+                name: "",
+                maybeValidationError: Option.some("Bitte geben Sie einen Ordnernamen ein."),
+              }),
             }),
           )
         }),
-        message(modalMsg(Modal.Message.UpdatedModalName({ name: "sub/folder" }))),
-        message(modalMsg(Modal.Message.ClickedSaveModal())),
+        message(editorMsg(Editor.Message.UpdatedName({ name: "sub/folder" }))),
+        message(editorMsg(Editor.Message.ClickedSave())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.CreateFolder({
-              name: "sub/folder",
-              maybeValidationError: Option.some(
-                "Der Ordnername darf keine Schrägstriche enthalten.",
-              ),
+            ModalState.Editor({
+              editor: Editor.Model.CreateFolder({
+                name: "sub/folder",
+                maybeValidationError: Option.some(
+                  "Der Ordnername darf keine Schrägstriche enthalten.",
+                ),
+              }),
             }),
           )
         }),
@@ -399,24 +405,28 @@ describe("PWA Islands Story Tests", () => {
     it("validates duplicate folder name", () => {
       const modelWithDuplicateFolder: Model = {
         ...readyModel,
-        modalState: ModalState.CreateFolder({
-          name: "projekte",
-          maybeValidationError: Option.none(),
+        modalState: ModalState.Editor({
+          editor: Editor.Model.CreateFolder({
+            name: "projekte",
+            maybeValidationError: Option.none(),
+          }),
         }),
       }
 
       story(
         update,
         given(modelWithDuplicateFolder),
-        message(modalMsg(Modal.Message.ClickedSaveModal())),
+        message(editorMsg(Editor.Message.ClickedSave())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.CreateFolder({
-              name: "projekte",
-              maybeValidationError: Option.some(
-                'Ein Eintrag mit dem Namen "projekte" existiert bereits.',
-              ),
+            ModalState.Editor({
+              editor: Editor.Model.CreateFolder({
+                name: "projekte",
+                maybeValidationError: Option.some(
+                  'Ein Eintrag mit dem Namen "projekte" existiert bereits.',
+                ),
+              }),
             }),
           )
         }),
@@ -426,32 +436,36 @@ describe("PWA Islands Story Tests", () => {
     it("prompts overwrite confirmation when creating a file with existing name", () => {
       const modelWithDuplicateFile: Model = {
         ...readyModel,
-        modalState: ModalState.CreateFile({
-          name: "index.html",
-          content: "<p>New</p>",
-          maybeValidationError: Option.none(),
+        modalState: ModalState.Editor({
+          editor: Editor.Model.CreateFile({
+            name: "index.html",
+            content: "<p>New</p>",
+            maybeValidationError: Option.none(),
+          }),
         }),
       }
 
       story(
         update,
         given(modelWithDuplicateFile),
-        message(modalMsg(Modal.Message.ClickedSaveModal())),
+        message(editorMsg(Editor.Message.ClickedSave())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.ConfirmOverwrite({
-              targetName: "index.html",
-              source: OverwriteSource.CreateFile({
-                content: "<p>New</p>",
+            ModalState.Editor({
+              editor: Editor.Model.ConfirmOverwrite({
+                targetName: "index.html",
+                source: OverwriteSource.CreateFile({
+                  content: "<p>New</p>",
+                }),
               }),
             }),
           )
         }),
-        message(modalMsg(Modal.Message.ClickedConfirmOverwrite())),
+        message(editorMsg(Editor.Message.ClickedConfirmOverwrite())),
         Command.expectExact(
-          SaveModalChanges({
-            modalState: ModalState.ConfirmOverwrite({
+          SaveChanges({
+            model: Editor.Model.ConfirmOverwrite({
               targetName: "index.html",
               source: OverwriteSource.CreateFile({
                 content: "<p>New</p>",
@@ -461,8 +475,8 @@ describe("PWA Islands Story Tests", () => {
           }),
         ),
         Command.resolve(
-          SaveModalChanges,
-          Modal.Message.SucceededSaveModalChanges({ entries: sampleEntries }),
+          SaveChanges,
+          Editor.Message.SucceededSaveChanges({ entries: sampleEntries }),
         ),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
@@ -474,36 +488,40 @@ describe("PWA Islands Story Tests", () => {
     it("prompts delete confirmation and deletes modal entry", () => {
       const modelWithEditFile: Model = {
         ...readyModel,
-        modalState: ModalState.EditFile({
-          originalName: "index.html",
-          name: "index.html",
-          fileMode: EditorFileMode.Text({ content: "<p>Hello</p>" }),
-          maybeValidationError: Option.none(),
+        modalState: ModalState.Editor({
+          editor: Editor.Model.EditFile({
+            originalName: "index.html",
+            name: "index.html",
+            fileMode: EditorFileMode.Text({ content: "<p>Hello</p>" }),
+            maybeValidationError: Option.none(),
+          }),
         }),
       }
 
       story(
         update,
         given(modelWithEditFile),
-        message(modalMsg(Modal.Message.ClickedDeleteModalEntry())),
+        message(editorMsg(Editor.Message.ClickedDelete())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.ConfirmDelete({
-              entryName: "index.html",
-              entryKind: "file",
+            ModalState.Editor({
+              editor: Editor.Model.ConfirmDelete({
+                entryName: "index.html",
+                entryKind: "file",
+              }),
             }),
           )
         }),
-        message(modalMsg(Modal.Message.ConfirmedDeleteModalEntry())),
+        message(editorMsg(Editor.Message.ConfirmedDelete())),
         Command.expectExact(
-          DeleteModalEntry({
+          DeleteEntry({
             entryName: "index.html",
             entryKind: "file",
             subPath: [],
           }),
         ),
-        Command.resolve(DeleteModalEntry, Modal.Message.SucceededDeleteModalEntry({ entries: [] })),
+        Command.resolve(DeleteEntry, Editor.Message.SucceededDeleteEntry({ entries: [] })),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
           expect(m.modalState).toEqual(ModalState.Closed())
@@ -535,12 +553,7 @@ describe("PWA Islands Story Tests", () => {
               expect(resolved[0].targetName).toBe("neu.html")
             },
             Closed: () => expect.fail("Expected ImportConflict"),
-            CreateFile: () => expect.fail("Expected ImportConflict"),
-            CreateFolder: () => expect.fail("Expected ImportConflict"),
-            EditFolder: () => expect.fail("Expected ImportConflict"),
-            EditFile: () => expect.fail("Expected ImportConflict"),
-            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
-            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Editor: () => expect.fail("Expected ImportConflict"),
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
@@ -625,12 +638,7 @@ describe("PWA Islands Story Tests", () => {
               expect(queue).toHaveLength(2)
             },
             Closed: () => expect.fail("Expected ImportConflict"),
-            CreateFile: () => expect.fail("Expected ImportConflict"),
-            CreateFolder: () => expect.fail("Expected ImportConflict"),
-            EditFolder: () => expect.fail("Expected ImportConflict"),
-            EditFile: () => expect.fail("Expected ImportConflict"),
-            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
-            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Editor: () => expect.fail("Expected ImportConflict"),
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
@@ -643,12 +651,7 @@ describe("PWA Islands Story Tests", () => {
               expect(queue).toHaveLength(1)
             },
             Closed: () => expect.fail("Expected ImportConflict"),
-            CreateFile: () => expect.fail("Expected ImportConflict"),
-            CreateFolder: () => expect.fail("Expected ImportConflict"),
-            EditFolder: () => expect.fail("Expected ImportConflict"),
-            EditFile: () => expect.fail("Expected ImportConflict"),
-            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
-            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Editor: () => expect.fail("Expected ImportConflict"),
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
@@ -660,12 +663,7 @@ describe("PWA Islands Story Tests", () => {
               expect(applyToAll).toBe(true)
             },
             Closed: () => expect.fail("Expected ImportConflict"),
-            CreateFile: () => expect.fail("Expected ImportConflict"),
-            CreateFolder: () => expect.fail("Expected ImportConflict"),
-            EditFolder: () => expect.fail("Expected ImportConflict"),
-            EditFile: () => expect.fail("Expected ImportConflict"),
-            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
-            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Editor: () => expect.fail("Expected ImportConflict"),
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
@@ -703,14 +701,16 @@ describe("PWA Islands Story Tests", () => {
         Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.CreateFile({
-              name: "Neu.html",
-              content: "",
-              maybeValidationError: Option.none(),
+            ModalState.Editor({
+              editor: Editor.Model.CreateFile({
+                name: "Neu.html",
+                content: "",
+                maybeValidationError: Option.none(),
+              }),
             }),
           )
         }),
-        message(modalMsg(Modal.Message.ClickedCloseModal())),
+        message(editorMsg(Editor.Message.ClickedClose())),
         Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), RevokeActivePreviewUrl()),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         Command.resolve(RevokeActivePreviewUrl, Modal.Message.CompletedRevokeActivePreviewUrl()),
@@ -730,9 +730,11 @@ describe("PWA Islands Story Tests", () => {
         Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.CreateFolder({
-              name: "Neuer Ordner",
-              maybeValidationError: Option.none(),
+            ModalState.Editor({
+              editor: Editor.Model.CreateFolder({
+                name: "Neuer Ordner",
+                maybeValidationError: Option.none(),
+              }),
             }),
           )
         }),
@@ -749,10 +751,12 @@ describe("PWA Islands Story Tests", () => {
         Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
-            ModalState.CreateFile({
-              name: "Neu.html",
-              content: "",
-              maybeValidationError: Option.none(),
+            ModalState.Editor({
+              editor: Editor.Model.CreateFile({
+                name: "Neu.html",
+                content: "",
+                maybeValidationError: Option.none(),
+              }),
             }),
           )
           expect(m.storageState).toEqual(readyModel.storageState)

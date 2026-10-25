@@ -38,6 +38,7 @@ import {
   setSavedFsaHandle,
   showDirectoryPicker,
 } from "./files"
+import * as Editor from "./editor"
 import * as Help from "./help"
 import * as Modal from "./modal"
 import { AlertBanner, mapHtmlBuilder } from "./modal"
@@ -192,12 +193,15 @@ export const computeDocumentTitle = (model: Model): string => {
 
   return Modal.ModalState.match(model.modalState, {
     Closed: () => folderTitle,
-    CreateFile: () => `Neue Datei — ${folderTitle}`,
-    CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
-    EditFolder: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
-    EditFile: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
-    ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
-    ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
+    Editor: ({ editor }) =>
+      Editor.Model.match(editor, {
+        CreateFile: () => `Neue Datei — ${folderTitle}`,
+        CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
+        EditFolder: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
+        EditFile: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
+        ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
+        ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
+      }),
     ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
     Help: ({ help }) =>
       Option.match(help.maybeOpenTopic, {
@@ -435,16 +439,19 @@ const resolveRouteDeepLink = async (
         subPath: resolvedSubPath,
         entries,
         maybeModalState: Option.some(
-          target === "folder"
-            ? Modal.ModalState.CreateFolder({
-                name: "Neuer Ordner",
-                maybeValidationError: Option.none(),
-              })
-            : Modal.ModalState.CreateFile({
-                name: "Neu.html",
-                content: "",
-                maybeValidationError: Option.none(),
-              }),
+          Modal.ModalState.Editor({
+            editor:
+              target === "folder"
+                ? Editor.Model.CreateFolder({
+                    name: "Neuer Ordner",
+                    maybeValidationError: Option.none(),
+                  })
+                : Editor.Model.CreateFile({
+                    name: "Neu.html",
+                    content: "",
+                    maybeValidationError: Option.none(),
+                  }),
+          }),
         ),
         maybeAlertBanner,
       }
@@ -487,10 +494,12 @@ const resolveRouteDeepLink = async (
                 subPath,
                 entries,
                 maybeModalState: Option.some(
-                  Modal.ModalState.EditFolder({
-                    originalName: targetEntry.name,
-                    name: targetEntry.name,
-                    maybeValidationError: Option.none(),
+                  Modal.ModalState.Editor({
+                    editor: Editor.Model.EditFolder({
+                      originalName: targetEntry.name,
+                      name: targetEntry.name,
+                      maybeValidationError: Option.none(),
+                    }),
                   }),
                 ),
                 maybeAlertBanner: Option.none(),
@@ -502,11 +511,13 @@ const resolveRouteDeepLink = async (
               subPath,
               entries,
               maybeModalState: Option.some(
-                Modal.ModalState.EditFile({
-                  originalName: targetEntry.name,
-                  name: targetEntry.name,
-                  fileMode,
-                  maybeValidationError: Option.none(),
+                Modal.ModalState.Editor({
+                  editor: Editor.Model.EditFile({
+                    originalName: targetEntry.name,
+                    name: targetEntry.name,
+                    fileMode,
+                    maybeValidationError: Option.none(),
+                  }),
                 }),
               ),
               maybeAlertBanner: Option.none(),
@@ -1011,16 +1022,19 @@ export const init = (
     Folder: () => Option.none(),
     New: ({ target }) =>
       Option.some(
-        target === "folder"
-          ? Modal.ModalState.CreateFolder({
-              name: "Neuer Ordner",
-              maybeValidationError: Option.none(),
-            })
-          : Modal.ModalState.CreateFile({
-              name: "Neu.html",
-              content: "",
-              maybeValidationError: Option.none(),
-            }),
+        Modal.ModalState.Editor({
+          editor:
+            target === "folder"
+              ? Editor.Model.CreateFolder({
+                  name: "Neuer Ordner",
+                  maybeValidationError: Option.none(),
+                })
+              : Editor.Model.CreateFile({
+                  name: "Neu.html",
+                  content: "",
+                  maybeValidationError: Option.none(),
+                }),
+        }),
       ),
     Edit: () => Option.none(),
     Help: ({ maybeTopic }) =>
@@ -1420,17 +1434,19 @@ export const update = (
         },
 
         New: ({ subPath, target }) => {
-          const newModalState =
-            target === "folder"
-              ? Modal.ModalState.CreateFolder({
-                  name: "Neuer Ordner",
-                  maybeValidationError: Option.none(),
-                })
-              : Modal.ModalState.CreateFile({
-                  name: "Neu.html",
-                  content: "",
-                  maybeValidationError: Option.none(),
-                })
+          const newModalState = Modal.ModalState.Editor({
+            editor:
+              target === "folder"
+                ? Editor.Model.CreateFolder({
+                    name: "Neuer Ordner",
+                    maybeValidationError: Option.none(),
+                  })
+                : Editor.Model.CreateFile({
+                    name: "Neu.html",
+                    content: "",
+                    maybeValidationError: Option.none(),
+                  }),
+          })
 
           return whenReady(model, (readyState) => {
             const isSamePath = isSameSubPath(readyState.subPath, subPath)
@@ -1462,8 +1478,16 @@ export const update = (
 
         Edit: ({ subPath, name }) => {
           const isAlreadyEditing = Match.value(model.modalState).pipe(
-            Match.tag("EditFolder", (folder) => folder.originalName === name),
-            Match.tag("EditFile", (file) => file.originalName === name),
+            Match.tag("Editor", ({ editor }) =>
+              Editor.Model.match(editor, {
+                EditFolder: (folder) => folder.originalName === name,
+                EditFile: (file) => file.originalName === name,
+                CreateFile: () => false,
+                CreateFolder: () => false,
+                ConfirmDelete: () => false,
+                ConfirmOverwrite: () => false,
+              }),
+            ),
             Match.orElse(() => false),
           )
           if (isAlreadyEditing) {
@@ -1486,10 +1510,12 @@ export const update = (
                 model: modifyFields(model, {
                   isSettingsOpen: () => false,
                   modalState: () =>
-                    Modal.ModalState.EditFolder({
-                      originalName: name,
-                      name,
-                      maybeValidationError: Option.none(),
+                    Modal.ModalState.Editor({
+                      editor: Editor.Model.EditFolder({
+                        originalName: name,
+                        name,
+                        maybeValidationError: Option.none(),
+                      }),
                     }),
                 }),
                 commands: [toModalCommand(Modal.FocusModalNameInput())],
@@ -1747,10 +1773,12 @@ export const update = (
       return {
         model: modifyFields(model, {
           modalState: () =>
-            Modal.ModalState.CreateFile({
-              name: "Neu.html",
-              content: "",
-              maybeValidationError: Option.none(),
+            Modal.ModalState.Editor({
+              editor: Editor.Model.CreateFile({
+                name: "Neu.html",
+                content: "",
+                maybeValidationError: Option.none(),
+              }),
             }),
         }),
         commands: [
@@ -1765,9 +1793,11 @@ export const update = (
       return {
         model: modifyFields(model, {
           modalState: () =>
-            Modal.ModalState.CreateFolder({
-              name: "Neuer Ordner",
-              maybeValidationError: Option.none(),
+            Modal.ModalState.Editor({
+              editor: Editor.Model.CreateFolder({
+                name: "Neuer Ordner",
+                maybeValidationError: Option.none(),
+              }),
             }),
         }),
         commands: [
@@ -1788,10 +1818,12 @@ export const update = (
         return {
           model: modifyFields(model, {
             modalState: () =>
-              Modal.ModalState.EditFolder({
-                originalName: entry.name,
-                name: entry.name,
-                maybeValidationError: Option.none(),
+              Modal.ModalState.Editor({
+                editor: Editor.Model.EditFolder({
+                  originalName: entry.name,
+                  name: entry.name,
+                  maybeValidationError: Option.none(),
+                }),
               }),
           }),
           commands: [
@@ -1842,72 +1874,7 @@ export const update = (
           }
           return { model }
         },
-        CreateFile: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
-            }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
-          }
-        },
-        CreateFolder: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
-            }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
-          }
-        },
-        EditFolder: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
-            }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
-          }
-        },
-        EditFile: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
-            }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
-          }
-        },
-        ConfirmDelete: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
-            }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
-          }
-        },
-        ConfirmOverwrite: () => {
+        Editor: () => {
           const subPath = currentSubPathFromStorageState(model.storageState)
           return {
             model: modifyFields(model, {
@@ -2096,12 +2063,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           model.isSettingsOpen ||
           Modal.ModalState.match(model.modalState, {
             Closed: () => false,
-            CreateFile: () => true,
-            CreateFolder: () => true,
-            EditFolder: () => true,
-            EditFile: () => true,
-            ConfirmDelete: () => true,
-            ConfirmOverwrite: () => true,
+            Editor: () => true,
             ImportConflict: () => true,
             Help: () => true,
           }),

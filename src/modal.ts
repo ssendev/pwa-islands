@@ -6,14 +6,12 @@ import type * as Html from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
+import * as Editor from "./editor"
 import {
   BinaryEdit,
   EditorFileMode,
   FileEntry,
-  FileEntryKind,
   PreviewContent,
-  arrayBufferToBase64,
-  base64ToUint8Array,
   findFreeFileName,
   getPendingImportFiles,
   loadEditorFileModeForEntry,
@@ -54,46 +52,10 @@ export const ResolvedImportItem = Schema.Struct({
 })
 export type ResolvedImportItem = typeof ResolvedImportItem.Type
 
-export const OverwriteSource = defineTaggedUnion({
-  CreateFile: {
-    content: Schema.String,
-  },
-  EditFile: {
-    originalName: Schema.String,
-    fileMode: EditorFileMode,
-  },
-})
-export type OverwriteSource = typeof OverwriteSource.Type
-
 export const ModalState = defineTaggedUnion({
   Closed: {},
-  CreateFile: {
-    name: Schema.String,
-    content: Schema.String,
-    maybeValidationError: Schema.Option(Schema.String),
-  },
-  CreateFolder: {
-    name: Schema.String,
-    maybeValidationError: Schema.Option(Schema.String),
-  },
-  EditFolder: {
-    originalName: Schema.String,
-    name: Schema.String,
-    maybeValidationError: Schema.Option(Schema.String),
-  },
-  EditFile: {
-    originalName: Schema.String,
-    name: Schema.String,
-    fileMode: EditorFileMode,
-    maybeValidationError: Schema.Option(Schema.String),
-  },
-  ConfirmDelete: {
-    entryName: Schema.String,
-    entryKind: FileEntryKind,
-  },
-  ConfirmOverwrite: {
-    targetName: Schema.String,
-    source: OverwriteSource,
+  Editor: {
+    editor: Editor.Model,
   },
   ImportConflict: {
     current: PendingImportFile,
@@ -108,12 +70,12 @@ export const ModalState = defineTaggedUnion({
 })
 export type ModalState = typeof ModalState.Type
 
-type EditFileState = Extract<ModalState, { readonly _tag: "EditFile" }>
-type BinaryFileMode = Extract<EditorFileMode, { readonly _tag: "Binary" }>
-
 // MESSAGE
 
 export const Message = defineMessageUnion({
+  GotEditorMessage: {
+    message: Editor.Message,
+  },
   GotHelpMessage: {
     message: Help.Message,
   },
@@ -122,43 +84,6 @@ export const Message = defineMessageUnion({
     fileMode: EditorFileMode,
   },
   FailedInspectFileForEditor: {
-    message: Schema.String,
-  },
-  UpdatedModalName: {
-    name: Schema.String,
-  },
-  UpdatedModalTextContent: {
-    content: Schema.String,
-  },
-  ToggledModalBase64: {
-    isChecked: Schema.Boolean,
-  },
-  SucceededLoadModalBase64: {
-    base64Content: Schema.String,
-  },
-  FailedLoadModalBase64: {
-    message: Schema.String,
-  },
-  UpdatedModalBase64Content: {
-    base64Content: Schema.String,
-  },
-  ClickedSaveModal: {},
-  ClickedConfirmOverwrite: {},
-  ClickedCancelOverwrite: {},
-  ClickedDeleteModalEntry: {},
-  ConfirmedDeleteModalEntry: {},
-  ClickedCancelDeleteModal: {},
-  ClickedCloseModal: {},
-  SucceededSaveModalChanges: {
-    entries: Schema.Array(FileEntry),
-  },
-  FailedSaveModalChanges: {
-    message: Schema.String,
-  },
-  SucceededDeleteModalEntry: {
-    entries: Schema.Array(FileEntry),
-  },
-  FailedDeleteModalEntry: {
     message: Schema.String,
   },
   CompletedSelectImportFiles: {
@@ -198,25 +123,6 @@ export const OutMessage = defineTaggedUnion({
 export type OutMessage = typeof OutMessage.Type
 
 // COMMAND
-
-const BinaryOrText = (
-  fileMode: EditorFileMode,
-  handlers: {
-    readonly text: (content: string) => Promise<void>
-    readonly binaryEditing: (content: string) => Promise<void>
-    readonly binaryRename: () => Promise<void>
-  },
-): Promise<void> =>
-  EditorFileMode.match(fileMode, {
-    Text: ({ content }) => handlers.text(content),
-    Binary: ({ edit }) =>
-      BinaryEdit.match(edit, {
-        Locked: handlers.binaryRename,
-        Disabled: handlers.binaryRename,
-        Loading: handlers.binaryRename,
-        Editing: ({ content }) => handlers.binaryEditing(content),
-      }),
-  })
 
 export const InspectFileForEditor = Command.define("InspectFileForEditor", {
   args: {
@@ -260,152 +166,6 @@ export const FocusModalNameInput = Command.define("FocusModalNameInput", {
     Effect.as(Message.CompletedFocusModalNameInput()),
     Effect.catch(() => Effect.succeed(Message.CompletedFocusModalNameInput())),
   ),
-})
-
-export const LoadModalBase64 = Command.define("LoadModalBase64", {
-  args: {
-    entryName: Schema.String,
-    subPath: Schema.Array(Schema.String),
-  },
-  messages: [Message.SucceededLoadModalBase64, Message.FailedLoadModalBase64],
-  execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        const storage = requireActiveStorage()
-        const buffer = await storage.readFileBuffer(args.subPath, args.entryName)
-        const base64Content = arrayBufferToBase64(buffer)
-        return Message.SucceededLoadModalBase64({ base64Content })
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.succeed(
-          Message.FailedLoadModalBase64({
-            message: `Dateiinhalt konnte nicht als Base64 geladen werden: ${error.message}`,
-          }),
-        ),
-      ),
-    ),
-})
-
-export const SaveModalChanges = Command.define("SaveModalChanges", {
-  args: {
-    modalState: ModalState,
-    subPath: Schema.Array(Schema.String),
-  },
-  messages: [Message.SucceededSaveModalChanges, Message.FailedSaveModalChanges],
-  execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        const storage = requireActiveStorage()
-
-        await Match.value(args.modalState).pipe(
-          Match.tag("CreateFolder", ({ name }) =>
-            storage.createDirectory(args.subPath, name.trim()),
-          ),
-          Match.tag("EditFolder", async ({ name, originalName }) => {
-            const newName = name.trim()
-            if (newName !== originalName) {
-              await storage.renameDirectory(args.subPath, originalName, newName)
-            }
-          }),
-          Match.tag("CreateFile", ({ name, content }) =>
-            storage.writeFile(args.subPath, name.trim(), content),
-          ),
-          Match.tag("EditFile", async ({ name, originalName, fileMode }) => {
-            const newName = name.trim()
-            await BinaryOrText(fileMode, {
-              text: async (content) => {
-                await storage.writeFile(args.subPath, newName, content)
-                if (originalName !== newName) {
-                  await storage.deleteEntry(args.subPath, originalName, "file")
-                }
-              },
-              binaryEditing: async (content) => {
-                await storage.writeFileBuffer(args.subPath, newName, base64ToUint8Array(content))
-                if (originalName !== newName) {
-                  await storage.deleteEntry(args.subPath, originalName, "file")
-                }
-              },
-              binaryRename: () => storage.renameBinaryFile(args.subPath, originalName, newName),
-            })
-          }),
-          Match.tag("ConfirmOverwrite", async ({ targetName, source }) => {
-            await Match.value(source).pipe(
-              Match.tag("CreateFile", async ({ content }) => {
-                await storage.writeFile(args.subPath, targetName, content)
-              }),
-              Match.tag("EditFile", async ({ originalName, fileMode }) => {
-                await BinaryOrText(fileMode, {
-                  text: async (content) => {
-                    await storage.writeFile(args.subPath, targetName, content)
-                    if (originalName !== targetName) {
-                      await storage.deleteEntry(args.subPath, originalName, "file")
-                    }
-                  },
-                  binaryEditing: async (content) => {
-                    await storage.writeFileBuffer(
-                      args.subPath,
-                      targetName,
-                      base64ToUint8Array(content),
-                    )
-                    if (originalName !== targetName) {
-                      await storage.deleteEntry(args.subPath, originalName, "file")
-                    }
-                  },
-                  binaryRename: () =>
-                    storage.renameBinaryFile(args.subPath, originalName, targetName),
-                })
-              }),
-              Match.exhaustive,
-            )
-          }),
-          Match.orElse(() => Promise.resolve()),
-        )
-
-        revokeActivePreviewUrl()
-        const updatedEntries = await storage.listEntries(args.subPath)
-        return Message.SucceededSaveModalChanges({ entries: updatedEntries })
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.succeed(
-          Message.FailedSaveModalChanges({
-            message: `Speichern fehlgeschlagen: ${error.message}`,
-          }),
-        ),
-      ),
-    ),
-})
-
-export const DeleteModalEntry = Command.define("DeleteModalEntry", {
-  args: {
-    entryName: Schema.String,
-    entryKind: FileEntryKind,
-    subPath: Schema.Array(Schema.String),
-  },
-  messages: [Message.SucceededDeleteModalEntry, Message.FailedDeleteModalEntry],
-  execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        const storage = requireActiveStorage()
-
-        await storage.deleteEntry(args.subPath, args.entryName, args.entryKind)
-        revokeActivePreviewUrl()
-        const updatedEntries = await storage.listEntries(args.subPath)
-        return Message.SucceededDeleteModalEntry({ entries: updatedEntries })
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.succeed(
-          Message.FailedDeleteModalEntry({
-            message: `Löschen fehlgeschlagen: ${error.message}`,
-          }),
-        ),
-      ),
-    ),
 })
 
 export const SelectImportFiles = Command.define("SelectImportFiles", {
@@ -505,31 +265,6 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
 
 // UPDATE
 
-const whenBinaryEditor = (
-  modalState: ModalState,
-  fn: (
-    editState: EditFileState,
-    binaryMode: BinaryFileMode,
-  ) => {
-    readonly model: ModalState
-    readonly commands?: ReadonlyArray<Command.Command<Message>>
-    readonly outMessage: OutMessage
-  },
-): {
-  readonly model: ModalState
-  readonly commands?: ReadonlyArray<Command.Command<Message>>
-  readonly outMessage: OutMessage
-} =>
-  Match.value(modalState).pipe(
-    Match.tag("EditFile", (editState) =>
-      Match.value(editState.fileMode).pipe(
-        Match.tag("Binary", (binaryMode) => fn(editState, binaryMode)),
-        Match.orElse(() => ({ model: modalState, outMessage: OutMessage.None() })),
-      ),
-    ),
-    Match.orElse(() => ({ model: modalState, outMessage: OutMessage.None() })),
-  )
-
 export const update = (
   modalState: ModalState,
   message: Message,
@@ -543,6 +278,61 @@ export const update = (
   readonly outMessage: OutMessage
 } =>
   Message.match(message, {
+    GotEditorMessage: ({ message: editorMessage }) =>
+      Match.value(modalState).pipe(
+        Match.tag("Editor", (editorState) => {
+          const editorResult = Editor.update(editorState.editor, editorMessage, context)
+          const mappedCommands = editorResult.commands
+            ? Command.mapMessages(editorResult.commands, (msg) =>
+                Message.GotEditorMessage({ message: msg }),
+              )
+            : []
+          return Editor.OutMessage.match(editorResult.outMessage, {
+            None: () =>
+              Array.isReadonlyArrayNonEmpty(mappedCommands)
+                ? {
+                    model: ModalState.Editor({ editor: editorResult.model }),
+                    commands: mappedCommands,
+                    outMessage: OutMessage.None(),
+                  }
+                : {
+                    model: ModalState.Editor({ editor: editorResult.model }),
+                    outMessage: OutMessage.None(),
+                  },
+            CloseModal: ({ replaceUrl }) => ({
+              model: ModalState.Closed(),
+              commands: [...mappedCommands, RevokeActivePreviewUrl()],
+              outMessage: replaceUrl
+                ? OutMessage.ReplaceUrl({ url: buildFolderUrl(context.subPath) })
+                : OutMessage.None(),
+            }),
+            EntriesUpdated: ({ entries }) => ({
+              model: ModalState.Closed(),
+              commands: mappedCommands,
+              outMessage: OutMessage.EntriesUpdated({
+                entries,
+                maybeAlertBanner: Option.none(),
+                replaceUrl: true,
+              }),
+            }),
+            ShowAlert: ({ banner, closeModal, replaceUrl }) => ({
+              model: closeModal
+                ? ModalState.Closed()
+                : ModalState.Editor({ editor: editorResult.model }),
+              commands: closeModal ? [...mappedCommands, RevokeActivePreviewUrl()] : mappedCommands,
+              outMessage: OutMessage.ShowAlert({
+                banner,
+                replaceUrl,
+              }),
+            }),
+          })
+        }),
+        Match.orElse(() => ({
+          model: modalState,
+          outMessage: OutMessage.None(),
+        })),
+      ),
+
     GotHelpMessage: ({ message: helpMessage }) =>
       Match.value(modalState).pipe(
         Match.tag("Help", (helpState) => {
@@ -589,11 +379,13 @@ export const update = (
       ),
 
     SucceededInspectFileForEditor: ({ originalName, fileMode }) => ({
-      model: ModalState.EditFile({
-        originalName,
-        name: originalName,
-        fileMode,
-        maybeValidationError: Option.none(),
+      model: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName,
+          name: originalName,
+          fileMode,
+          maybeValidationError: Option.none(),
+        }),
       }),
       commands: [FocusModalNameInput()],
       outMessage: OutMessage.None(),
@@ -608,438 +400,6 @@ export const update = (
           variant: "danger",
         },
         replaceUrl: true,
-      }),
-    }),
-
-    UpdatedModalName: ({ name }) => ({
-      model: ModalState.match(modalState, {
-        Closed: () => modalState,
-        CreateFile: (state) =>
-          modifyFields(state, {
-            name: () => name,
-            maybeValidationError: () => Option.none(),
-          }),
-        CreateFolder: (state) =>
-          modifyFields(state, {
-            name: () => name,
-            maybeValidationError: () => Option.none(),
-          }),
-        EditFolder: (state) =>
-          modifyFields(state, {
-            name: () => name,
-            maybeValidationError: () => Option.none(),
-          }),
-        EditFile: (state) =>
-          modifyFields(state, {
-            name: () => name,
-            maybeValidationError: () => Option.none(),
-          }),
-        ConfirmDelete: () => modalState,
-        ConfirmOverwrite: () => modalState,
-        ImportConflict: () => modalState,
-        Help: () => modalState,
-      }),
-      outMessage: OutMessage.None(),
-    }),
-
-    UpdatedModalTextContent: ({ content }) => ({
-      model: ModalState.match(modalState, {
-        Closed: () => modalState,
-        CreateFile: (state) =>
-          modifyFields(state, {
-            content: () => content,
-          }),
-        CreateFolder: () => modalState,
-        EditFolder: () => modalState,
-        EditFile: (state) =>
-          EditorFileMode.match(state.fileMode, {
-            Text: () =>
-              modifyFields(state, {
-                fileMode: () => EditorFileMode.Text({ content }),
-              }),
-            Binary: () => state,
-          }),
-        ConfirmDelete: () => modalState,
-        ConfirmOverwrite: () => modalState,
-        ImportConflict: () => modalState,
-        Help: () => modalState,
-      }),
-      outMessage: OutMessage.None(),
-    }),
-
-    ToggledModalBase64: ({ isChecked }) =>
-      whenBinaryEditor(modalState, (editState, binaryMode) => {
-        const isLocked = BinaryEdit.match(binaryMode.edit, {
-          Locked: () => true,
-          Disabled: () => false,
-          Loading: () => false,
-          Editing: () => false,
-        })
-        if (isLocked) {
-          return { model: modalState, outMessage: OutMessage.None() }
-        }
-
-        if (!isChecked) {
-          return {
-            model: modifyFields(editState, {
-              fileMode: () =>
-                modifyFields(binaryMode, {
-                  edit: () => BinaryEdit.Disabled(),
-                }),
-            }),
-            outMessage: OutMessage.None(),
-          }
-        }
-
-        return {
-          model: modifyFields(editState, {
-            fileMode: () =>
-              modifyFields(binaryMode, {
-                edit: () => BinaryEdit.Loading(),
-              }),
-          }),
-          commands: [
-            LoadModalBase64({ entryName: editState.originalName, subPath: context.subPath }),
-          ],
-          outMessage: OutMessage.None(),
-        }
-      }),
-
-    SucceededLoadModalBase64: ({ base64Content }) =>
-      whenBinaryEditor(modalState, (editState, binaryMode) => ({
-        model: modifyFields(editState, {
-          fileMode: () =>
-            modifyFields(binaryMode, {
-              edit: () => BinaryEdit.Editing({ content: base64Content }),
-            }),
-        }),
-        outMessage: OutMessage.None(),
-      })),
-
-    FailedLoadModalBase64: ({ message: errorMessage }) =>
-      whenBinaryEditor(modalState, (editState, binaryMode) => ({
-        model: modifyFields(editState, {
-          fileMode: () =>
-            modifyFields(binaryMode, {
-              edit: () => BinaryEdit.Disabled(),
-            }),
-        }),
-        outMessage: OutMessage.ShowAlert({
-          banner: {
-            message: errorMessage,
-            variant: "danger",
-          },
-          replaceUrl: false,
-        }),
-      })),
-
-    UpdatedModalBase64Content: ({ base64Content }) =>
-      whenBinaryEditor(modalState, (editState, binaryMode) => {
-        const isEditing = BinaryEdit.match(binaryMode.edit, {
-          Locked: () => false,
-          Disabled: () => false,
-          Loading: () => false,
-          Editing: () => true,
-        })
-        if (!isEditing) {
-          return { model: modalState, outMessage: OutMessage.None() }
-        }
-
-        return {
-          model: modifyFields(editState, {
-            fileMode: () =>
-              modifyFields(binaryMode, {
-                edit: () => BinaryEdit.Editing({ content: base64Content }),
-              }),
-          }),
-          outMessage: OutMessage.None(),
-        }
-      }),
-
-    ClickedSaveModal: () => {
-      const validateName = (rawName: string, isFolder: boolean): Option.Option<string> => {
-        const trimmed = rawName.trim()
-        if (!trimmed) {
-          return Option.some(
-            isFolder
-              ? "Bitte geben Sie einen Ordnernamen ein."
-              : "Bitte geben Sie einen Dateinamen ein.",
-          )
-        }
-        if (trimmed.includes("/") || trimmed.includes("\\")) {
-          return Option.some(
-            `Der ${isFolder ? "Ordnername" : "Dateiname"} darf keine Schrägstriche enthalten.`,
-          )
-        }
-        return Option.none()
-      }
-
-      const existingNames = new Set(context.existingEntries.map((e) => e.name))
-
-      return Match.value(modalState).pipe(
-        Match.tag("CreateFolder", (createFolder) => {
-          const error = validateName(createFolder.name, true)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(createFolder, {
-                maybeValidationError: () => error,
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const trimmed = createFolder.name.trim()
-          if (existingNames.has(trimmed)) {
-            return {
-              model: modifyFields(createFolder, {
-                maybeValidationError: () =>
-                  Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          return {
-            model: modalState,
-            commands: [SaveModalChanges({ modalState: createFolder, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        }),
-        Match.tag("EditFolder", (editFolder) => {
-          const error = validateName(editFolder.name, true)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(editFolder, {
-                maybeValidationError: () => error,
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const trimmed = editFolder.name.trim()
-          if (trimmed !== editFolder.originalName && existingNames.has(trimmed)) {
-            return {
-              model: modifyFields(editFolder, {
-                maybeValidationError: () =>
-                  Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          return {
-            model: modalState,
-            commands: [SaveModalChanges({ modalState: editFolder, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        }),
-        Match.tag("CreateFile", (createFile) => {
-          const error = validateName(createFile.name, false)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(createFile, {
-                maybeValidationError: () => error,
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const trimmed = createFile.name.trim()
-          if (existingNames.has(trimmed)) {
-            return {
-              model: ModalState.ConfirmOverwrite({
-                targetName: trimmed,
-                source: OverwriteSource.CreateFile({
-                  content: createFile.content,
-                }),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          return {
-            model: modalState,
-            commands: [SaveModalChanges({ modalState: createFile, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        }),
-        Match.tag("EditFile", (editFile) => {
-          const error = validateName(editFile.name, false)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(editFile, {
-                maybeValidationError: () => error,
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-
-          const trimmed = editFile.name.trim()
-
-          const maybeBase64Content = EditorFileMode.match(editFile.fileMode, {
-            Text: () => Option.none<string>(),
-            Binary: ({ edit }) =>
-              BinaryEdit.match(edit, {
-                Locked: () => Option.none<string>(),
-                Disabled: () => Option.none<string>(),
-                Loading: () => Option.none<string>(),
-                Editing: ({ content }) => Option.some(content),
-              }),
-          })
-
-          if (Option.isSome(maybeBase64Content)) {
-            try {
-              base64ToUint8Array(maybeBase64Content.value)
-            } catch {
-              return {
-                model: modifyFields(editFile, {
-                  maybeValidationError: () =>
-                    Option.some("Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe."),
-                }),
-                outMessage: OutMessage.None(),
-              }
-            }
-          }
-
-          if (trimmed !== editFile.originalName && existingNames.has(trimmed)) {
-            const isText = EditorFileMode.match(editFile.fileMode, {
-              Text: () => true,
-              Binary: () => false,
-            })
-            if (!isText && Option.isNone(maybeBase64Content)) {
-              return {
-                model: modifyFields(editFile, {
-                  maybeValidationError: () =>
-                    Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                }),
-                outMessage: OutMessage.None(),
-              }
-            }
-            return {
-              model: ModalState.ConfirmOverwrite({
-                targetName: trimmed,
-                source: OverwriteSource.EditFile({
-                  originalName: editFile.originalName,
-                  fileMode: editFile.fileMode,
-                }),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-
-          return {
-            model: modalState,
-            commands: [SaveModalChanges({ modalState: editFile, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        }),
-        Match.orElse((state) => ({
-          model: modalState,
-          commands: [SaveModalChanges({ modalState: state, subPath: context.subPath })],
-          outMessage: OutMessage.None(),
-        })),
-      )
-    },
-
-    ClickedConfirmOverwrite: () => ({
-      model: modalState,
-      commands: [SaveModalChanges({ modalState, subPath: context.subPath })],
-      outMessage: OutMessage.None(),
-    }),
-
-    ClickedCancelOverwrite: () =>
-      Match.value(modalState).pipe(
-        Match.tag("ConfirmOverwrite", ({ targetName, source }) =>
-          Match.value(source).pipe(
-            Match.tag("CreateFile", ({ content }) => ({
-              model: ModalState.CreateFile({
-                name: targetName,
-                content,
-                maybeValidationError: Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            })),
-            Match.tag("EditFile", ({ originalName, fileMode }) => ({
-              model: ModalState.EditFile({
-                originalName,
-                name: targetName,
-                fileMode,
-                maybeValidationError: Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            })),
-            Match.exhaustive,
-          ),
-        ),
-        Match.orElse(() => ({ model: modalState, outMessage: OutMessage.None() })),
-      ),
-
-    ClickedDeleteModalEntry: () =>
-      Match.value(modalState).pipe(
-        Match.tag("EditFolder", ({ originalName }) => ({
-          model: ModalState.ConfirmDelete({ entryName: originalName, entryKind: "directory" }),
-          outMessage: OutMessage.None(),
-        })),
-        Match.tag("EditFile", ({ originalName }) => ({
-          model: ModalState.ConfirmDelete({ entryName: originalName, entryKind: "file" }),
-          outMessage: OutMessage.None(),
-        })),
-        Match.orElse(() => ({ model: modalState, outMessage: OutMessage.None() })),
-      ),
-
-    ConfirmedDeleteModalEntry: () =>
-      Match.value(modalState).pipe(
-        Match.tag("ConfirmDelete", ({ entryName, entryKind }) => ({
-          model: ModalState.Closed(),
-          commands: [DeleteModalEntry({ entryName, entryKind, subPath: context.subPath })],
-          outMessage: OutMessage.None(),
-        })),
-        Match.orElse(() => ({ model: modalState, outMessage: OutMessage.None() })),
-      ),
-
-    ClickedCancelDeleteModal: () => ({
-      model: ModalState.Closed(),
-      commands: [RevokeActivePreviewUrl()],
-      outMessage: OutMessage.ReplaceUrl({ url: buildFolderUrl(context.subPath) }),
-    }),
-
-    ClickedCloseModal: () => ({
-      model: ModalState.Closed(),
-      commands: [RevokeActivePreviewUrl()],
-      outMessage: OutMessage.ReplaceUrl({ url: buildFolderUrl(context.subPath) }),
-    }),
-
-    SucceededSaveModalChanges: ({ entries }) => ({
-      model: ModalState.Closed(),
-      outMessage: OutMessage.EntriesUpdated({
-        entries,
-        maybeAlertBanner: Option.none(),
-        replaceUrl: true,
-      }),
-    }),
-
-    FailedSaveModalChanges: ({ message: errorMessage }) => ({
-      model: modalState,
-      outMessage: OutMessage.ShowAlert({
-        banner: {
-          message: errorMessage,
-          variant: "danger",
-        },
-        replaceUrl: false,
-      }),
-    }),
-
-    SucceededDeleteModalEntry: ({ entries }) => ({
-      model: ModalState.Closed(),
-      outMessage: OutMessage.EntriesUpdated({
-        entries,
-        maybeAlertBanner: Option.none(),
-        replaceUrl: true,
-      }),
-    }),
-
-    FailedDeleteModalEntry: ({ message: errorMessage }) => ({
-      model: modalState,
-      outMessage: OutMessage.ShowAlert({
-        banner: {
-          message: errorMessage,
-          variant: "danger",
-        },
-        replaceUrl: false,
       }),
     }),
 
@@ -1249,424 +609,6 @@ export const mapHtmlBuilder = <ChildMessage, ParentMessage>(
   })
 }
 
-const viewPreviewContent = (preview: PreviewContent, h: Html.HtmlBuilder<Message>): Html.Html =>
-  PreviewContent.match(preview, {
-    None: () => h.empty,
-    Image: ({ objectUrl }) =>
-      h.figure(
-        [h.Id("modal-file-preview"), h.Class("file-preview")],
-        [h.img([h.Src(objectUrl), h.Alt("Vorschau der Datei"), h.Class("file-preview-image")])],
-      ),
-    Pdf: ({ objectUrl }) =>
-      h.figure(
-        [h.Id("modal-file-preview"), h.Class("file-preview")],
-        [h.iframe([h.Src(objectUrl), h.Title("Vorschau der Datei"), h.Class("file-preview-pdf")])],
-      ),
-  })
-
-const viewEditorFileBody = (
-  fileMode: EditorFileMode,
-  h: Html.HtmlBuilder<Message>,
-): ReadonlyArray<Html.Html> =>
-  EditorFileMode.match(fileMode, {
-    Text: ({ content }) => [
-      h.div(
-        [h.Class("form-group")],
-        [
-          h.label([h.For("modal-file-content")], ["Inhalt:"]),
-          h.textarea([
-            h.Id("modal-file-content"),
-            h.Class("form-textarea"),
-            h.Placeholder("Geben Sie hier den Dateiinhalt ein..."),
-            h.Spellcheck(false),
-            h.Value(content),
-            h.OnInput((text) => Message.UpdatedModalTextContent({ content: text })),
-          ]),
-        ],
-      ),
-    ],
-
-    Binary: ({ preview, edit }) => {
-      const { isLocked, isChecked, isLoading, isEditing, lockReason, base64Content } =
-        BinaryEdit.match(edit, {
-          Locked: ({ reason }) => ({
-            isLocked: true,
-            isChecked: false,
-            isLoading: false,
-            isEditing: false,
-            lockReason: reason,
-            base64Content: "",
-          }),
-          Disabled: () => ({
-            isLocked: false,
-            isChecked: false,
-            isLoading: false,
-            isEditing: false,
-            lockReason: "",
-            base64Content: "",
-          }),
-          Loading: () => ({
-            isLocked: false,
-            isChecked: true,
-            isLoading: true,
-            isEditing: false,
-            lockReason: "",
-            base64Content: "",
-          }),
-          Editing: ({ content }) => ({
-            isLocked: false,
-            isChecked: true,
-            isLoading: false,
-            isEditing: true,
-            lockReason: "",
-            base64Content: content,
-          }),
-        })
-
-      return [
-        h.div(
-          [h.Class("form-group")],
-          [
-            !isLocked
-              ? h.label(
-                  [h.Class("form-check")],
-                  [
-                    h.input([
-                      h.Type("checkbox"),
-                      h.Id("modal-use-base64"),
-                      h.Checked(isChecked),
-                      h.Disabled(isLoading),
-                      h.OnChange(() =>
-                        Message.ToggledModalBase64({
-                          isChecked: !isChecked,
-                        }),
-                      ),
-                    ]),
-                    h.span([], ["Binärdatei bearbeiten"]),
-                  ],
-                )
-              : h.p([h.Class("form-hint")], [lockReason]),
-            isEditing
-              ? h.div(
-                  [h.Id("modal-base64-editor"), h.Class("form-group")],
-                  [
-                    h.label([h.For("modal-file-content-b64")], ["Base64-Inhalt:"]),
-                    h.textarea([
-                      h.Id("modal-file-content-b64"),
-                      h.Class("form-textarea form-textarea-mono"),
-                      h.Spellcheck(false),
-                      h.Placeholder("Base64-Daten dieser Datei"),
-                      h.Value(base64Content),
-                      h.OnInput((value) =>
-                        Message.UpdatedModalBase64Content({
-                          base64Content: value,
-                        }),
-                      ),
-                    ]),
-                  ],
-                )
-              : h.empty,
-            isChecked ? h.empty : viewPreviewContent(preview, h),
-          ],
-        ),
-      ]
-    },
-  })
-
-const viewEditorModal = (
-  {
-    titleText,
-    noun,
-    isFolder,
-    isEditingExisting,
-    nameValue,
-    maybeValidationError,
-    extraBodyNodes,
-  }: {
-    readonly titleText: string
-    readonly noun: "Datei" | "Ordner"
-    readonly isFolder: boolean
-    readonly isEditingExisting: boolean
-    readonly nameValue: string
-    readonly maybeValidationError: Option.Option<string>
-    readonly extraBodyNodes: ReadonlyArray<Html.Html>
-  },
-  h: Html.HtmlBuilder<Message>,
-): Html.Html => {
-  const saveLabel = isEditingExisting ? "Speichern" : "Erstellen"
-
-  return h.div(
-    [
-      h.Class("modal-overlay"),
-      h.Role("dialog"),
-      h.AriaModal(true),
-      h.AriaLabelledBy("modal-title"),
-    ],
-    [
-      h.div(
-        [h.Class("modal-content")],
-        [
-          h.header(
-            [h.Class("modal-header")],
-            [
-              h.h3([h.Id("modal-title"), h.Class("modal-title")], [titleText]),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
-                  h.OnClick(Message.ClickedCloseModal()),
-                ],
-                ["×"],
-              ),
-            ],
-          ),
-          h.form(
-            [h.Id("modal-form"), h.OnSubmit(Message.ClickedSaveModal())],
-            [
-              h.div(
-                [h.Class("modal-body")],
-                [
-                  Option.match(maybeValidationError, {
-                    onNone: () => h.empty,
-                    onSome: (error) =>
-                      h.div([h.Class("alert alert-danger mb-3"), h.Role("alert")], [error]),
-                  }),
-                  h.div(
-                    [h.Class("form-group")],
-                    [
-                      h.label([h.For("modal-file-name")], [`${noun}name:`]),
-                      h.input([
-                        h.Type("text"),
-                        h.Id("modal-file-name"),
-                        h.Class("form-input"),
-                        h.Value(nameValue),
-                        h.Required(true),
-                        h.Placeholder(isFolder ? "z. B. projekte" : "z. B. index.html, daten.json"),
-                        h.Autocomplete("off"),
-                        h.OnInput((name) => Message.UpdatedModalName({ name })),
-                      ]),
-                    ],
-                  ),
-                  ...extraBodyNodes,
-                ],
-              ),
-              h.footer(
-                [h.Class("modal-footer")],
-                [
-                  h.div(
-                    [h.Class("modal-footer-left")],
-                    [
-                      isEditingExisting
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("modal-btn-delete"),
-                              h.Class("btn btn-danger icon-label-btn"),
-                              h.AriaLabel("Löschen"),
-                              h.DataAttribute("tip", "Löschen"),
-                              h.OnClick(Message.ClickedDeleteModalEntry()),
-                            ],
-                            [
-                              h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["🗑️"]),
-                              h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
-                            ],
-                          )
-                        : h.empty,
-                    ],
-                  ),
-                  h.div(
-                    [h.Class("modal-footer-right")],
-                    [
-                      h.button(
-                        [
-                          h.Type("button"),
-                          h.Id("modal-btn-cancel"),
-                          h.Class("btn btn-secondary icon-label-btn"),
-                          h.AriaLabel("Abbrechen"),
-                          h.DataAttribute("tip", "Abbrechen"),
-                          h.OnClick(Message.ClickedCloseModal()),
-                        ],
-                        [
-                          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
-                          h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
-                        ],
-                      ),
-                      h.button(
-                        [
-                          h.Type("submit"),
-                          h.Id("modal-btn-save"),
-                          h.Class("btn btn-primary icon-label-btn save-modal-btn"),
-                          h.AriaLabel(saveLabel),
-                          h.DataAttribute("tip", saveLabel),
-                          h.OnClick(Message.ClickedSaveModal(), { defaultAction: "Prevent" }),
-                        ],
-                        [
-                          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["💾"]),
-                          h.span([h.Class("icon-label-btn-text")], [saveLabel]),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    ],
-  )
-}
-
-const viewConfirmDeleteModal = (
-  entryName: string,
-  entryKind: FileEntryKind,
-  h: Html.HtmlBuilder<Message>,
-): Html.Html => {
-  const isFolder = entryKind === "directory"
-  const noun = isFolder ? "den Ordner" : "die Datei"
-  return h.div(
-    [
-      h.Class("modal-overlay"),
-      h.Role("dialog"),
-      h.AriaModal(true),
-      h.AriaLabelledBy("modal-title"),
-    ],
-    [
-      h.div(
-        [h.Class("modal-content")],
-        [
-          h.header(
-            [h.Class("modal-header")],
-            [
-              h.h3([h.Id("modal-title"), h.Class("modal-title")], ["Eintrag löschen"]),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
-                  h.OnClick(Message.ClickedCancelDeleteModal()),
-                ],
-                ["×"],
-              ),
-            ],
-          ),
-          h.div(
-            [h.Class("modal-body")],
-            [
-              h.p(
-                [],
-                [
-                  isFolder
-                    ? `Möchten Sie ${noun} „${entryName}“ und dessen gesamten Inhalt wirklich unwiderruflich löschen?`
-                    : `Möchten Sie ${noun} „${entryName}“ wirklich unwiderruflich löschen?`,
-                ],
-              ),
-            ],
-          ),
-          h.footer(
-            [h.Class("modal-footer")],
-            [
-              h.div([h.Class("modal-footer-left")]),
-              h.div(
-                [h.Class("modal-footer-right")],
-                [
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Class("btn btn-secondary"),
-                      h.OnClick(Message.ClickedCancelDeleteModal()),
-                    ],
-                    ["Abbrechen"],
-                  ),
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Class("btn btn-danger"),
-                      h.OnClick(Message.ConfirmedDeleteModalEntry()),
-                    ],
-                    ["Löschen"],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    ],
-  )
-}
-
-const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Message>): Html.Html =>
-  h.div(
-    [
-      h.Class("modal-overlay"),
-      h.Role("dialog"),
-      h.AriaModal(true),
-      h.AriaLabelledBy("modal-title"),
-    ],
-    [
-      h.div(
-        [h.Class("modal-content")],
-        [
-          h.header(
-            [h.Class("modal-header")],
-            [
-              h.h3([h.Id("modal-title"), h.Class("modal-title")], ["Datei überschreiben?"]),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
-                  h.OnClick(Message.ClickedCancelOverwrite()),
-                ],
-                ["×"],
-              ),
-            ],
-          ),
-          h.div(
-            [h.Class("modal-body")],
-            [
-              h.p(
-                [],
-                [
-                  `Ein Eintrag mit dem Namen „${targetName}“ existiert bereits. Möchten Sie ihn überschreiben?`,
-                ],
-              ),
-            ],
-          ),
-          h.footer(
-            [h.Class("modal-footer")],
-            [
-              h.div([h.Class("modal-footer-left")]),
-              h.div(
-                [h.Class("modal-footer-right")],
-                [
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Class("btn btn-secondary"),
-                      h.OnClick(Message.ClickedCancelOverwrite()),
-                    ],
-                    ["Abbrechen"],
-                  ),
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Class("btn btn-danger"),
-                      h.OnClick(Message.ClickedConfirmOverwrite()),
-                    ],
-                    ["Überschreiben"],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    ],
-  )
-
 const viewImportConflictModal = (
   current: PendingImportFile,
   suggestedName: string,
@@ -1789,66 +731,11 @@ export const view = (
       ModalState.match(model, {
         Closed: () => h.empty,
 
-        CreateFile: ({ name, content, maybeValidationError }) =>
-          viewEditorModal(
-            {
-              titleText: "Neue Datei erstellen",
-              noun: "Datei",
-              isFolder: false,
-              isEditingExisting: false,
-              nameValue: name,
-              maybeValidationError,
-              extraBodyNodes: viewEditorFileBody(EditorFileMode.Text({ content }), h),
-            },
-            h,
+        Editor: ({ editor }) =>
+          Editor.view(
+            editor,
+            mapHtmlBuilder(h, (msg) => Message.GotEditorMessage({ message: msg })),
           ),
-
-        CreateFolder: ({ name, maybeValidationError }) =>
-          viewEditorModal(
-            {
-              titleText: "Neuen Ordner erstellen",
-              noun: "Ordner",
-              isFolder: true,
-              isEditingExisting: false,
-              nameValue: name,
-              maybeValidationError,
-              extraBodyNodes: [],
-            },
-            h,
-          ),
-
-        EditFolder: ({ originalName, name, maybeValidationError }) =>
-          viewEditorModal(
-            {
-              titleText: `Ordner bearbeiten: ${originalName}`,
-              noun: "Ordner",
-              isFolder: true,
-              isEditingExisting: true,
-              nameValue: name,
-              maybeValidationError,
-              extraBodyNodes: [],
-            },
-            h,
-          ),
-
-        EditFile: ({ originalName, name, fileMode, maybeValidationError }) =>
-          viewEditorModal(
-            {
-              titleText: `Datei bearbeiten: ${originalName}`,
-              noun: "Datei",
-              isFolder: false,
-              isEditingExisting: true,
-              nameValue: name,
-              maybeValidationError,
-              extraBodyNodes: viewEditorFileBody(fileMode, h),
-            },
-            h,
-          ),
-
-        ConfirmDelete: ({ entryName, entryKind }) =>
-          viewConfirmDeleteModal(entryName, entryKind, h),
-
-        ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
 
         ImportConflict: ({ current, suggestedName, queue, applyToAll }) =>
           viewImportConflictModal(current, suggestedName, queue, applyToAll, h),
