@@ -1,4 +1,4 @@
-import { Array, Option, pipe } from "effect"
+import { Array, Match, Option, pipe } from "effect"
 import { UrlRequest } from "foldkit/navigation"
 import { modifyFields } from "foldkit/struct"
 import type * as Update from "foldkit/update"
@@ -195,30 +195,42 @@ const handleUseFsa = (model: Model): Update.Return<Model, Message> => {
   })
 }
 
+type ReadyStorageState = Extract<StorageState, { readonly _tag: "Ready" }>
+
+const isReady = (storageState: StorageState): storageState is ReadyStorageState =>
+  Match.value(storageState).pipe(
+    Match.tag("Ready", () => true),
+    Match.orElse(() => false),
+  )
+
+const isModal =
+  <Tag extends ModalState["_tag"]>(tag: Tag) =>
+  (modalState: ModalState): modalState is Extract<ModalState, { readonly _tag: Tag }> =>
+    Match.value(modalState).pipe(
+      Match.tag(tag, () => true),
+      Match.orElse(() => false),
+    )
+
 const whenReady = (
   model: Model,
-  fn: (
-    readyState: typeof StorageState.Type & { readonly _tag: "Ready" },
-  ) => Update.Return<Model, Message>,
+  fn: (readyState: ReadyStorageState) => Update.Return<Model, Message>,
 ): Update.Return<Model, Message> =>
-  model.storageState._tag === "Ready" ? fn(model.storageState) : { model }
+  isReady(model.storageState) ? fn(model.storageState) : { model }
 
 const handleEntriesListed = (
   model: Model,
   { subPath, entries }: Omit<typeof Message.SucceededRefreshEntries.Type, "_tag">,
 ): Update.Return<Model, Message> =>
-  model.storageState._tag === "Ready"
-    ? {
-        model: modifyFields(model, {
-          storageState: () =>
-            modifyFields(model.storageState as typeof StorageState.Type & { _tag: "Ready" }, {
-              subPath: () => subPath,
-              entriesState: () => EntriesState.Loaded({ entries }),
-            }),
-          maybeAlertBanner: () => Option.none(),
+  whenReady(model, (readyState) => ({
+    model: modifyFields(model, {
+      storageState: () =>
+        modifyFields(readyState, {
+          subPath: () => subPath,
+          entriesState: () => EntriesState.Loaded({ entries }),
         }),
-      }
-    : { model }
+      maybeAlertBanner: () => Option.none(),
+    }),
+  }))
 
 const handleStorageActivated = (
   model: Model,
@@ -233,14 +245,20 @@ const handleStorageActivated = (
   }: Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">,
 ): Update.Return<Model, Message> => {
   const nextModalState = Option.getOrElse(maybeModalState, () =>
-    model.modalState._tag === "Help" ? model.modalState : ModalState.Closed(),
+    isModal("Help")(model.modalState) ? model.modalState : ModalState.Closed(),
   )
 
-  const shouldFocusModal =
-    nextModalState._tag === "EditFile" ||
-    nextModalState._tag === "EditFolder" ||
-    nextModalState._tag === "CreateFile" ||
-    nextModalState._tag === "CreateFolder"
+  const shouldFocusModal = ModalState.match(nextModalState, {
+    Closed: () => false,
+    CreateFile: () => true,
+    CreateFolder: () => true,
+    EditFolder: () => true,
+    EditFile: () => true,
+    ConfirmDelete: () => false,
+    ConfirmOverwrite: () => false,
+    ImportConflict: () => false,
+    Help: () => false,
+  })
 
   return {
     model: modifyFields(model, {
@@ -284,10 +302,37 @@ const handleNoFolderSelected = (
   model: modifyFields(model, {
     storageState: () => StorageState.NoFolderSelected({ storageType, otherBackend }),
     isSettingsOpen: () => false,
-    modalState: () => (model.modalState._tag === "Help" ? model.modalState : ModalState.Closed()),
+    modalState: () => (isModal("Help")(model.modalState) ? model.modalState : ModalState.Closed()),
     maybeAlertBanner: () => Option.none(),
   }),
 })
+
+type HelpModalState = Extract<ModalState, { readonly _tag: "Help" }>
+type EditFileModalState = Extract<ModalState, { readonly _tag: "EditFile" }>
+type BinaryFileMode = Extract<EditFileModalState["fileMode"], { readonly _tag: "Binary" }>
+
+const whenHelp = (
+  model: Model,
+  fn: (helpState: HelpModalState) => Update.Return<Model, Message>,
+): Update.Return<Model, Message> =>
+  Match.value(model.modalState).pipe(
+    Match.tag("Help", fn),
+    Match.orElse(() => ({ model })),
+  )
+
+const whenBinaryEditor = (
+  model: Model,
+  fn: (editState: EditFileModalState, binaryMode: BinaryFileMode) => Update.Return<Model, Message>,
+): Update.Return<Model, Message> =>
+  Match.value(model.modalState).pipe(
+    Match.tag("EditFile", (editState) =>
+      Match.value(editState.fileMode).pipe(
+        Match.tag("Binary", (binaryMode) => fn(editState, binaryMode)),
+        Match.orElse(() => ({ model })),
+      ),
+    ),
+    Match.orElse(() => ({ model })),
+  )
 
 export const update = (model: Model, message: Message) =>
   Message.match<Update.Return<Model, Message>>(message, {
@@ -413,9 +458,10 @@ export const update = (model: Model, message: Message) =>
       return AppRoute.match(route, {
         Folder: ({ subPath }) => {
           revokeActivePreviewUrl()
-          const nextModalState =
-            model.modalState._tag !== "Closed" ? ModalState.Closed() : model.modalState
-          if (model.storageState._tag !== "Ready") {
+          const nextModalState = !isModal("Closed")(model.modalState)
+            ? ModalState.Closed()
+            : model.modalState
+          if (!isReady(model.storageState)) {
             return {
               model: modifyFields(model, {
                 modalState: () => nextModalState,
@@ -445,8 +491,8 @@ export const update = (model: Model, message: Message) =>
         New: ({ subPath, target }) => {
           revokeActivePreviewUrl()
           const isAlreadyNew =
-            (target === "folder" && model.modalState._tag === "CreateFolder") ||
-            (target === "file" && model.modalState._tag === "CreateFile")
+            (target === "folder" && isModal("CreateFolder")(model.modalState)) ||
+            (target === "file" && isModal("CreateFile")(model.modalState))
 
           const targetModalState =
             target === "folder"
@@ -464,7 +510,7 @@ export const update = (model: Model, message: Message) =>
             return { model }
           }
 
-          if (model.storageState._tag !== "Ready") {
+          if (!isReady(model.storageState)) {
             return {
               model: modifyFields(model, {
                 isSettingsOpen: () => false,
@@ -499,14 +545,14 @@ export const update = (model: Model, message: Message) =>
 
         Edit: ({ subPath, name }) => {
           const isAlreadyEditing =
-            (model.modalState._tag === "EditFile" && model.modalState.originalName === name) ||
-            (model.modalState._tag === "EditFolder" && model.modalState.originalName === name)
+            (isModal("EditFile")(model.modalState) && model.modalState.originalName === name) ||
+            (isModal("EditFolder")(model.modalState) && model.modalState.originalName === name)
 
           if (isAlreadyEditing) {
             return { model }
           }
 
-          if (model.storageState._tag !== "Ready") {
+          if (!isReady(model.storageState)) {
             return { model }
           }
 
@@ -553,8 +599,9 @@ export const update = (model: Model, message: Message) =>
 
         Help: ({ maybeTopic }) => {
           revokeActivePreviewUrl()
-          const maybeExistingHelp =
-            model.modalState._tag === "Help" ? Option.some(model.modalState) : Option.none()
+          const maybeExistingHelp = isModal("Help")(model.modalState)
+            ? Option.some(model.modalState)
+            : Option.none()
 
           return {
             model: modifyFields(model, {
@@ -619,7 +666,7 @@ export const update = (model: Model, message: Message) =>
     },
 
     ClickedSelectFolder: () => {
-      if (model.storageState._tag === "Ready" && model.storageState.storageType === "opfs") {
+      if (isReady(model.storageState) && model.storageState.storageType === "opfs") {
         return handleUseFsa(model)
       }
       const otherBackend = getOtherBackend(model.storageState)
@@ -890,7 +937,7 @@ export const update = (model: Model, message: Message) =>
     },
 
     ToggledImportConflictApplyToAll: ({ applyToAll }) => {
-      if (model.modalState._tag !== "ImportConflict") {
+      if (!isModal("ImportConflict")(model.modalState)) {
         return { model }
       }
       const conflictState = model.modalState
@@ -905,7 +952,7 @@ export const update = (model: Model, message: Message) =>
     },
 
     SelectedImportConflictAction: ({ action }) => {
-      if (model.modalState._tag !== "ImportConflict") {
+      if (!isModal("ImportConflict")(model.modalState)) {
         return { model }
       }
       const conflictState = model.modalState
@@ -996,7 +1043,7 @@ export const update = (model: Model, message: Message) =>
     }),
 
     CompletedWritePendingImportFiles: ({ entries, maybeAlertBanner }) => {
-      if (model.storageState._tag !== "Ready") {
+      if (!isReady(model.storageState)) {
         return {
           model: modifyFields(model, {
             maybeAlertBanner: () => Option.orElse(maybeAlertBanner, () => model.maybeAlertBanner),
@@ -1128,11 +1175,13 @@ export const update = (model: Model, message: Message) =>
             CreateFolder: () => model.modalState,
             EditFolder: () => model.modalState,
             EditFile: (state) =>
-              state.fileMode._tag === "Text"
-                ? modifyFields(state, {
+              EditorFileMode.match(state.fileMode, {
+                Text: () =>
+                  modifyFields(state, {
                     fileMode: () => EditorFileMode.Text({ content }),
-                  })
-                : state,
+                  }),
+                Binary: () => state,
+              }),
             ConfirmDelete: () => model.modalState,
             ConfirmOverwrite: () => model.modalState,
             ImportConflict: () => model.modalState,
@@ -1142,20 +1191,65 @@ export const update = (model: Model, message: Message) =>
     }),
 
     ToggledModalBase64: ({ isChecked }) => {
-      if (model.modalState._tag !== "EditFile") {
-        return { model }
-      }
-      const editState = model.modalState
-      if (editState.fileMode._tag !== "Binary") {
-        return { model }
-      }
-      const binaryMode = editState.fileMode
+      return whenBinaryEditor(model, (editState, binaryMode) => {
+        const isLocked = BinaryEdit.match(binaryMode.edit, {
+          Locked: () => true,
+          Disabled: () => false,
+          Loading: () => false,
+          Editing: () => false,
+        })
+        if (isLocked) {
+          return { model }
+        }
 
-      if (binaryMode.edit._tag === "Locked") {
-        return { model }
-      }
+        if (!isChecked) {
+          return {
+            model: modifyFields(model, {
+              modalState: () =>
+                modifyFields(editState, {
+                  fileMode: () =>
+                    modifyFields(binaryMode, {
+                      edit: () => BinaryEdit.Disabled(),
+                    }),
+                }),
+            }),
+          }
+        }
 
-      if (!isChecked) {
+        const subPath = currentSubPathFromStorageState(model.storageState)
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(editState, {
+                fileMode: () =>
+                  modifyFields(binaryMode, {
+                    edit: () => BinaryEdit.Loading(),
+                  }),
+              }),
+          }),
+          commands: [LoadModalBase64({ entryName: editState.originalName, subPath })],
+        }
+      })
+    },
+
+    SucceededLoadModalBase64: ({ base64Content }) => {
+      return whenBinaryEditor(model, (editState, binaryMode) => {
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(editState, {
+                fileMode: () =>
+                  modifyFields(binaryMode, {
+                    edit: () => BinaryEdit.Editing({ content: base64Content }),
+                  }),
+              }),
+          }),
+        }
+      })
+    },
+
+    FailedLoadModalBase64: ({ message: errorMessage }) => {
+      return whenBinaryEditor(model, (editState, binaryMode) => {
         return {
           model: modifyFields(model, {
             modalState: () =>
@@ -1165,100 +1259,40 @@ export const update = (model: Model, message: Message) =>
                     edit: () => BinaryEdit.Disabled(),
                   }),
               }),
+            maybeAlertBanner: () =>
+              Option.some({
+                message: errorMessage,
+                variant: "danger",
+              }),
           }),
         }
-      }
-
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(editState, {
-              fileMode: () =>
-                modifyFields(binaryMode, {
-                  edit: () => BinaryEdit.Loading(),
-                }),
-            }),
-        }),
-        commands: [LoadModalBase64({ entryName: editState.originalName, subPath })],
-      }
-    },
-
-    SucceededLoadModalBase64: ({ base64Content }) => {
-      if (model.modalState._tag !== "EditFile") {
-        return { model }
-      }
-      const editState = model.modalState
-      if (editState.fileMode._tag !== "Binary") {
-        return { model }
-      }
-      const binaryMode = editState.fileMode
-
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(editState, {
-              fileMode: () =>
-                modifyFields(binaryMode, {
-                  edit: () => BinaryEdit.Editing({ content: base64Content }),
-                }),
-            }),
-        }),
-      }
-    },
-
-    FailedLoadModalBase64: ({ message: errorMessage }) => {
-      if (model.modalState._tag !== "EditFile") {
-        return { model }
-      }
-      const editState = model.modalState
-      if (editState.fileMode._tag !== "Binary") {
-        return { model }
-      }
-      const binaryMode = editState.fileMode
-
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(editState, {
-              fileMode: () =>
-                modifyFields(binaryMode, {
-                  edit: () => BinaryEdit.Disabled(),
-                }),
-            }),
-          maybeAlertBanner: () =>
-            Option.some({
-              message: errorMessage,
-              variant: "danger",
-            }),
-        }),
-      }
+      })
     },
 
     UpdatedModalBase64Content: ({ base64Content }) => {
-      if (model.modalState._tag !== "EditFile") {
-        return { model }
-      }
-      const editState = model.modalState
-      if (editState.fileMode._tag !== "Binary") {
-        return { model }
-      }
-      const binaryMode = editState.fileMode
-      if (binaryMode.edit._tag !== "Editing") {
-        return { model }
-      }
+      return whenBinaryEditor(model, (editState, binaryMode) => {
+        const isEditing = BinaryEdit.match(binaryMode.edit, {
+          Locked: () => false,
+          Disabled: () => false,
+          Loading: () => false,
+          Editing: () => true,
+        })
+        if (!isEditing) {
+          return { model }
+        }
 
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(editState, {
-              fileMode: () =>
-                modifyFields(binaryMode, {
-                  edit: () => BinaryEdit.Editing({ content: base64Content }),
-                }),
-            }),
-        }),
-      }
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(editState, {
+                fileMode: () =>
+                  modifyFields(binaryMode, {
+                    edit: () => BinaryEdit.Editing({ content: base64Content }),
+                  }),
+              }),
+          }),
+        }
+      })
     },
 
     ClickedSaveModal: () => {
@@ -1294,186 +1328,183 @@ export const update = (model: Model, message: Message) =>
       const existingNames = new Set(existingEntries.map((e) => e.name))
       const subPath = currentSubPathFromStorageState(model.storageState)
 
-      if (model.modalState._tag === "CreateFolder") {
-        const createFolder = model.modalState
-        const error = validateName(createFolder.name, true)
-        if (Option.isSome(error)) {
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(createFolder, {
-                  maybeValidationError: () => error,
-                }),
-            }),
+      return Match.value(model.modalState).pipe(
+        Match.tag("CreateFolder", (createFolder) => {
+          const error = validateName(createFolder.name, true)
+          if (Option.isSome(error)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  modifyFields(createFolder, {
+                    maybeValidationError: () => error,
+                  }),
+              }),
+            }
           }
-        }
-        const trimmed = createFolder.name.trim()
-        if (existingNames.has(trimmed)) {
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(createFolder, {
-                  maybeValidationError: () =>
-                    Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                }),
-            }),
+          const trimmed = createFolder.name.trim()
+          if (existingNames.has(trimmed)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  modifyFields(createFolder, {
+                    maybeValidationError: () =>
+                      Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+                  }),
+              }),
+            }
           }
-        }
-        return {
-          model,
-          commands: [SaveModalChanges({ modalState: createFolder, subPath })],
-        }
-      }
-
-      if (model.modalState._tag === "EditFolder") {
-        const editFolder = model.modalState
-        const error = validateName(editFolder.name, true)
-        if (Option.isSome(error)) {
           return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(editFolder, {
-                  maybeValidationError: () => error,
-                }),
-            }),
+            model,
+            commands: [SaveModalChanges({ modalState: createFolder, subPath })],
           }
-        }
-        const trimmed = editFolder.name.trim()
-        if (trimmed !== editFolder.originalName && existingNames.has(trimmed)) {
+        }),
+        Match.tag("EditFolder", (editFolder) => {
+          const error = validateName(editFolder.name, true)
+          if (Option.isSome(error)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  modifyFields(editFolder, {
+                    maybeValidationError: () => error,
+                  }),
+              }),
+            }
+          }
+          const trimmed = editFolder.name.trim()
+          if (trimmed !== editFolder.originalName && existingNames.has(trimmed)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  modifyFields(editFolder, {
+                    maybeValidationError: () =>
+                      Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+                  }),
+              }),
+            }
+          }
           return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(editFolder, {
-                  maybeValidationError: () =>
-                    Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                }),
-            }),
+            model,
+            commands: [SaveModalChanges({ modalState: editFolder, subPath })],
           }
-        }
-        return {
-          model,
-          commands: [SaveModalChanges({ modalState: editFolder, subPath })],
-        }
-      }
-
-      if (model.modalState._tag === "CreateFile") {
-        const createFile = model.modalState
-        const error = validateName(createFile.name, false)
-        if (Option.isSome(error)) {
+        }),
+        Match.tag("CreateFile", (createFile) => {
+          const error = validateName(createFile.name, false)
+          if (Option.isSome(error)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  modifyFields(createFile, {
+                    maybeValidationError: () => error,
+                  }),
+              }),
+            }
+          }
+          const trimmed = createFile.name.trim()
+          if (existingNames.has(trimmed)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  ModalState.ConfirmOverwrite({
+                    targetName: trimmed,
+                    originalName: trimmed,
+                    content: createFile.content,
+                    isBase64: false,
+                    isEditing: false,
+                  }),
+              }),
+            }
+          }
           return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(createFile, {
-                  maybeValidationError: () => error,
-                }),
-            }),
+            model,
+            commands: [SaveModalChanges({ modalState: createFile, subPath })],
           }
-        }
-        const trimmed = createFile.name.trim()
-        if (existingNames.has(trimmed)) {
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                ModalState.ConfirmOverwrite({
-                  targetName: trimmed,
-                  originalName: trimmed,
-                  content: createFile.content,
-                  isBase64: false,
-                  isEditing: false,
-                }),
-            }),
-          }
-        }
-        return {
-          model,
-          commands: [SaveModalChanges({ modalState: createFile, subPath })],
-        }
-      }
-
-      if (model.modalState._tag === "EditFile") {
-        const editFile = model.modalState
-        const error = validateName(editFile.name, false)
-        if (Option.isSome(error)) {
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(editFile, {
-                  maybeValidationError: () => error,
-                }),
-            }),
-          }
-        }
-
-        const trimmed = editFile.name.trim()
-
-        if (editFile.fileMode._tag === "Binary" && editFile.fileMode.edit._tag === "Editing") {
-          try {
-            base64ToUint8Array(editFile.fileMode.edit.content)
-          } catch {
+        }),
+        Match.tag("EditFile", (editFile) => {
+          const error = validateName(editFile.name, false)
+          if (Option.isSome(error)) {
             return {
               model: modifyFields(model, {
                 modalState: () =>
                   modifyFields(editFile, {
-                    maybeValidationError: () =>
-                      Option.some("Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe."),
+                    maybeValidationError: () => error,
                   }),
               }),
             }
           }
-        }
 
-        if (trimmed !== editFile.originalName && existingNames.has(trimmed)) {
-          if (editFile.fileMode._tag === "Text") {
-            const textMode = editFile.fileMode
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  ModalState.ConfirmOverwrite({
-                    targetName: trimmed,
-                    originalName: editFile.originalName,
-                    content: textMode.content,
-                    isBase64: false,
-                    isEditing: true,
-                  }),
+          const trimmed = editFile.name.trim()
+
+          const maybeBase64Content = EditorFileMode.match(editFile.fileMode, {
+            Text: () => Option.none<string>(),
+            Binary: ({ edit }) =>
+              BinaryEdit.match(edit, {
+                Locked: () => Option.none<string>(),
+                Disabled: () => Option.none<string>(),
+                Loading: () => Option.none<string>(),
+                Editing: ({ content }) => Option.some(content),
               }),
-            }
-          }
-          if (editFile.fileMode._tag === "Binary" && editFile.fileMode.edit._tag === "Editing") {
-            const editing = editFile.fileMode.edit
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  ModalState.ConfirmOverwrite({
-                    targetName: trimmed,
-                    originalName: editFile.originalName,
-                    content: editing.content,
-                    isBase64: true,
-                    isEditing: true,
-                  }),
-              }),
-            }
-          }
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(editFile, {
-                  maybeValidationError: () =>
-                    Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+          })
+
+          if (Option.isSome(maybeBase64Content)) {
+            try {
+              base64ToUint8Array(maybeBase64Content.value)
+            } catch {
+              return {
+                model: modifyFields(model, {
+                  modalState: () =>
+                    modifyFields(editFile, {
+                      maybeValidationError: () =>
+                        Option.some(
+                          "Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe.",
+                        ),
+                    }),
                 }),
-            }),
+              }
+            }
           }
-        }
 
-        return {
+          if (trimmed !== editFile.originalName && existingNames.has(trimmed)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  Option.match(
+                    EditorFileMode.match(editFile.fileMode, {
+                      Text: ({ content }) => Option.some({ content, isBase64: false }),
+                      Binary: () =>
+                        Option.map(maybeBase64Content, (content) => ({ content, isBase64: true })),
+                    }),
+                    {
+                      onSome: ({ content, isBase64 }) =>
+                        ModalState.ConfirmOverwrite({
+                          targetName: trimmed,
+                          originalName: editFile.originalName,
+                          content,
+                          isBase64,
+                          isEditing: true,
+                        }),
+                      onNone: () =>
+                        modifyFields(editFile, {
+                          maybeValidationError: () =>
+                            Option.some(
+                              `Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`,
+                            ),
+                        }),
+                    },
+                  ),
+              }),
+            }
+          }
+
+          return {
+            model,
+            commands: [SaveModalChanges({ modalState: editFile, subPath })],
+          }
+        }),
+        Match.orElse((modalState) => ({
           model,
-          commands: [SaveModalChanges({ modalState: editFile, subPath })],
-        }
-      }
-
-      return {
-        model,
-        commands: [SaveModalChanges({ modalState: model.modalState, subPath })],
-      }
+          commands: [SaveModalChanges({ modalState, subPath })],
+        })),
+      )
     },
 
     ClickedConfirmOverwrite: () => {
@@ -1485,80 +1516,72 @@ export const update = (model: Model, message: Message) =>
     },
 
     ClickedCancelOverwrite: () => {
-      if (model.modalState._tag !== "ConfirmOverwrite") {
-        return { model }
-      }
-      const { targetName, originalName, content, isBase64, isEditing } = model.modalState
-      if (!isEditing) {
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              ModalState.CreateFile({
-                name: targetName,
-                content,
-                maybeValidationError: Option.none(),
+      return Match.value(model.modalState).pipe(
+        Match.tag("ConfirmOverwrite", (state) => {
+          const { targetName, originalName, content, isBase64, isEditing } = state
+          if (!isEditing) {
+            return {
+              model: modifyFields(model, {
+                modalState: () =>
+                  ModalState.CreateFile({
+                    name: targetName,
+                    content,
+                    maybeValidationError: Option.none(),
+                  }),
               }),
-          }),
-        }
-      }
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            ModalState.EditFile({
-              originalName,
-              name: targetName,
-              fileMode: isBase64
-                ? EditorFileMode.Binary({
-                    preview: PreviewContent.None(),
-                    edit: BinaryEdit.Editing({ content }),
-                  })
-                : EditorFileMode.Text({ content }),
-              maybeValidationError: Option.none(),
+            }
+          }
+          return {
+            model: modifyFields(model, {
+              modalState: () =>
+                ModalState.EditFile({
+                  originalName,
+                  name: targetName,
+                  fileMode: isBase64
+                    ? EditorFileMode.Binary({
+                        preview: PreviewContent.None(),
+                        edit: BinaryEdit.Editing({ content }),
+                      })
+                    : EditorFileMode.Text({ content }),
+                  maybeValidationError: Option.none(),
+                }),
             }),
+          }
         }),
-      }
+        Match.orElse(() => ({ model })),
+      )
     },
 
-    ClickedDeleteModalEntry: () => {
-      if (model.modalState._tag === "EditFolder") {
-        const folderState = model.modalState
-        return {
+    ClickedDeleteModalEntry: () =>
+      Match.value(model.modalState).pipe(
+        Match.tag("EditFolder", ({ originalName }) => ({
+          model: modifyFields(model, {
+            modalState: () => ModalState.ConfirmDelete({ entryName: originalName, isFolder: true }),
+          }),
+        })),
+        Match.tag("EditFile", ({ originalName }) => ({
           model: modifyFields(model, {
             modalState: () =>
-              ModalState.ConfirmDelete({
-                entryName: folderState.originalName,
-                isFolder: true,
-              }),
+              ModalState.ConfirmDelete({ entryName: originalName, isFolder: false }),
           }),
-        }
-      }
-      if (model.modalState._tag === "EditFile") {
-        const fileState = model.modalState
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              ModalState.ConfirmDelete({
-                entryName: fileState.originalName,
-                isFolder: false,
-              }),
-          }),
-        }
-      }
-      return { model }
-    },
+        })),
+        Match.orElse(() => ({ model })),
+      ),
 
     ConfirmedDeleteModalEntry: () => {
-      if (model.modalState._tag !== "ConfirmDelete") {
-        return { model }
-      }
-      const { entryName, isFolder } = model.modalState
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      return {
-        model: modifyFields(model, {
-          modalState: () => ModalState.Closed(),
+      return Match.value(model.modalState).pipe(
+        Match.tag("ConfirmDelete", (state) => {
+          const { entryName, isFolder } = state
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [DeleteModalEntry({ entryName, isFolder, subPath })],
+          }
         }),
-        commands: [DeleteModalEntry({ entryName, isFolder, subPath })],
-      }
+        Match.orElse(() => ({ model })),
+      )
     },
 
     ClickedCancelDeleteModal: () => {
@@ -1584,7 +1607,7 @@ export const update = (model: Model, message: Message) =>
     },
 
     PressedEscape: () => {
-      if (model.modalState._tag !== "Closed") {
+      if (!isModal("Closed")(model.modalState)) {
         const subPath = currentSubPathFromStorageState(model.storageState)
         revokeActivePreviewUrl()
         return {
@@ -1606,7 +1629,7 @@ export const update = (model: Model, message: Message) =>
     },
 
     SucceededSaveModalChanges: ({ entries }) => {
-      if (model.storageState._tag !== "Ready") {
+      if (!isReady(model.storageState)) {
         return {
           model: modifyFields(model, {
             modalState: () => ModalState.Closed(),
@@ -1627,7 +1650,7 @@ export const update = (model: Model, message: Message) =>
     },
 
     SucceededDeleteModalEntry: ({ entries }) => {
-      if (model.storageState._tag !== "Ready") {
+      if (!isReady(model.storageState)) {
         return {
           model: modifyFields(model, {
             modalState: () => ModalState.Closed(),
@@ -1670,7 +1693,7 @@ export const update = (model: Model, message: Message) =>
     // Help Modal
     ClickedOpenHelp: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      const isFolderViewVisible = model.storageState._tag === "Ready"
+      const isFolderViewVisible = isReady(model.storageState)
       revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
@@ -1691,105 +1714,102 @@ export const update = (model: Model, message: Message) =>
     },
 
     ToggledHelpTopic: ({ topic, isOpen }) => {
-      if (model.modalState._tag !== "Help") {
-        return { model }
-      }
-      const helpState = model.modalState
-      const nextIsApiOpen = topic === "api" ? isOpen : isOpen ? false : helpState.isApiOpen
-      const nextIsFsOpen = topic === "fs" ? isOpen : isOpen ? false : helpState.isFsOpen
+      return whenHelp(model, (helpState) => {
+        const nextIsApiOpen = topic === "api" ? isOpen : isOpen ? false : helpState.isApiOpen
+        const nextIsFsOpen = topic === "fs" ? isOpen : isOpen ? false : helpState.isFsOpen
 
-      if (nextIsApiOpen === helpState.isApiOpen && nextIsFsOpen === helpState.isFsOpen) {
-        return { model }
-      }
+        if (nextIsApiOpen === helpState.isApiOpen && nextIsFsOpen === helpState.isFsOpen) {
+          return { model }
+        }
 
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      const maybeActiveTopic =
-        nextIsApiOpen && !nextIsFsOpen
-          ? Option.some<HelpTopic>("api")
-          : nextIsFsOpen && !nextIsApiOpen
-            ? Option.some<HelpTopic>("fs")
-            : Option.none()
+        const subPath = currentSubPathFromStorageState(model.storageState)
+        const maybeActiveTopic =
+          nextIsApiOpen && !nextIsFsOpen
+            ? Option.some<HelpTopic>("api")
+            : nextIsFsOpen && !nextIsApiOpen
+              ? Option.some<HelpTopic>("fs")
+              : Option.none()
 
-      const replaceUrlCommand = ReplaceUrl({ url: buildHelpUrl(subPath, maybeActiveTopic) })
-      const commands = isOpen
-        ? [replaceUrlCommand, ScrollHelpTopicIntoView({ topic })]
-        : [replaceUrlCommand]
+        const replaceUrlCommand = ReplaceUrl({ url: buildHelpUrl(subPath, maybeActiveTopic) })
+        const commands = isOpen
+          ? [replaceUrlCommand, ScrollHelpTopicIntoView({ topic })]
+          : [replaceUrlCommand]
 
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(helpState, {
-              isApiOpen: () => nextIsApiOpen,
-              isFsOpen: () => nextIsFsOpen,
-            }),
-        }),
-        commands,
-      }
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(helpState, {
+                isApiOpen: () => nextIsApiOpen,
+                isFsOpen: () => nextIsFsOpen,
+              }),
+          }),
+          commands,
+        }
+      })
     },
 
     ClickedCopyDts: () => {
-      if (model.modalState._tag !== "Help") {
-        return { model }
-      }
-      const helpState = model.modalState
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(helpState, {
-              copyDtsState: () => CopyDtsState.Copying(),
-            }),
-        }),
-        commands: [CopyApiDtsToClipboard()],
-      }
+      return whenHelp(model, (helpState) => {
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(helpState, {
+                copyDtsState: () => CopyDtsState.Copying(),
+              }),
+          }),
+          commands: [CopyApiDtsToClipboard()],
+        }
+      })
     },
 
     SucceededCopyApiDtsToClipboard: () => {
-      if (model.modalState._tag !== "Help") {
-        return { model }
-      }
-      const helpState = model.modalState
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(helpState, {
-              copyDtsState: () => CopyDtsState.Copied(),
-            }),
-        }),
-        commands: [WaitBeforeResetCopyDts()],
-      }
+      return whenHelp(model, (helpState) => {
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(helpState, {
+                copyDtsState: () => CopyDtsState.Copied(),
+              }),
+          }),
+          commands: [WaitBeforeResetCopyDts()],
+        }
+      })
     },
 
     CompletedWaitBeforeResetCopyDts: () => {
-      if (model.modalState._tag !== "Help") {
-        return { model }
-      }
-      const helpState = model.modalState
-      if (helpState.copyDtsState._tag !== "Copied") {
-        return { model }
-      }
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(helpState, {
-              copyDtsState: () => CopyDtsState.Idle(),
-            }),
-        }),
-      }
+      return whenHelp(model, (helpState) => {
+        if (
+          !CopyDtsState.match(helpState.copyDtsState, {
+            Idle: () => false,
+            Copying: () => false,
+            Copied: () => true,
+            Error: () => false,
+          })
+        ) {
+          return { model }
+        }
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(helpState, {
+                copyDtsState: () => CopyDtsState.Idle(),
+              }),
+          }),
+        }
+      })
     },
 
     FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => {
-      if (model.modalState._tag !== "Help") {
-        return { model }
-      }
-      const helpState = model.modalState
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(helpState, {
-              copyDtsState: () => CopyDtsState.Error({ message: errorMessage }),
-            }),
-        }),
-      }
+      return whenHelp(model, (helpState) => {
+        return {
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(helpState, {
+                copyDtsState: () => CopyDtsState.Error({ message: errorMessage }),
+              }),
+          }),
+        }
+      })
     },
 
     // PWA Install & Service Worker Toast

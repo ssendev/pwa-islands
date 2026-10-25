@@ -3,10 +3,12 @@ import type * as Html from "foldkit/html"
 import { PREVIEWABLE_IMAGE_EXTENSIONS } from "./files"
 import { Message } from "./message"
 import {
+  BinaryEdit,
   CopyDtsState,
   EditorFileMode,
   EntriesState,
   type FileEntry,
+  InstallPrompt,
   type Model,
   ModalState,
   type PendingImportFile,
@@ -19,6 +21,12 @@ import {
 } from "./model"
 import { OPFS_APP_FOLDER } from "./storage"
 import rootIconUrl from "./assets/pwa-islands.svg"
+
+const INSTALL_AVAILABLE = {
+  Available: () => true,
+  Unavailable: () => false,
+  Prompting: () => false,
+}
 
 type HtmlBuilder = Html.HtmlBuilder<Message>
 
@@ -161,7 +169,13 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
   })
 
 const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
-  const isReady = model.storageState._tag === "Ready"
+  const isReady = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: () => false,
+    Ready: () => true,
+  })
   const currentStorageType = StorageState.match(model.storageState, {
     Initializing: () => Option.none(),
     Unsupported: () => Option.none(),
@@ -169,11 +183,28 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
     PermissionRequired: ({ storageType }) => Option.some(storageType),
     Ready: ({ storageType }) => Option.some(storageType),
   })
-  const isFsaReady = model.storageState._tag === "Ready" && model.storageState.storageType === "fsa"
-  const isFsaNoFolder =
-    model.storageState._tag === "NoFolderSelected" && model.storageState.storageType === "fsa"
-  const isFsaPermissionRequired =
-    model.storageState._tag === "PermissionRequired" && model.storageState.storageType === "fsa"
+  const isFsaReady = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: () => false,
+    Ready: ({ storageType }) => storageType === "fsa",
+  })
+  const isFsaNoFolder = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: ({ storageType }) => storageType === "fsa",
+    PermissionRequired: () => false,
+    Ready: () => false,
+  })
+  const isFsaPermissionRequired = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: ({ storageType }) => storageType === "fsa",
+    Ready: () => false,
+  })
+  const isInstallAvailable = InstallPrompt.match(model.installPrompt, INSTALL_AVAILABLE)
   const canSwitchToOpfs =
     model.hasOPFS &&
     Option.match(currentStorageType, {
@@ -299,7 +330,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                 ["🔌 Trennen"],
               )
             : h.empty,
-          model.installPrompt._tag === "Available"
+          isInstallAvailable
             ? h.button(
                 [
                   h.Type("button"),
@@ -319,7 +350,13 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
 }
 
 const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
-  const isReady = model.storageState._tag === "Ready"
+  const isReady = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: () => false,
+    Ready: () => true,
+  })
 
   return h.div(
     [h.Class("files-toolbar")],
@@ -697,10 +734,41 @@ const viewEditorFileBody = (fileMode: EditorFileMode, h: HtmlBuilder): ReadonlyA
     ],
 
     Binary: ({ preview, edit }) => {
-      const isLocked = edit._tag === "Locked"
-      const isChecked = edit._tag === "Loading" || edit._tag === "Editing"
-      const isLoading = edit._tag === "Loading"
-      const isEditing = edit._tag === "Editing"
+      const { isLocked, isChecked, isLoading, isEditing, lockReason, base64Content } =
+        BinaryEdit.match(edit, {
+          Locked: ({ reason }) => ({
+            isLocked: true,
+            isChecked: false,
+            isLoading: false,
+            isEditing: false,
+            lockReason: reason,
+            base64Content: "",
+          }),
+          Disabled: () => ({
+            isLocked: false,
+            isChecked: false,
+            isLoading: false,
+            isEditing: false,
+            lockReason: "",
+            base64Content: "",
+          }),
+          Loading: () => ({
+            isLocked: false,
+            isChecked: true,
+            isLoading: true,
+            isEditing: false,
+            lockReason: "",
+            base64Content: "",
+          }),
+          Editing: ({ content }) => ({
+            isLocked: false,
+            isChecked: true,
+            isLoading: false,
+            isEditing: true,
+            lockReason: "",
+            base64Content: content,
+          }),
+        })
 
       return [
         h.div(
@@ -724,7 +792,7 @@ const viewEditorFileBody = (fileMode: EditorFileMode, h: HtmlBuilder): ReadonlyA
                     h.span([], ["Binärdatei bearbeiten"]),
                   ],
                 )
-              : h.p([h.Class("form-hint")], [edit.reason]),
+              : h.p([h.Class("form-hint")], [lockReason]),
             isEditing
               ? h.div(
                   [h.Id("modal-base64-editor"), h.Class("form-group")],
@@ -735,7 +803,7 @@ const viewEditorFileBody = (fileMode: EditorFileMode, h: HtmlBuilder): ReadonlyA
                       h.Class("form-textarea form-textarea-mono"),
                       h.Spellcheck(false),
                       h.Placeholder("Base64-Daten dieser Datei"),
-                      h.Value(edit.content),
+                      h.Value(base64Content),
                       h.OnInput((value) =>
                         Message.UpdatedModalBase64Content({
                           base64Content: value,
@@ -1444,7 +1512,14 @@ const viewHelpModal = (
                       h.Class("btn btn-primary icon-label-btn copy-dts-btn"),
                       h.AriaLabel("/api.d.ts kopieren"),
                       h.DataAttribute("tip", "/api.d.ts kopieren"),
-                      h.Disabled(copyDtsState._tag === "Copying"),
+                      h.Disabled(
+                        CopyDtsState.match(copyDtsState, {
+                          Idle: () => false,
+                          Copying: () => true,
+                          Copied: () => false,
+                          Error: () => false,
+                        }),
+                      ),
                       h.OnClick(Message.ClickedCopyDts()),
                     ],
                     [

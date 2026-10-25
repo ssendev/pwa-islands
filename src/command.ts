@@ -1,4 +1,4 @@
-import { Array, Duration, Effect, Option, Schema, pipe } from "effect"
+import { Array, Duration, Effect, Match, Option, Schema, pipe } from "effect"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
 import * as File from "foldkit/file"
@@ -34,7 +34,9 @@ import { Message } from "./message"
 import {
   type AlertBanner,
   AppRoute,
+  BinaryEdit,
   CopyDtsState,
+  EditorFileMode,
   type FileEntry,
   HelpTopic,
   ModalState,
@@ -237,6 +239,25 @@ const activateStorageBackend = async (
 }
 
 // COMMAND
+
+const BinaryOrText = (
+  fileMode: EditorFileMode,
+  handlers: {
+    readonly text: (content: string) => Promise<void>
+    readonly binaryEditing: (content: string) => Promise<void>
+    readonly binaryRename: () => Promise<void>
+  },
+): Promise<void> =>
+  EditorFileMode.match(fileMode, {
+    Text: ({ content }) => handlers.text(content),
+    Binary: ({ edit }) =>
+      BinaryEdit.match(edit, {
+        Locked: handlers.binaryRename,
+        Disabled: handlers.binaryRename,
+        Loading: handlers.binaryRename,
+        Editing: ({ content }) => handlers.binaryEditing(content),
+      }),
+  })
 
 export const LoadFileInfoPreference = Command.define("LoadFileInfoPreference", {
   messages: [Message.CompletedLoadFileInfoPreference],
@@ -727,50 +748,52 @@ export const SaveModalChanges = Command.define("SaveModalChanges", {
           throw new Error("Kein aktiver Speicher verfügbar.")
         }
 
-        if (args.modalState._tag === "CreateFolder") {
-          await storage.createDirectory(args.subPath, args.modalState.name.trim())
-        } else if (args.modalState._tag === "EditFolder") {
-          const newName = args.modalState.name.trim()
-          const { originalName } = args.modalState
-          if (newName !== originalName) {
-            await storage.renameDirectory(args.subPath, originalName, newName)
-          }
-        } else if (args.modalState._tag === "CreateFile") {
-          await storage.writeFile(
-            args.subPath,
-            args.modalState.name.trim(),
-            args.modalState.content,
-          )
-        } else if (args.modalState._tag === "EditFile") {
-          const newName = args.modalState.name.trim()
-          const { originalName, fileMode } = args.modalState
-
-          if (fileMode._tag === "Text") {
-            await storage.writeFile(args.subPath, newName, fileMode.content)
-            if (originalName !== newName) {
-              await storage.deleteEntry(args.subPath, originalName, "file")
+        await Match.value(args.modalState).pipe(
+          Match.tag("CreateFolder", ({ name }) =>
+            storage.createDirectory(args.subPath, name.trim()),
+          ),
+          Match.tag("EditFolder", async ({ name, originalName }) => {
+            const newName = name.trim()
+            if (newName !== originalName) {
+              await storage.renameDirectory(args.subPath, originalName, newName)
             }
-          } else if (fileMode.edit._tag === "Editing") {
-            const decodedBytes = base64ToUint8Array(fileMode.edit.content)
-            await storage.writeFileBuffer(args.subPath, newName, decodedBytes)
-            if (originalName !== newName) {
-              await storage.deleteEntry(args.subPath, originalName, "file")
-            }
-          } else {
-            await storage.renameBinaryFile(args.subPath, originalName, newName)
-          }
-        } else if (args.modalState._tag === "ConfirmOverwrite") {
-          const { targetName, originalName, content, isBase64, isEditing } = args.modalState
-          if (isBase64) {
-            const decodedBytes = base64ToUint8Array(content)
-            await storage.writeFileBuffer(args.subPath, targetName, decodedBytes)
-          } else {
-            await storage.writeFile(args.subPath, targetName, content)
-          }
-          if (isEditing && originalName !== targetName) {
-            await storage.deleteEntry(args.subPath, originalName, "file")
-          }
-        }
+          }),
+          Match.tag("CreateFile", ({ name, content }) =>
+            storage.writeFile(args.subPath, name.trim(), content),
+          ),
+          Match.tag("EditFile", async ({ name, originalName, fileMode }) => {
+            const newName = name.trim()
+            await BinaryOrText(fileMode, {
+              text: async (content) => {
+                await storage.writeFile(args.subPath, newName, content)
+                if (originalName !== newName) {
+                  await storage.deleteEntry(args.subPath, originalName, "file")
+                }
+              },
+              binaryEditing: async (content) => {
+                await storage.writeFileBuffer(args.subPath, newName, base64ToUint8Array(content))
+                if (originalName !== newName) {
+                  await storage.deleteEntry(args.subPath, originalName, "file")
+                }
+              },
+              binaryRename: () => storage.renameBinaryFile(args.subPath, originalName, newName),
+            })
+          }),
+          Match.tag(
+            "ConfirmOverwrite",
+            async ({ targetName, originalName, content, isBase64, isEditing }) => {
+              if (isBase64) {
+                await storage.writeFileBuffer(args.subPath, targetName, base64ToUint8Array(content))
+              } else {
+                await storage.writeFile(args.subPath, targetName, content)
+              }
+              if (isEditing && originalName !== targetName) {
+                await storage.deleteEntry(args.subPath, originalName, "file")
+              }
+            },
+          ),
+          Match.orElse(() => Promise.resolve()),
+        )
 
         revokeActivePreviewUrl()
         const updatedEntries = await storage.listEntries(args.subPath)
