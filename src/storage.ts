@@ -5,33 +5,15 @@ export const DB_VERSION = 1
 export const STORE_NAME = "handles"
 export const HANDLE_KEY = "selected_folder"
 export const STORAGE_TYPE_KEY = "selected_storage_type"
-/**
- * Schluessel fuer die Sichtbarkeit von Groesse und Aenderungsdatum in der
- * Dateiliste (Zahnrad -> "Datei-Infos"). Absichtlich eine eigene Zeile in der
- * Ablage statt eines Feldes an der Speicherart: die Einstellung gehoert zur
- * Ansicht und soll auch beim Wechsel zwischen lokalem Ordner und App-Speicher
- * erhalten bleiben.
- */
 export const FILE_INFO_VISIBLE_KEY = "file_info_visible"
 export const ISLAND_PARAM = "pwaislands"
 
-/**
- * OPFS hat pro Origin nur EINE Wurzel -- eine zweite Wurzel laesst sich nicht
- * waehlen. Damit die App nicht direkt im Origin-Wurzelverzeichnis schreibt,
- * liegen alle Dateien in diesem Unterordner.
- */
+// NOTE: OPFS has a single root per origin; files are placed in a subfolder
 export const OPFS_APP_FOLDER = "PWA Islands"
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
-/**
- * Oeffnet die IndexedDB genau einmal je Seitenaufruf.
- *
- * Der Service Worker fragt die Wurzel bei jeder Anfrage nach -- also auch fuer
- * jedes CSS, JS und Bild einer Island. Ohne diesen Zwischenspeicher wuerde jede
- * Anfrage eine neue Verbindung aufbauen, was den groessten Teil der Antwortzeit
- * ausmacht.
- */
+// NOTE: IndexedDB instance is cached to avoid reconnect overhead on island asset fetches
 export function openDB(): Promise<IDBDatabase> {
   if (dbPromise) {
     return dbPromise
@@ -52,9 +34,7 @@ export function openDB(): Promise<IDBDatabase> {
   })
 
   dbPromise = pending
-  // Fehlversuch nicht festschreiben, sonst bliebe die App dauerhaft ohne DB.
-  // Der Fehler wird hier nicht geschluckt: `pending` bleibt für den Aufrufer
-  // abgelehnt, nur der Zwischenspeicher wird geraeumt.
+  // NOTE: Evict failed connection so future calls can retry
   void pending.catch(() => {
     if (dbPromise === pending) dbPromise = null
   })
@@ -107,7 +87,6 @@ export async function clearStoredDirectoryHandle(): Promise<void> {
   })
 }
 
-/** Liest die zuletzt gewählte Speicherart ('fsa' oder 'opfs'). */
 export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opfs">> {
   try {
     const db = await openDB()
@@ -126,7 +105,6 @@ export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opf
   }
 }
 
-/** Speichert die zuletzt gewählte Speicherart. */
 export async function storeStorageType(type: "fsa" | "opfs"): Promise<void> {
   invalidateRootCache()
   const db = await openDB()
@@ -140,13 +118,7 @@ export async function storeStorageType(type: "fsa" | "opfs"): Promise<void> {
   })
 }
 
-/**
- * Liest, ob die Dateiliste Groesse und Aenderungsdatum zeigt. Vorgabe ist
- * `true`: ohne gespeicherte Wahl bleibt die gewohnte Tabellenansicht stehen.
- *
- * Fehler (kein IndexedDB, gesperrte Ablage) liefern ebenfalls `true` -- eine
- * fehlende Einstellung darf die Liste nicht veraendern.
- */
+// NOTE: Defaults to true so missing preference leaves standard file info visible
 export async function getStoredFileInfoVisible(): Promise<boolean> {
   try {
     const db = await openDB()
@@ -164,7 +136,6 @@ export async function getStoredFileInfoVisible(): Promise<boolean> {
   }
 }
 
-/** Speichert, ob die Dateiliste Groesse und Aenderungsdatum zeigt. */
 export async function storeFileInfoVisible(visible: boolean): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
@@ -207,27 +178,15 @@ export async function getOPFSDirectoryHandle(): Promise<Option.Option<FileSystem
   return Option.none()
 }
 
-/** Dateiname des Ordner-Index, wie bei einem Webserver. */
 export const DEFAULT_INDEX_FILE = "index.html"
 
-/** Eine gefundene gespeicherte Datei samt Pfad, unter dem sie gefunden wurde. */
 export interface SavedFile {
   file: File
-  /**
-   * Der Pfad, der tatsaechlich die Datei ist -- bei einem Ordner also
-   * `"foo/index.html"` statt `"foo"`. Entscheidet ueber den MIME-Typ: aus
-   * `"projekte/v1.2"` laesst sich keine Endung ableiten, aus
-   * `"projekte/v1.2/index.html"` schon.
-   */
   path: string
 }
 
 const MISS_ERRORS = new Set(["NotFoundError", "TypeMismatchError"])
 
-/**
- * Lauft den Pfad bis zum Elternordner ab. Liefert none, sobald ein Abschnitt
- * fehlt oder auf eine Datei zeigt -- ohne Ausnahme nach aussen.
- */
 async function walkToParent(
   root: FileSystemDirectoryHandle,
   segments: ReadonlyArray<string>,
@@ -252,17 +211,7 @@ async function walkToParent(
   )
 }
 
-/**
- * Loest einen relativen Pfad zu einer gespeicherten Datei auf.
- *
- * Der Eintrag wird zuerst als Datei probiert, danach als Ordner mit
- * Index-Datei. Was er ist, entscheidet also das Dateisystem, nicht die
- * Schreibweise: ein Punkt im Namen sagt nichts -- "projekte/v1.2" ist ein
- * Ordner, "notes" eine Datei.
- *
- * Pro Aufruf kostet das im Trefferfall genau einen Handle-Zugriff; ein Ordner
- * kostet einen zusaetzlichen, weil der erste Versuch fehlschlaegt.
- */
+// NOTE: Resolves as direct file first, falling back to folder index.html
 export async function resolveFileInDirectory(
   root: FileSystemDirectoryHandle,
   relativePath: string,
@@ -282,7 +231,6 @@ export async function resolveFileInDirectory(
   const name = parts[parts.length - 1]
   const filePath = parts.join("/")
 
-  // 1. Der uebliche Fall: unter dem Pfad liegt direkt eine Datei.
   try {
     const fileHandle = await parent.getFileHandle(name)
     return Option.some({ file: await fileHandle.getFile(), path: filePath })
@@ -292,8 +240,6 @@ export async function resolveFileInDirectory(
     }
   }
 
-  // 2. Ordner mit Index-Datei. Der zweite Versuch ist kein Fehler, sondern der
-  //    Normalfall fuer /foo und /foo/ -- deshalb erst hier, nicht vorher.
   if (!indexFile) {
     return Option.none()
   }
@@ -311,40 +257,22 @@ export async function resolveFileInDirectory(
 
 let rootCache: { root: FileSystemDirectoryHandle } | null = null
 
-/**
- * Verwirft den zwischengespeicherten Wurzel-Handle. Wird bei jedem Wechsel der
- * Speicherart oder des Ordners aufgerufen -- sonst zeigte die App weiter auf
- * den alten Speicher.
- */
 export function invalidateRootCache(): void {
   rootCache = null
 }
 
-/**
- * Wie {@link findActiveStorage}, aber ohne erneuten IndexedDB-Zugriff bei jeder
- * Anfrage. Der Wert wird nur bei einem Wechsel der Speicherart oder des Ordners
- * verworfen (siehe {@link invalidateRootCache}).
- *
- * Eine fehlende Berechtigung wird bewusst NICHT zwischengespeichert: sie kann
- * der Benutzer jederzeit erteilen, ohne dass ein Ereignis hier ankaeme.
- */
+// NOTE: Missing directory permission is intentionally un-cached so user prompts re-trigger
 async function findCachedActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
   if (rootCache) {
     return Option.some(rootCache.root)
   }
   const maybeRoot = await findActiveStorage()
-  // none (kein Speicher) nicht festschreiben -- sonst bliebe die App nach dem
-  // spaeteren Waehlen eines Ordners stumm.
   if (Option.isSome(maybeRoot)) {
     rootCache = { root: maybeRoot.value }
   }
   return maybeRoot
 }
 
-/**
- * Sucht eine gespeicherte Datei zum relativen Pfad in der aktiven Speicherwurzel.
- * Liefert die Datei samt effektivem Pfad (siehe {@link SavedFile}).
- */
 export async function findSavedFile(
   relativePath: string,
   indexFile = DEFAULT_INDEX_FILE,
@@ -402,11 +330,6 @@ export function splitPath(path: string): ReadonlyArray<string> {
   return clean ? clean.split("/").filter(Boolean) : []
 }
 
-/**
- * Findet die aktive Speicher-Wurzel: zuerst der gespeicherte FSA-Ordner,
- * danach OPFS. Liefert none, wenn keiner verfügbar ist (z. B. wenn die
- * Berechtigung für den gespeicherten Ordner fehlt).
- */
 export async function findActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
   try {
     const maybeStoredType = await getStoredStorageType()
@@ -440,10 +363,6 @@ export async function findActiveStorage(): Promise<Option.Option<FileSystemDirec
   return Option.none()
 }
 
-/**
- * Läuft von einer Wurzel-Handle entlang der Pfadsegmente zu einem
- * Verzeichnis. Mit create=true werden fehlende Ordner angelegt.
- */
 export async function getDirectory(
   root: FileSystemDirectoryHandle,
   dirs: ReadonlyArray<string>,

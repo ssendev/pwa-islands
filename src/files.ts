@@ -20,9 +20,7 @@ import {
 } from "./storage"
 import { checkTextBytes } from "./text"
 
-// ---------------------------------------------------------------------------
-// Browser File System Access API Types & Capabilities
-// ---------------------------------------------------------------------------
+// CAPABILITIES
 
 interface IterableDirectoryCapable {
   values?: () => AsyncIterableIterator<FileSystemDirectoryHandle | FileSystemFileHandle>
@@ -108,9 +106,7 @@ export const getSavedStorageType = getStoredStorageType
 export const getSavedFileInfoVisible = getStoredFileInfoVisible
 export const saveFileInfoVisible = storeFileInfoVisible
 
-// ---------------------------------------------------------------------------
-// File Preview & Base64 Helpers
-// ---------------------------------------------------------------------------
+// PREVIEWS & TRANSFORMS
 
 export const MAX_TEXT_EDIT_SIZE_BYTES = 10 * 1024 * 1024 // 10 MB
 
@@ -164,9 +160,7 @@ export const base64ToUint8Array = (base64: string): Uint8Array<ArrayBuffer> => {
   return Uint8Array.from(binaryString, (char) => char.charCodeAt(0))
 }
 
-// ---------------------------------------------------------------------------
-// FileSystemHandleStorage
-// ---------------------------------------------------------------------------
+// STORAGE BACKEND
 
 /**
  * Storage backend wrapping a `FileSystemDirectoryHandle`.
@@ -397,9 +391,7 @@ export class FileSystemHandleStorage {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Imperative Runtime Bridge (Non-Serializable Handles)
-// ---------------------------------------------------------------------------
+// RUNTIME BRIDGE
 
 const runtimeBridge: {
   activeStorage: Option.Option<FileSystemHandleStorage>

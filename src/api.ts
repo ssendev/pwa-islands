@@ -1,25 +1,3 @@
-/**
- * PWA Islands – Datei-API
- *
- * Einfache, öffentliche API, die von Islands (gespeicherten HTML-Dateien)
- * genutzt werden kann, um auf den ausgewählten Speicher zuzugreifen.
- *
- * Die API wird vom Service Worker unter `/api.js` ausgeliefert. Sie
- * abstrahiert die darunterliegende Implementierung (File System Access API
- * oder OPFS) vollständig – Aufrufer arbeiten ausschließlich mit Pfaden
- * relativ zur ausgewählten Wurzel.
- *
- * Beispiel (in einer Island):
- *
- *   <script type="module">
- *     import islands from '/api.js'
- *     const files = await islands.list()
- *     const html = await islands.read('notizen/ideen.md')
- *     await islands.write('notizen/ideen.md', 'Hallo Welt')
- *     await islands.remove('notizen/ideen.md')
- *   </script>
- */
-
 import { Option } from "effect"
 import { findActiveStorage, normalizePath, splitPath, getDirectory } from "./storage.ts"
 import { readTextOrThrow } from "./text.ts"
@@ -34,7 +12,6 @@ export type {
   RemoveOptions,
 } from "./api-types.ts"
 
-/** Liest eine Datei-Handle über die aktive Speicher-Wurzel auf. */
 async function resolveFile(path: string, createParents = false): Promise<FileSystemFileHandle> {
   const root = await requireRoot()
   const { dirs, name } = splitEntryPath(path)
@@ -42,7 +19,6 @@ async function resolveFile(path: string, createParents = false): Promise<FileSys
   return dir.getFileHandle(name, { create: createParents })
 }
 
-/** Liest eine Verzeichnis-Handle über die aktive Speicher-Wurzel auf. */
 async function resolveDirectory(path: string, create = false): Promise<FileSystemDirectoryHandle> {
   const root = await requireRoot()
   const dirs = splitPath(normalizePath(path))
@@ -75,7 +51,6 @@ const api: IslandsApi = {
     for await (const entry of dir.values()) {
       const entryPath = path ? `${normalizePath(path)}/${entry.name}` : entry.name
       if (entry.kind === "file") {
-        // Größe/Änderungsdatum nicht ermittelbar – Eintrag trotzdem liefern.
         const stats = await entry
           .getFile()
           .then((file) => ({ size: file.size, lastModified: file.lastModified }))
@@ -98,9 +73,6 @@ const api: IslandsApi = {
 
   async read(path, options) {
     const file = await (await resolveFile(path)).getFile()
-    // Ohne `ensureText` bleibt es beim direkten Weg: `file.text()` ist
-    // schneller als ArrayBuffer plus Prüfung und ersetzt kaputte Sequenzen
-    // genauso durch U+FFFD.
     return options?.ensureText ? readTextOrThrow(file, path) : file.text()
   },
 
@@ -182,7 +154,6 @@ const api: IslandsApi = {
   },
 }
 
-/** Kopiert einen Ordner rekursiv in ein Zielverzeichnis. */
 async function copyDirectory(
   source: FileSystemDirectoryHandle,
   target: FileSystemDirectoryHandle,

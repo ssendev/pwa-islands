@@ -441,9 +441,7 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Alert Banner & Main File List Content
-// ---------------------------------------------------------------------------
+// VIEW CONTENT
 
 const viewAlertContainer = (model: Model, h: HtmlBuilder): Html.Html =>
   Option.match(model.maybeAlertBanner, {
@@ -707,9 +705,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
     ],
   )
 
-// ---------------------------------------------------------------------------
-// Editor Modal & Help Modal
-// ---------------------------------------------------------------------------
+// VIEW MODALS
 
 const viewPreviewContent = (preview: PreviewContent, h: HtmlBuilder): Html.Html =>
   PreviewContent.match(preview, {
@@ -1915,9 +1911,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
     ],
   )
 
-// ---------------------------------------------------------------------------
-// Root Document View
-// ---------------------------------------------------------------------------
+// VIEW DOCUMENT
 
 export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
   title: computeDocumentTitle(model),
