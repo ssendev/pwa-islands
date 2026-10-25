@@ -875,7 +875,7 @@ const viewEditorModal = (
                         [
                           h.Type("submit"),
                           h.Id("modal-btn-save"),
-                          h.Class("btn btn-primary icon-label-btn"),
+                          h.Class("btn btn-primary icon-label-btn save-modal-btn"),
                           h.AriaLabel(saveLabel),
                           h.DataAttribute("tip", saveLabel),
                           h.OnClick(Message.ClickedSaveModal(), { defaultAction: "Prevent" }),

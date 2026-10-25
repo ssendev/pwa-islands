@@ -948,6 +948,17 @@ code {
   .copy-dts-btn .copy-dts-action {
     display: none;
   }
+
+  .modal-footer .save-modal-btn {
+    width: auto;
+    max-width: 100%;
+    padding: 0 10px;
+  }
+
+  .save-modal-btn .icon-label-btn-text {
+    display: inline;
+    white-space: nowrap;
+  }
 }
 
 /* Ab 521px steht die Beschriftung im Button -- dann kein Tooltip. */
