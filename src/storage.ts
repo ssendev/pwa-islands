@@ -9,6 +9,7 @@ export const DB_NAME = "pwa-islands-db"
 export const DB_VERSION = 1
 export const STORE_NAME = "handles"
 export const HANDLE_KEY = "selected_folder"
+export const USER_TEMPLATES_KEY = "user_templates"
 export const STORAGE_TYPE_KEY = "selected_storage_type"
 export const FILE_INFO_VISIBLE_KEY = "file_info_visible"
 export const ISLAND_PARAM = "pwaislands"
@@ -521,4 +522,61 @@ function decodeUtf8Strict(bytes: Uint8Array): Option.Option<string> {
 
 function toHex(byte: number): string {
   return `0x${byte.toString(16).padStart(2, "0")}`
+}
+
+export interface StoredUserTemplate {
+  readonly id: string
+  readonly label: string
+  readonly defaultFileName: string
+  readonly content: string
+}
+
+const isStoredUserTemplate = (value: unknown): value is StoredUserTemplate =>
+  typeof value === "object" &&
+  value !== null &&
+  "id" in value &&
+  typeof value.id === "string" &&
+  "label" in value &&
+  typeof value.label === "string" &&
+  "defaultFileName" in value &&
+  typeof value.defaultFileName === "string" &&
+  "content" in value &&
+  typeof value.content === "string"
+
+export async function getStoredUserTemplates(): Promise<ReadonlyArray<StoredUserTemplate>> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const store = tx.objectStore(STORE_NAME)
+      const req = store.get(USER_TEMPLATES_KEY)
+
+      req.onsuccess = () => {
+        const raw = req.result
+        if (Array.isArray(raw)) {
+          resolve(Array.filter(raw, isStoredUserTemplate))
+          return
+        }
+        resolve([])
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Benutzervorlagen:", error)
+    return []
+  }
+}
+
+export async function storeUserTemplates(
+  templates: ReadonlyArray<StoredUserTemplate>,
+): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const store = tx.objectStore(STORE_NAME)
+    const req = store.put(templates, USER_TEMPLATES_KEY)
+
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
 }

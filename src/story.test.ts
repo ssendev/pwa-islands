@@ -437,11 +437,11 @@ describe("PWA Islands Story Tests", () => {
       const modelWithDuplicateFile: Model = {
         ...readyModel,
         modalState: ModalState.Editor({
-          editor: Editor.Model.CreateFile({
+          editor: {
+            ...Editor.makeCreateFile(),
             name: "index.html",
             content: "<p>New</p>",
-            maybeValidationError: Option.none(),
-          }),
+          },
         }),
       }
 
@@ -457,6 +457,8 @@ describe("PWA Islands Story Tests", () => {
                 targetName: "index.html",
                 source: OverwriteSource.CreateFile({
                   content: "<p>New</p>",
+                  selectedTemplateId: "builtin:empty",
+                  userTemplates: [],
                 }),
               }),
             }),
@@ -469,6 +471,8 @@ describe("PWA Islands Story Tests", () => {
               targetName: "index.html",
               source: OverwriteSource.CreateFile({
                 content: "<p>New</p>",
+                selectedTemplateId: "builtin:empty",
+                userTemplates: [],
               }),
             }),
             subPath: [],
@@ -691,6 +695,38 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
+    it("updates only file extension when selecting a template with different extension", () => {
+      const modelWithCustomName: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: {
+            ...Editor.makeCreateFile(),
+            name: "mein-dokument.html",
+            content: "",
+          },
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithCustomName),
+        message(editorMsg(Editor.Message.SelectedTemplate({ templateId: "builtin:markdown" }))),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.Editor({
+              editor: {
+                ...Editor.makeCreateFile(),
+                selectedTemplateId: "builtin:markdown",
+                name: "mein-dokument.md",
+                content: "# Notiz\n\n",
+              },
+            }),
+          )
+        }),
+      )
+    })
+
     it("opens CreateFile modal and updates URL to ?pwaislands=new when ClickedNewFile", () => {
       story(
         update,
@@ -702,11 +738,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Editor({
-              editor: Editor.Model.CreateFile({
-                name: "Neu.html",
-                content: "",
-                maybeValidationError: Option.none(),
-              }),
+              editor: Editor.makeCreateFile(),
             }),
           )
         }),
@@ -752,11 +784,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Editor({
-              editor: Editor.Model.CreateFile({
-                name: "Neu.html",
-                content: "",
-                maybeValidationError: Option.none(),
-              }),
+              editor: Editor.makeCreateFile(),
             }),
           )
           expect(m.storageState).toEqual(readyModel.storageState)

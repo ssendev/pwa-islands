@@ -1,4 +1,4 @@
-import { Array, Effect, Match, Option, Schema } from "effect"
+import { Array, Clock, Effect, Match, Option, Schema, pipe } from "effect"
 import { Submodel } from "foldkit"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
@@ -17,14 +17,19 @@ import {
   requireActiveStorage,
   revokeActivePreviewUrl,
 } from "./files"
+import { getStoredUserTemplates, storeUserTemplates } from "./storage"
+import { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate } from "./templates"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
+export { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate }
 
 // MODEL
 
 export const OverwriteSource = defineTaggedUnion({
   CreateFile: {
     content: Schema.String,
+    selectedTemplateId: Schema.String,
+    userTemplates: Schema.Array(StarterTemplate),
   },
   EditFile: {
     originalName: Schema.String,
@@ -37,6 +42,11 @@ export const Model = defineTaggedUnion({
   CreateFile: {
     name: Schema.String,
     content: Schema.String,
+    selectedTemplateId: Schema.String,
+    userTemplates: Schema.Array(StarterTemplate),
+    isSavingTemplate: Schema.Boolean,
+    isDeletingTemplate: Schema.Boolean,
+    newTemplateLabel: Schema.String,
     maybeValidationError: Schema.Option(Schema.String),
   },
   CreateFolder: {
@@ -65,8 +75,23 @@ export const Model = defineTaggedUnion({
 })
 export type Model = typeof Model.Type
 
+type CreateFileModel = Extract<Model, { readonly _tag: "CreateFile" }>
 type EditFileModel = Extract<Model, { readonly _tag: "EditFile" }>
 type BinaryFileMode = Extract<EditorFileMode, { readonly _tag: "Binary" }>
+
+export const makeCreateFile = (
+  userTemplates: ReadonlyArray<StarterTemplate> = [],
+): CreateFileModel => ({
+  _tag: "CreateFile",
+  name: "Neu.html",
+  content: "",
+  selectedTemplateId: "builtin:empty",
+  userTemplates,
+  isSavingTemplate: false,
+  isDeletingTemplate: false,
+  newTemplateLabel: "",
+  maybeValidationError: Option.none(),
+})
 
 export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
 export type AlertVariant = typeof AlertVariant.Type
@@ -85,6 +110,29 @@ export const Message = defineMessageUnion({
   },
   UpdatedTextContent: {
     content: Schema.String,
+  },
+  SelectedTemplate: {
+    templateId: Schema.String,
+  },
+  ClickedOpenSaveTemplate: {},
+  ClickedCancelSaveTemplate: {},
+  UpdatedNewTemplateLabel: {
+    label: Schema.String,
+  },
+  ClickedConfirmSaveTemplate: {},
+  GeneratedTemplateTimestamp: {
+    timestamp: Schema.Number,
+  },
+  ClickedOpenDeleteTemplate: {},
+  ClickedCancelDeleteTemplate: {},
+  ClickedConfirmDeleteTemplate: {},
+  ClickedDeleteSelectedTemplate: {},
+  CompletedLoadUserTemplates: {
+    templates: Schema.Array(StarterTemplate),
+  },
+  CompletedPersistUserTemplates: {
+    templates: Schema.Array(StarterTemplate),
+    selectedTemplateId: Schema.String,
   },
   ToggledBase64: {
     isChecked: Schema.Boolean,
@@ -154,12 +202,66 @@ const BinaryOrText = (
       }),
   })
 
+export const GenerateTemplateTimestamp = Command.define("GenerateTemplateTimestamp", {
+  messages: [Message.GeneratedTemplateTimestamp],
+  execute: Clock.currentTimeMillis.pipe(
+    Effect.map((timestamp) => Message.GeneratedTemplateTimestamp({ timestamp })),
+  ),
+})
+
 export const FocusNameInput = Command.define("FocusNameInput", {
   messages: [Message.CompletedFocusNameInput],
   execute: Dom.focus("#modal-file-name").pipe(
     Effect.as(Message.CompletedFocusNameInput()),
     Effect.catch(() => Effect.succeed(Message.CompletedFocusNameInput())),
   ),
+})
+
+export const LoadUserTemplates = Command.define("LoadUserTemplates", {
+  messages: [Message.CompletedLoadUserTemplates],
+  execute: Effect.tryPromise({
+    try: async () => {
+      const stored = await getStoredUserTemplates()
+      const templates: ReadonlyArray<StarterTemplate> = Array.map(stored, (t) => ({
+        id: t.id,
+        label: t.label,
+        defaultFileName: t.defaultFileName,
+        content: t.content,
+        isBuiltin: false,
+      }))
+      return Message.CompletedLoadUserTemplates({ templates })
+    },
+    catch: () => new Error("Failed to load user templates"),
+  }).pipe(
+    Effect.catch(() => Effect.succeed(Message.CompletedLoadUserTemplates({ templates: [] }))),
+  ),
+})
+
+export const PersistUserTemplates = Command.define("PersistUserTemplates", {
+  args: {
+    templates: Schema.Array(StarterTemplate),
+    selectedTemplateId: Schema.String,
+  },
+  messages: [Message.CompletedPersistUserTemplates],
+  execute: ({ templates, selectedTemplateId }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await storeUserTemplates(
+          Array.map(templates, (t) => ({
+            id: t.id,
+            label: t.label,
+            defaultFileName: t.defaultFileName,
+            content: t.content,
+          })),
+        )
+        return Message.CompletedPersistUserTemplates({ templates, selectedTemplateId })
+      },
+      catch: () => new Error("Failed to store user templates"),
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(Message.CompletedPersistUserTemplates({ templates, selectedTemplateId })),
+      ),
+    ),
 })
 
 export const LoadBase64 = Command.define("LoadBase64", {
@@ -298,6 +400,23 @@ export const DeleteEntry = Command.define("DeleteEntry", {
 
 // UPDATE
 
+const whenCreateFile = (
+  model: Model,
+  fn: (state: CreateFileModel) => {
+    readonly model: Model
+    readonly commands?: ReadonlyArray<Command.Command<Message>>
+    readonly outMessage: OutMessage
+  },
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+  readonly outMessage: OutMessage
+} =>
+  Match.value(model).pipe(
+    Match.tag("CreateFile", fn),
+    Match.orElse(() => ({ model, outMessage: OutMessage.None() })),
+  )
+
 const whenBinaryEditor = (
   model: Model,
   fn: (
@@ -385,6 +504,195 @@ export const update = (
       }),
       outMessage: OutMessage.None(),
     }),
+
+    SelectedTemplate: ({ templateId }) =>
+      whenCreateFile(model, (state) => {
+        const allTemplates = [...BUILTIN_TEMPLATES, ...state.userTemplates]
+        return Option.match(
+          Array.findFirst(allTemplates, (t) => t.id === templateId),
+          {
+            onNone: () => ({ model: state, outMessage: OutMessage.None() }),
+            onSome: (template) => ({
+              model: modifyFields(state, {
+                selectedTemplateId: () => template.id,
+                content: () => template.content,
+                name: () => replaceFileExtension(state.name, template.defaultFileName),
+                isDeletingTemplate: () => false,
+              }),
+              outMessage: OutMessage.None(),
+            }),
+          },
+        )
+      }),
+
+    ClickedOpenSaveTemplate: () =>
+      whenCreateFile(model, (state) => ({
+        model: modifyFields(state, {
+          isSavingTemplate: () => true,
+          isDeletingTemplate: () => false,
+          newTemplateLabel: () => state.name.trim() || "Meine Vorlage",
+        }),
+        outMessage: OutMessage.None(),
+      })),
+
+    ClickedCancelSaveTemplate: () =>
+      whenCreateFile(model, (state) => ({
+        model: modifyFields(state, {
+          isSavingTemplate: () => false,
+          newTemplateLabel: () => "",
+        }),
+        outMessage: OutMessage.None(),
+      })),
+
+    UpdatedNewTemplateLabel: ({ label }) =>
+      whenCreateFile(model, (state) => ({
+        model: modifyFields(state, {
+          newTemplateLabel: () => label,
+        }),
+        outMessage: OutMessage.None(),
+      })),
+
+    ClickedConfirmSaveTemplate: () =>
+      whenCreateFile(model, (state) => {
+        const trimmedLabel = state.newTemplateLabel.trim()
+        if (!trimmedLabel) {
+          return { model: state, outMessage: OutMessage.None() }
+        }
+        return {
+          model: state,
+          commands: [GenerateTemplateTimestamp()],
+          outMessage: OutMessage.None(),
+        }
+      }),
+
+    GeneratedTemplateTimestamp: ({ timestamp }) =>
+      whenCreateFile(model, (state) => {
+        const trimmedLabel = state.newTemplateLabel.trim()
+        if (!trimmedLabel) {
+          return { model: state, outMessage: OutMessage.None() }
+        }
+        const id = `user:${trimmedLabel.toLowerCase().replace(/\s+/g, "-")}-${timestamp}`
+        const newTemplate: StarterTemplate = {
+          id,
+          label: trimmedLabel,
+          defaultFileName: state.name.trim() || "Neu.html",
+          content: state.content,
+          isBuiltin: false,
+        }
+        const nextTemplates = [...state.userTemplates, newTemplate]
+        return {
+          model: modifyFields(state, {
+            userTemplates: () => nextTemplates,
+            selectedTemplateId: () => id,
+            isSavingTemplate: () => false,
+            newTemplateLabel: () => "",
+          }),
+          commands: [
+            PersistUserTemplates({
+              templates: nextTemplates,
+              selectedTemplateId: id,
+            }),
+          ],
+          outMessage: OutMessage.None(),
+        }
+      }),
+
+    ClickedOpenDeleteTemplate: () =>
+      whenCreateFile(model, (state) => ({
+        model: modifyFields(state, {
+          isDeletingTemplate: () => true,
+          isSavingTemplate: () => false,
+        }),
+        outMessage: OutMessage.None(),
+      })),
+
+    ClickedCancelDeleteTemplate: () =>
+      whenCreateFile(model, (state) => ({
+        model: modifyFields(state, {
+          isDeletingTemplate: () => false,
+        }),
+        outMessage: OutMessage.None(),
+      })),
+
+    ClickedConfirmDeleteTemplate: () =>
+      whenCreateFile(model, (state) => {
+        const isUserTemplate = Array.some(
+          state.userTemplates,
+          (t) => t.id === state.selectedTemplateId,
+        )
+        if (!isUserTemplate) {
+          return {
+            model: modifyFields(state, {
+              isDeletingTemplate: () => false,
+            }),
+            outMessage: OutMessage.None(),
+          }
+        }
+        const nextTemplates = Array.filter(
+          state.userTemplates,
+          (t) => t.id !== state.selectedTemplateId,
+        )
+        return {
+          model: modifyFields(state, {
+            userTemplates: () => nextTemplates,
+            selectedTemplateId: () => "builtin:empty",
+            isDeletingTemplate: () => false,
+          }),
+          commands: [
+            PersistUserTemplates({
+              templates: nextTemplates,
+              selectedTemplateId: "builtin:empty",
+            }),
+          ],
+          outMessage: OutMessage.None(),
+        }
+      }),
+
+    ClickedDeleteSelectedTemplate: () =>
+      whenCreateFile(model, (state) => {
+        const isUserTemplate = Array.some(
+          state.userTemplates,
+          (t) => t.id === state.selectedTemplateId,
+        )
+        if (!isUserTemplate) {
+          return { model: state, outMessage: OutMessage.None() }
+        }
+        const nextTemplates = Array.filter(
+          state.userTemplates,
+          (t) => t.id !== state.selectedTemplateId,
+        )
+        return {
+          model: modifyFields(state, {
+            userTemplates: () => nextTemplates,
+            selectedTemplateId: () => "builtin:empty",
+            isDeletingTemplate: () => false,
+          }),
+          commands: [
+            PersistUserTemplates({
+              templates: nextTemplates,
+              selectedTemplateId: "builtin:empty",
+            }),
+          ],
+          outMessage: OutMessage.None(),
+        }
+      }),
+
+    CompletedLoadUserTemplates: ({ templates }) =>
+      whenCreateFile(model, (state) => ({
+        model: modifyFields(state, {
+          userTemplates: () => templates,
+        }),
+        outMessage: OutMessage.None(),
+      })),
+
+    CompletedPersistUserTemplates: ({ templates, selectedTemplateId }) =>
+      whenCreateFile(model, (state) => ({
+        model: modifyFields(state, {
+          userTemplates: () => templates,
+          selectedTemplateId: () => selectedTemplateId,
+        }),
+        outMessage: OutMessage.None(),
+      })),
 
     ToggledBase64: ({ isChecked }) =>
       whenBinaryEditor(model, (editState, binaryMode) => {
@@ -564,6 +872,8 @@ export const update = (
                 targetName: trimmed,
                 source: OverwriteSource.CreateFile({
                   content: createFile.content,
+                  selectedTemplateId: createFile.selectedTemplateId,
+                  userTemplates: createFile.userTemplates,
                 }),
               }),
               outMessage: OutMessage.None(),
@@ -667,10 +977,15 @@ export const update = (
       Model.match(model, {
         ConfirmOverwrite: ({ targetName, source }) =>
           OverwriteSource.match(source, {
-            CreateFile: ({ content }) => ({
+            CreateFile: ({ content, selectedTemplateId, userTemplates }) => ({
               model: Model.CreateFile({
                 name: targetName,
                 content,
+                selectedTemplateId,
+                userTemplates,
+                isSavingTemplate: false,
+                isDeletingTemplate: false,
+                newTemplateLabel: "",
                 maybeValidationError: Option.none(),
               }),
               outMessage: OutMessage.None(),
@@ -773,6 +1088,176 @@ export const update = (
   })
 
 // VIEW
+
+const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>): Html.Html => {
+  const selectedTemplate = Array.findFirst(
+    state.userTemplates,
+    (t) => t.id === state.selectedTemplateId,
+  )
+  const isCustomSelected = Option.isSome(selectedTemplate)
+  const selectedTemplateLabel = Option.match(selectedTemplate, {
+    onNone: () => "Vorlage",
+    onSome: (t) => t.label,
+  })
+
+  return h.div(
+    [h.Class("form-group")],
+    [
+      h.label([h.For("modal-template-select")], ["Vorlage:"]),
+      h.div(
+        [h.Class("template-toolbar")],
+        [
+          h.select(
+            [
+              h.Id("modal-template-select"),
+              h.Class("form-input"),
+              h.Value(state.selectedTemplateId),
+              h.OnChange((templateId) => Message.SelectedTemplate({ templateId })),
+            ],
+            [
+              ...(Array.isReadonlyArrayNonEmpty(state.userTemplates)
+                ? [
+                    h.optgroup(
+                      [h.LabelAttr("Eigene Vorlagen")],
+                      pipe(
+                        state.userTemplates,
+                        Array.map((t) =>
+                          h.option(
+                            [h.Value(t.id), h.Selected(t.id === state.selectedTemplateId)],
+                            [t.label],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ]
+                : []),
+              h.optgroup(
+                [h.LabelAttr("Standard-Vorlagen")],
+                pipe(
+                  BUILTIN_TEMPLATES,
+                  Array.map((t) =>
+                    h.option(
+                      [h.Value(t.id), h.Selected(t.id === state.selectedTemplateId)],
+                      [t.label],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          !state.isSavingTemplate && !state.isDeletingTemplate
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("modal-btn-save-template"),
+                  h.Class("btn btn-secondary btn-icon"),
+                  h.Title("Aktuellen Inhalt als eigene Vorlage speichern"),
+                  h.AriaLabel("Aktuellen Inhalt als eigene Vorlage speichern"),
+                  h.OnClick(Message.ClickedOpenSaveTemplate()),
+                ],
+                [h.span([h.AriaHidden(true)], ["💾"])],
+              )
+            : h.empty,
+          isCustomSelected && !state.isSavingTemplate && !state.isDeletingTemplate
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("modal-btn-delete-template"),
+                  h.Class("btn btn-danger btn-icon"),
+                  h.Title("Ausgewählte eigene Vorlage löschen"),
+                  h.AriaLabel("Ausgewählte eigene Vorlage löschen"),
+                  h.OnClick(Message.ClickedOpenDeleteTemplate()),
+                ],
+                [h.span([h.AriaHidden(true)], ["🗑️"])],
+              )
+            : h.empty,
+        ],
+      ),
+      state.isSavingTemplate
+        ? h.div(
+            [h.Id("modal-save-template-box"), h.Class("template-save-row")],
+            [
+              h.input([
+                h.Type("text"),
+                h.Id("modal-template-name"),
+                h.Class("form-input"),
+                h.Placeholder("Name der Vorlage (z. B. Mein Dashboard)"),
+                h.Value(state.newTemplateLabel),
+                h.OnInput((label) => Message.UpdatedNewTemplateLabel({ label })),
+              ]),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Id("modal-btn-cancel-save-template"),
+                  h.Class("btn btn-secondary icon-label-btn"),
+                  h.AriaLabel("Abbrechen"),
+                  h.DataAttribute("tip", "Abbrechen"),
+                  h.OnClick(Message.ClickedCancelSaveTemplate()),
+                ],
+                [
+                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                  h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
+                ],
+              ),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Id("modal-btn-confirm-save-template"),
+                  h.Class("btn btn-primary icon-label-btn"),
+                  h.AriaLabel("Speichern"),
+                  h.DataAttribute("tip", "Speichern"),
+                  h.OnClick(Message.ClickedConfirmSaveTemplate()),
+                ],
+                [
+                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["💾"]),
+                  h.span([h.Class("icon-label-btn-text")], ["Speichern"]),
+                ],
+              ),
+            ],
+          )
+        : h.empty,
+      state.isDeletingTemplate
+        ? h.div(
+            [h.Id("modal-delete-template-box"), h.Class("template-save-row")],
+            [
+              h.span(
+                [h.Class("template-delete-prompt")],
+                [`Vorlage „${selectedTemplateLabel}“ wirklich löschen?`],
+              ),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Id("modal-btn-cancel-delete-template"),
+                  h.Class("btn btn-secondary icon-label-btn"),
+                  h.AriaLabel("Abbrechen"),
+                  h.DataAttribute("tip", "Abbrechen"),
+                  h.OnClick(Message.ClickedCancelDeleteTemplate()),
+                ],
+                [
+                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                  h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
+                ],
+              ),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Id("modal-btn-confirm-delete-template"),
+                  h.Class("btn btn-danger icon-label-btn"),
+                  h.AriaLabel("Löschen"),
+                  h.DataAttribute("tip", "Löschen"),
+                  h.OnClick(Message.ClickedConfirmDeleteTemplate()),
+                ],
+                [
+                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["🗑️"]),
+                  h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
+                ],
+              ),
+            ],
+          )
+        : h.empty,
+    ],
+  )
+}
 
 const viewPreviewContent = (preview: PreviewContent, h: Html.HtmlBuilder<Message>): Html.Html =>
   PreviewContent.match(preview, {
@@ -1194,16 +1679,19 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
 
 export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
   Model.match(model, {
-    CreateFile: ({ name, content, maybeValidationError }) =>
+    CreateFile: (state) =>
       viewEditorModal(
         {
           titleText: "Neue Datei erstellen",
           noun: "Datei",
           isFolder: false,
           isEditingExisting: false,
-          nameValue: name,
-          maybeValidationError,
-          extraBodyNodes: viewEditorFileBody(EditorFileMode.Text({ content }), h),
+          nameValue: state.name,
+          maybeValidationError: state.maybeValidationError,
+          extraBodyNodes: [
+            viewTemplatePicker(state, h),
+            ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
+          ],
         },
         h,
       ),

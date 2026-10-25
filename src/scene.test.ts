@@ -140,11 +140,11 @@ describe("PWA Islands Scene Tests", () => {
     const modelWithDuplicateFile: Model = {
       ...readyModel,
       modalState: ModalState.Editor({
-        editor: Editor.Model.CreateFile({
+        editor: {
+          ...Editor.makeCreateFile(),
           name: "index.html",
           content: "<h1>Duplicate</h1>",
-          maybeValidationError: Option.none(),
-        }),
+        },
       }),
     }
 

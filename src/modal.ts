@@ -108,12 +108,12 @@ export const openCreate = (target: NewTarget | "file" | "folder"): ModalState =>
             name: "Neuer Ordner",
             maybeValidationError: Option.none(),
           })
-        : Editor.Model.CreateFile({
-            name: "Neu.html",
-            content: "",
-            maybeValidationError: Option.none(),
-          }),
+        : Editor.makeCreateFile(),
   })
+
+export const LoadEditorUserTemplates = Command.mapMessage(Editor.LoadUserTemplates(), (message) =>
+  Message.GotEditorMessage({ message }),
+)
 
 export const openEditFolder = (name: string): ModalState =>
   ModalState.Editor({
