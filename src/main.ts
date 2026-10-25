@@ -197,9 +197,7 @@ const handleUseFsa = (model: Model): Update.Return<Model, Message> => {
 
 const isSameSubPath = Array.makeEquivalence<string>((a, b) => a === b)
 
-type ReadyStorageState = Extract<StorageState, { readonly _tag: "Ready" }>
-
-const isReady = (storageState: StorageState): storageState is ReadyStorageState =>
+const isReadyStorage = (storageState: StorageState): boolean =>
   Match.value(storageState).pipe(
     Match.tag("Ready", () => true),
     Match.orElse(() => false),
@@ -207,9 +205,14 @@ const isReady = (storageState: StorageState): storageState is ReadyStorageState 
 
 const whenReady = (
   model: Model,
-  fn: (readyState: ReadyStorageState) => Update.Return<Model, Message>,
+  fn: (
+    readyState: Parameters<Parameters<typeof StorageState.match>[1]["Ready"]>[0],
+  ) => Update.Return<Model, Message>,
 ): Update.Return<Model, Message> =>
-  isReady(model.storageState) ? fn(model.storageState) : { model }
+  Match.value(model.storageState).pipe(
+    Match.tag("Ready", fn),
+    Match.orElse(() => ({ model })),
+  )
 
 const handleEntriesListed = (
   model: Model,
@@ -310,9 +313,9 @@ const handleNoFolderSelected = (
   }),
 })
 
-type HelpModalState = Extract<ModalState, { readonly _tag: "Help" }>
-type EditFileModalState = Extract<ModalState, { readonly _tag: "EditFile" }>
-type BinaryFileMode = Extract<EditFileModalState["fileMode"], { readonly _tag: "Binary" }>
+type HelpModalState = Parameters<Parameters<typeof ModalState.match>[1]["Help"]>[0]
+type EditFileModalState = Parameters<Parameters<typeof ModalState.match>[1]["EditFile"]>[0]
+type BinaryFileMode = Parameters<Parameters<typeof EditorFileMode.match>[1]["Binary"]>[0]
 
 const whenHelp = (
   model: Model,
@@ -464,29 +467,29 @@ export const update = (model: Model, message: Message) =>
             Match.tag("Closed", () => model.modalState),
             Match.orElse(() => ModalState.Closed()),
           )
-          if (!isReady(model.storageState)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () => nextModalState,
-              }),
-            }
-          }
-          const readyState = model.storageState
-          const isSamePath = isSameSubPath(readyState.subPath, subPath)
-
-          if (isSamePath) {
-            return {
-              model: modifyFields(model, {
-                modalState: () => nextModalState,
-              }),
-            }
-          }
-          return {
-            model: modifyFields(model, {
-              modalState: () => nextModalState,
+          return Match.value(model.storageState).pipe(
+            Match.tag("Ready", (readyState) => {
+              const isSamePath = isSameSubPath(readyState.subPath, subPath)
+              if (isSamePath) {
+                return {
+                  model: modifyFields(model, {
+                    modalState: () => nextModalState,
+                  }),
+                }
+              }
+              return {
+                model: modifyFields(model, {
+                  modalState: () => nextModalState,
+                }),
+                commands: [NavigateToSubfolder({ targetSubPath: subPath })],
+              }
             }),
-            commands: [NavigateToSubfolder({ targetSubPath: subPath })],
-          }
+            Match.orElse(() => ({
+              model: modifyFields(model, {
+                modalState: () => nextModalState,
+              }),
+            })),
+          )
         },
 
         New: ({ subPath, target }) => {
@@ -512,35 +515,34 @@ export const update = (model: Model, message: Message) =>
             return { model }
           }
 
-          if (!isReady(model.storageState)) {
-            return {
-              model: modifyFields(model, {
-                isSettingsOpen: () => false,
-                modalState: () => targetModalState,
-              }),
-            }
-          }
+          return Match.value(model.storageState).pipe(
+            Match.tag("Ready", (readyState) => {
+              const isSamePath = isSameSubPath(readyState.subPath, subPath)
+              if (isSamePath) {
+                return {
+                  model: modifyFields(model, {
+                    isSettingsOpen: () => false,
+                    modalState: () => targetModalState,
+                  }),
+                  commands: [FocusModalNameInput()],
+                }
+              }
 
-          const readyState = model.storageState
-          const isSamePath = isSameSubPath(readyState.subPath, subPath)
-
-          if (isSamePath) {
-            return {
-              model: modifyFields(model, {
-                isSettingsOpen: () => false,
-                modalState: () => targetModalState,
-              }),
-              commands: [FocusModalNameInput()],
-            }
-          }
-
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => targetModalState,
+              return {
+                model: modifyFields(model, {
+                  isSettingsOpen: () => false,
+                  modalState: () => targetModalState,
+                }),
+                commands: [NavigateToSubfolder({ targetSubPath: subPath }), FocusModalNameInput()],
+              }
             }),
-            commands: [NavigateToSubfolder({ targetSubPath: subPath }), FocusModalNameInput()],
-          }
+            Match.orElse(() => ({
+              model: modifyFields(model, {
+                isSettingsOpen: () => false,
+                modalState: () => targetModalState,
+              }),
+            })),
+          )
         },
 
         Edit: ({ subPath, name }) => {
@@ -554,42 +556,39 @@ export const update = (model: Model, message: Message) =>
             return { model }
           }
 
-          if (!isReady(model.storageState)) {
-            return { model }
-          }
+          return whenReady(model, (readyState) => {
+            const isSamePath = isSameSubPath(readyState.subPath, subPath)
 
-          const readyState = model.storageState
-          const isSamePath = isSameSubPath(readyState.subPath, subPath)
+            const maybeEntry = isSamePath
+              ? EntriesState.match(readyState.entriesState, {
+                  Loaded: ({ entries }) => Array.findFirst(entries, (e) => e.name === name),
+                  Loading: () => Option.none(),
+                  Error: () => Option.none(),
+                })
+              : Option.none()
 
-          const maybeEntry = isSamePath
-            ? EntriesState.match(readyState.entriesState, {
-                Loaded: ({ entries }) => Array.findFirst(entries, (e) => e.name === name),
-                Loading: () => Option.none(),
-                Error: () => Option.none(),
-              })
-            : Option.none()
+            if (Option.exists(maybeEntry, (entry) => entry.kind === "directory")) {
+              return {
+                model: modifyFields(model, {
+                  isSettingsOpen: () => false,
+                  modalState: () =>
+                    ModalState.EditFolder({
+                      originalName: name,
+                      name,
+                      maybeValidationError: Option.none(),
+                    }),
+                }),
+                commands: [FocusModalNameInput()],
+              }
+            }
 
-          if (Option.exists(maybeEntry, (entry) => entry.kind === "directory")) {
             return {
               model: modifyFields(model, {
                 isSettingsOpen: () => false,
-                modalState: () =>
-                  ModalState.EditFolder({
-                    originalName: name,
-                    name,
-                    maybeValidationError: Option.none(),
-                  }),
               }),
-              commands: [FocusModalNameInput()],
+              commands: [InspectFileForEditor({ entryName: name, subPath })],
             }
-          }
-
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-            }),
-            commands: [InspectFileForEditor({ entryName: name, subPath })],
-          }
+          })
         },
 
         Help: ({ maybeTopic }) => {
@@ -654,7 +653,11 @@ export const update = (model: Model, message: Message) =>
     },
 
     ClickedSelectFolder: () => {
-      if (isReady(model.storageState) && model.storageState.storageType === "opfs") {
+      const isOpfsReady = Match.value(model.storageState).pipe(
+        Match.tag("Ready", ({ storageType }) => storageType === "opfs"),
+        Match.orElse(() => false),
+      )
+      if (isOpfsReady) {
         return handleUseFsa(model)
       }
       const otherBackend = getOtherBackend(model.storageState)
@@ -900,28 +903,27 @@ export const update = (model: Model, message: Message) =>
 
       const subPath = currentSubPathFromStorageState(model.storageState)
 
-      if (Array.isReadonlyArrayEmpty(collisions)) {
-        return {
+      return Array.match(collisions, {
+        onEmpty: () => ({
           model,
           commands: [WritePendingImportFiles({ items: resolved, subPath })],
-        }
-      }
-
-      const [firstCollision, ...remainingCollisions] = collisions
-      const suggestedName = findFreeFileName(firstCollision.name, reservedNames)
-
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            ModalState.ImportConflict({
-              current: firstCollision,
-              suggestedName,
-              queue: remainingCollisions,
-              resolved,
-              applyToAll: false,
-            }),
         }),
-      }
+        onNonEmpty: ([firstCollision, ...remainingCollisions]) => {
+          const suggestedName = findFreeFileName(firstCollision.name, reservedNames)
+          return {
+            model: modifyFields(model, {
+              modalState: () =>
+                ModalState.ImportConflict({
+                  current: firstCollision,
+                  suggestedName,
+                  queue: remainingCollisions,
+                  resolved,
+                  applyToAll: false,
+                }),
+            }),
+          }
+        },
+      })
     },
 
     ToggledImportConflictApplyToAll: ({ applyToAll }) =>
@@ -994,30 +996,29 @@ export const update = (model: Model, message: Message) =>
             }
           }
 
-          if (Array.isReadonlyArrayEmpty(queue)) {
-            return {
+          return Array.match(queue, {
+            onEmpty: () => ({
               model: modifyFields(model, {
                 modalState: () => ModalState.Closed(),
               }),
               commands: [WritePendingImportFiles({ items: updatedResolved, subPath })],
-            }
-          }
-
-          const [nextCurrent, ...nextQueue] = queue
-          const nextSuggested = findFreeFileName(nextCurrent.name, reservedNames)
-
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                ModalState.ImportConflict({
-                  current: nextCurrent,
-                  suggestedName: nextSuggested,
-                  queue: nextQueue,
-                  resolved: updatedResolved,
-                  applyToAll: false,
-                }),
             }),
-          }
+            onNonEmpty: ([nextCurrent, ...nextQueue]) => {
+              const nextSuggested = findFreeFileName(nextCurrent.name, reservedNames)
+              return {
+                model: modifyFields(model, {
+                  modalState: () =>
+                    ModalState.ImportConflict({
+                      current: nextCurrent,
+                      suggestedName: nextSuggested,
+                      queue: nextQueue,
+                      resolved: updatedResolved,
+                      applyToAll: false,
+                    }),
+                }),
+              }
+            },
+          })
         }),
         Match.orElse(() => ({ model })),
       ),
@@ -1028,33 +1029,33 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
 
-    CompletedWritePendingImportFiles: ({ entries, maybeAlertBanner }) => {
-      if (!isReady(model.storageState)) {
-        return {
+    CompletedWritePendingImportFiles: ({ entries, maybeAlertBanner }) =>
+      Match.value(model.storageState).pipe(
+        Match.tag("Ready", (readyState) => {
+          const nextEntries = Array.isReadonlyArrayEmpty(entries)
+            ? EntriesState.match(readyState.entriesState, {
+                Loading: () => entries,
+                Loaded: ({ entries: existing }) => existing,
+                Error: () => entries,
+              })
+            : entries
+
+          return {
+            model: modifyFields(model, {
+              storageState: () =>
+                modifyFields(readyState, {
+                  entriesState: () => EntriesState.Loaded({ entries: nextEntries }),
+                }),
+              maybeAlertBanner: () => Option.orElse(maybeAlertBanner, () => model.maybeAlertBanner),
+            }),
+          }
+        }),
+        Match.orElse(() => ({
           model: modifyFields(model, {
             maybeAlertBanner: () => Option.orElse(maybeAlertBanner, () => model.maybeAlertBanner),
           }),
-        }
-      }
-      const readyState = model.storageState
-      const nextEntries = Array.isReadonlyArrayEmpty(entries)
-        ? EntriesState.match(readyState.entriesState, {
-            Loading: () => entries,
-            Loaded: ({ entries: existing }) => existing,
-            Error: () => entries,
-          })
-        : entries
-
-      return {
-        model: modifyFields(model, {
-          storageState: () =>
-            modifyFields(readyState, {
-              entriesState: () => EntriesState.Loaded({ entries: nextEntries }),
-            }),
-          maybeAlertBanner: () => Option.orElse(maybeAlertBanner, () => model.maybeAlertBanner),
-        }),
-      }
-    },
+        })),
+      ),
 
     // Editor Modal
     ClickedEditEntry: ({ entry }) => {
@@ -1675,47 +1676,43 @@ export const update = (model: Model, message: Message) =>
         },
       }),
 
-    SucceededSaveModalChanges: ({ entries }) => {
-      if (!isReady(model.storageState)) {
-        return {
+    SucceededSaveModalChanges: ({ entries }) =>
+      Match.value(model.storageState).pipe(
+        Match.tag("Ready", (readyState) => ({
+          model: modifyFields(model, {
+            storageState: () =>
+              modifyFields(readyState, {
+                entriesState: () => EntriesState.Loaded({ entries }),
+              }),
+            modalState: () => ModalState.Closed(),
+          }),
+          commands: [ReplaceUrl({ url: buildFolderUrl(readyState.subPath) })],
+        })),
+        Match.orElse(() => ({
           model: modifyFields(model, {
             modalState: () => ModalState.Closed(),
           }),
-        }
-      }
-      const readyState = model.storageState
-      return {
-        model: modifyFields(model, {
-          storageState: () =>
-            modifyFields(readyState, {
-              entriesState: () => EntriesState.Loaded({ entries }),
-            }),
-          modalState: () => ModalState.Closed(),
-        }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(readyState.subPath) })],
-      }
-    },
+        })),
+      ),
 
-    SucceededDeleteModalEntry: ({ entries }) => {
-      if (!isReady(model.storageState)) {
-        return {
+    SucceededDeleteModalEntry: ({ entries }) =>
+      Match.value(model.storageState).pipe(
+        Match.tag("Ready", (readyState) => ({
+          model: modifyFields(model, {
+            storageState: () =>
+              modifyFields(readyState, {
+                entriesState: () => EntriesState.Loaded({ entries }),
+              }),
+            modalState: () => ModalState.Closed(),
+          }),
+          commands: [ReplaceUrl({ url: buildFolderUrl(readyState.subPath) })],
+        })),
+        Match.orElse(() => ({
           model: modifyFields(model, {
             modalState: () => ModalState.Closed(),
           }),
-        }
-      }
-      const readyState = model.storageState
-      return {
-        model: modifyFields(model, {
-          storageState: () =>
-            modifyFields(readyState, {
-              entriesState: () => EntriesState.Loaded({ entries }),
-            }),
-          modalState: () => ModalState.Closed(),
-        }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(readyState.subPath) })],
-      }
-    },
+        })),
+      ),
 
     FailedSaveModalChanges: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
@@ -1740,7 +1737,7 @@ export const update = (model: Model, message: Message) =>
     // Help Modal
     ClickedOpenHelp: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      const isFolderViewVisible = isReady(model.storageState)
+      const isFolderViewVisible = isReadyStorage(model.storageState)
       const activeTopic: HelpTopic = isFolderViewVisible ? "api" : "fs"
       return {
         model: modifyFields(model, {

@@ -1,9 +1,12 @@
 import { Effect, Option, Schema, Stream } from "effect"
 import * as Dom from "foldkit/dom"
 import * as Subscription from "foldkit/subscription"
-import { type BeforeInstallPromptEvent, setDeferredInstallPrompt } from "./files"
+import { setDeferredInstallPrompt } from "./files"
 import { Message } from "./message"
 import { type Model, ModalState } from "./model"
+
+const isBeforeInstallPromptEvent = (event: Event): event is BeforeInstallPromptEvent =>
+  "prompt" in event && typeof event.prompt === "function" && "userChoice" in event
 
 export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
   escapeKey: entry(
@@ -75,7 +78,10 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       target: window,
       type: "beforeinstallprompt",
       filterMapEvent: (event) => {
-        setDeferredInstallPrompt(Option.some(event as BeforeInstallPromptEvent))
+        if (!isBeforeInstallPromptEvent(event)) {
+          return Option.none()
+        }
+        setDeferredInstallPrompt(Option.some(event))
         return Option.some(Message.CapturedInstallPrompt())
       },
     }),

@@ -10,18 +10,22 @@ interface FileSystemHandle {
   requestPermission?(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>
 }
 
-/**
- * Chromium-Ereignis, mit dem der Browser eine Installation der PWA anbietet.
- * Feuert nur, wenn die App noch nicht installiert ist -- genau daran erkennt
- * das Zahnrad-Menue, ob der Eintrag "App installieren" erscheinen soll.
- */
-interface InstallPromptEvent extends Event {
+interface FileSystemDirectoryHandle {
+  values?(): AsyncIterableIterator<FileSystemDirectoryHandle | FileSystemFileHandle>
+  entries?(): AsyncIterableIterator<[string, FileSystemDirectoryHandle | FileSystemFileHandle]>
+}
+
+interface BeforeInstallPromptEvent extends Event {
+  readonly platforms?: ReadonlyArray<string>
+  readonly userChoice: Promise<{
+    readonly outcome: "accepted" | "dismissed"
+    readonly platform: string
+  }>
   prompt(): Promise<void>
-  readonly userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>
 }
 
 interface WindowEventMap {
-  beforeinstallprompt: InstallPromptEvent
+  beforeinstallprompt: BeforeInstallPromptEvent
   appinstalled: Event
 }
 

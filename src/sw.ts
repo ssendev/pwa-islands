@@ -97,7 +97,6 @@ function fileResponse(saved: SavedFile): Response {
 }
 
 function isInternalPath(pathname: string): boolean {
-  // Immer ausgenommen: Dateien der App selbst.
   if (
     pathname === "/api.js" ||
     pathname === "/api.d.ts" ||
@@ -109,7 +108,6 @@ function isInternalPath(pathname: string): boolean {
     return true
   }
 
-  // Nur im Entwicklungsmodus vorhanden (Vite-Modulgraph).
   if (import.meta.env.DEV) {
     return (
       pathname.startsWith("/src/") ||

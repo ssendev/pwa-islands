@@ -1,4 +1,4 @@
-import { Array, Option } from "effect"
+import { Array, Option, Order } from "effect"
 import {
   BinaryEdit,
   EditorFileMode,
@@ -10,6 +10,7 @@ import {
 import {
   OPFS_APP_FOLDER,
   clearStoredDirectoryHandle,
+  collectDirectoryHandles,
   getOPFSDirectoryHandle,
   getStoredDirectoryHandle,
   getStoredFileInfoVisible,
@@ -21,20 +22,6 @@ import {
 import { checkTextBytes } from "./text"
 
 // CAPABILITIES
-
-interface IterableDirectoryCapable {
-  values?: () => AsyncIterableIterator<FileSystemDirectoryHandle | FileSystemFileHandle>
-  entries?: () => AsyncIterableIterator<[string, FileSystemDirectoryHandle | FileSystemFileHandle]>
-}
-
-export interface BeforeInstallPromptEvent extends Event {
-  readonly platforms?: ReadonlyArray<string>
-  readonly userChoice: Promise<{
-    readonly outcome: "accepted" | "dismissed"
-    readonly platform: string
-  }>
-  prompt(): Promise<void>
-}
 
 export const supportsDirectoryPicker = (): boolean =>
   typeof window !== "undefined" && typeof window.showDirectoryPicker === "function"
@@ -160,6 +147,14 @@ export const base64ToUint8Array = (base64: string): Uint8Array<ArrayBuffer> => {
   return Uint8Array.from(binaryString, (char) => char.charCodeAt(0))
 }
 
+const fileEntryOrder: Order.Order<FileEntry> = Order.make((a, b) => {
+  if (a.kind !== b.kind) {
+    return a.kind === "directory" ? -1 : 1
+  }
+  const cmp = a.name.localeCompare(b.name, "de", { sensitivity: "base" })
+  return cmp < 0 ? -1 : cmp > 0 ? 1 : 0
+})
+
 // STORAGE BACKEND
 
 /**
@@ -195,18 +190,7 @@ export class FileSystemHandleStorage {
     source: FileSystemDirectoryHandle,
     target: FileSystemDirectoryHandle,
   ): Promise<void> {
-    const iterable = source as unknown as IterableDirectoryCapable
-    const handles: Array<FileSystemDirectoryHandle | FileSystemFileHandle> = []
-
-    if (typeof iterable.values === "function") {
-      for await (const entry of iterable.values()) {
-        handles.push(entry)
-      }
-    } else if (typeof iterable.entries === "function") {
-      for await (const [, entry] of iterable.entries()) {
-        handles.push(entry)
-      }
-    }
+    const handles = await collectDirectoryHandles(source).catch(() => [])
 
     await Array.reduce(handles, Promise.resolve(), async (previous, handle) => {
       await previous
@@ -229,20 +213,7 @@ export class FileSystemHandleStorage {
 
   async listEntries(subPath: ReadonlyArray<string>): Promise<ReadonlyArray<FileEntry>> {
     const dir = await this.getDirectoryHandle(subPath)
-    const iterable = dir as unknown as IterableDirectoryCapable
-
-    const rawHandles: Array<FileSystemDirectoryHandle | FileSystemFileHandle> = []
-    if (typeof iterable.values === "function") {
-      for await (const entry of iterable.values()) {
-        rawHandles.push(entry)
-      }
-    } else if (typeof iterable.entries === "function") {
-      for await (const [, entry] of iterable.entries()) {
-        rawHandles.push(entry)
-      }
-    } else {
-      throw new Error("Das Verzeichnis-Handle unterstützt keine Iteration über Einträge.")
-    }
+    const rawHandles = await collectDirectoryHandles(dir)
 
     const entries: ReadonlyArray<FileEntry> = await Promise.all(
       Array.map(rawHandles, async (entry) => {
@@ -273,14 +244,7 @@ export class FileSystemHandleStorage {
       }),
     )
 
-    const sortedEntries = [...entries].sort((a, b) => {
-      if (a.kind !== b.kind) {
-        return a.kind === "directory" ? -1 : 1
-      }
-      return a.name.localeCompare(b.name, "de", { sensitivity: "base" })
-    })
-
-    return sortedEntries
+    return Array.sort(entries, fileEntryOrder)
   }
 
   async inspectFile(subPath: ReadonlyArray<string>, name: string): Promise<FileInspection> {

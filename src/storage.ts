@@ -89,6 +89,9 @@ export async function clearStoredDirectoryHandle(): Promise<void> {
   })
 }
 
+const isStoredStorageType = (value: unknown): value is "fsa" | "opfs" =>
+  value === "fsa" || value === "opfs"
+
 export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opfs">> {
   try {
     const db = await openDB()
@@ -97,8 +100,7 @@ export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opf
       const store = tx.objectStore(STORE_NAME)
       const req = store.get(STORAGE_TYPE_KEY)
 
-      req.onsuccess = () =>
-        resolve(Option.fromNullishOr(req.result as "fsa" | "opfs" | null | undefined))
+      req.onsuccess = () => resolve(Option.liftPredicate(req.result, isStoredStorageType))
       req.onerror = () => reject(req.error)
     })
   } catch (error) {
@@ -178,6 +180,26 @@ export async function getOPFSDirectoryHandle(): Promise<Option.Option<FileSystem
     }
   }
   return Option.none()
+}
+
+export async function collectDirectoryHandles(
+  dir: FileSystemDirectoryHandle,
+): Promise<ReadonlyArray<FileSystemDirectoryHandle | FileSystemFileHandle>> {
+  if (typeof dir.values === "function") {
+    const handles: Array<FileSystemDirectoryHandle | FileSystemFileHandle> = []
+    for await (const entry of dir.values()) {
+      handles.push(entry)
+    }
+    return handles
+  }
+  if (typeof dir.entries === "function") {
+    const handles: Array<FileSystemDirectoryHandle | FileSystemFileHandle> = []
+    for await (const [, handle] of dir.entries()) {
+      handles.push(handle)
+    }
+    return handles
+  }
+  throw new Error("Das Verzeichnis-Handle unterstützt keine Iteration über Einträge.")
 }
 
 export const DEFAULT_INDEX_FILE = "index.html"

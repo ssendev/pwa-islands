@@ -1,5 +1,11 @@
-import { Array, Option } from "effect"
-import { findActiveStorage, normalizePath, splitPath, getDirectory } from "./storage.ts"
+import { Array, Option, Order } from "effect"
+import {
+  collectDirectoryHandles,
+  findActiveStorage,
+  getDirectory,
+  normalizePath,
+  splitPath,
+} from "./storage.ts"
 import { readTextOrThrow } from "./text.ts"
 import type { IslandEntry, IslandsApi } from "./api-types.ts"
 
@@ -45,32 +51,34 @@ function splitEntryPath(path: string): { dirs: ReadonlyArray<string>; name: stri
   }
 }
 
+const islandEntryOrder: Order.Order<IslandEntry> = Order.make((a, b) => {
+  if (a.kind !== b.kind) {
+    return a.kind === "directory" ? -1 : 1
+  }
+  const cmp = a.name.localeCompare(b.name, "de", { sensitivity: "base", numeric: true })
+  return cmp < 0 ? -1 : cmp > 0 ? 1 : 0
+})
+
 const api: IslandsApi = {
   async list(path = "") {
     const dir = await resolveDirectory(path)
-    const entries: Array<IslandEntry> = []
+    const handles = await collectDirectoryHandles(dir)
 
-    for await (const entry of dir.values()) {
-      const entryPath = path ? `${normalizePath(path)}/${entry.name}` : entry.name
-      if (entry.kind === "file") {
-        const stats = await entry
-          .getFile()
-          .then((file) => ({ size: file.size, lastModified: file.lastModified }))
-          .catch(() => ({ size: undefined, lastModified: undefined }))
-        entries.push({ name: entry.name, path: entryPath, kind: "file", ...stats })
-      } else {
-        entries.push({ name: entry.name, path: entryPath, kind: "directory" })
-      }
-    }
+    const entries: ReadonlyArray<IslandEntry> = await Promise.all(
+      Array.map(handles, async (entry): Promise<IslandEntry> => {
+        const entryPath = path ? `${normalizePath(path)}/${entry.name}` : entry.name
+        if (entry.kind === "file") {
+          const stats = await entry
+            .getFile()
+            .then((file) => ({ size: file.size, lastModified: file.lastModified }))
+            .catch(() => ({ size: undefined, lastModified: undefined }))
+          return { name: entry.name, path: entryPath, kind: "file", ...stats }
+        }
+        return { name: entry.name, path: entryPath, kind: "directory" }
+      }),
+    )
 
-    entries.sort((a, b) => {
-      if (a.kind !== b.kind) {
-        return a.kind === "directory" ? -1 : 1
-      }
-      return a.name.localeCompare(b.name, "de", { sensitivity: "base", numeric: true })
-    })
-
-    return entries
+    return Array.sort(entries, islandEntryOrder)
   },
 
   async read(path, options) {
@@ -158,7 +166,9 @@ async function copyDirectory(
   name: string,
 ): Promise<void> {
   const destDir = await target.getDirectoryHandle(name, { create: true })
-  for await (const entry of source.values()) {
+  const entries = await collectDirectoryHandles(source)
+  await Array.reduce(entries, Promise.resolve(), async (previous, entry) => {
+    await previous
     if (entry.kind === "file") {
       const blob = await entry.getFile()
       const fileHandle = await destDir.getFileHandle(entry.name, { create: true })
@@ -171,7 +181,7 @@ async function copyDirectory(
     } else {
       await copyDirectory(entry, destDir, entry.name)
     }
-  }
+  })
 }
 
 export default api
