@@ -482,6 +482,31 @@ export async function readTextOrThrow(blob: Blob, path: string): Promise<string>
   return result.kind === "text" ? result.text : ""
 }
 
+export async function copyDirectory(
+  source: FileSystemDirectoryHandle,
+  target: FileSystemDirectoryHandle,
+  name?: string,
+): Promise<void> {
+  const destDir =
+    name !== undefined ? await target.getDirectoryHandle(name, { create: true }) : target
+  const entries = await collectDirectoryHandles(source).catch(() => [])
+  await Array.reduce(entries, Promise.resolve(), async (previous, entry) => {
+    await previous
+    if (entry.kind === "file") {
+      const blob = await entry.getFile()
+      const fileHandle = await destDir.getFileHandle(entry.name, { create: true })
+      const writable = await fileHandle.createWritable()
+      try {
+        await writable.write(blob)
+      } finally {
+        await writable.close()
+      }
+    } else {
+      await copyDirectory(entry, destDir, entry.name)
+    }
+  })
+}
+
 function decodeUtf8Strict(bytes: Uint8Array): Option.Option<string> {
   try {
     return Option.some(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes))

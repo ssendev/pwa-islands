@@ -5,6 +5,7 @@ import {
   checkTextBytes,
   clearStoredDirectoryHandle,
   collectDirectoryHandles,
+  copyDirectory,
   getOPFSDirectoryHandle,
   getStoredDirectoryHandle,
   getStoredFileInfoVisible,
@@ -208,31 +209,6 @@ export class FileSystemHandleStorage {
     )
   }
 
-  private async copyDirectoryRecursive(
-    source: FileSystemDirectoryHandle,
-    target: FileSystemDirectoryHandle,
-  ): Promise<void> {
-    const handles = await collectDirectoryHandles(source).catch(() => [])
-
-    await Array.reduce(handles, Promise.resolve(), async (previous, handle) => {
-      await previous
-      if (handle.kind === "file") {
-        const file = await handle.getFile()
-        const newFileHandle = await target.getFileHandle(handle.name, {
-          create: true,
-        })
-        const writable = await newFileHandle.createWritable()
-        await writable.write(await file.arrayBuffer())
-        await writable.close()
-      } else {
-        const newSubDir = await target.getDirectoryHandle(handle.name, {
-          create: true,
-        })
-        await this.copyDirectoryRecursive(handle, newSubDir)
-      }
-    })
-  }
-
   async listEntries(subPath: ReadonlyArray<string>): Promise<ReadonlyArray<FileEntry>> {
     const dir = await this.getDirectoryHandle(subPath)
     const rawHandles = await collectDirectoryHandles(dir)
@@ -363,7 +339,7 @@ export class FileSystemHandleStorage {
     const dir = await this.getDirectoryHandle(subPath)
     const oldDirHandle = await dir.getDirectoryHandle(oldName)
     const newDirHandle = await dir.getDirectoryHandle(newName, { create: true })
-    await this.copyDirectoryRecursive(oldDirHandle, newDirHandle)
+    await copyDirectory(oldDirHandle, newDirHandle)
     await dir.removeEntry(oldName, { recursive: true })
   }
 

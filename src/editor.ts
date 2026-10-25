@@ -118,7 +118,6 @@ export const Message = defineMessageUnion({
     message: Schema.String,
   },
   CompletedFocusNameInput: {},
-  CompletedRevokeActivePreviewUrl: {},
 })
 export type Message = typeof Message.Type
 
@@ -154,14 +153,6 @@ const BinaryOrText = (
         Editing: ({ content }) => handlers.binaryEditing(content),
       }),
   })
-
-export const RevokeActivePreviewUrl = Command.define("RevokeActivePreviewUrl", {
-  messages: [Message.CompletedRevokeActivePreviewUrl],
-  execute: Effect.sync(() => {
-    revokeActivePreviewUrl()
-    return Message.CompletedRevokeActivePreviewUrl()
-  }),
-})
 
 export const FocusNameInput = Command.define("FocusNameInput", {
   messages: [Message.CompletedFocusNameInput],
@@ -789,11 +780,6 @@ export const update = (
     }),
 
     CompletedFocusNameInput: () => ({
-      model,
-      outMessage: OutMessage.None(),
-    }),
-
-    CompletedRevokeActivePreviewUrl: () => ({
       model,
       outMessage: OutMessage.None(),
     }),

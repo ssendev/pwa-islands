@@ -8,6 +8,7 @@ import { defineMessageUnion } from "foldkit/message"
 import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
 import * as Editor from "./editor"
+import { AlertBanner } from "./editor"
 import {
   BinaryEdit,
   EditorFileMode,
@@ -25,17 +26,9 @@ import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
 import type { FileSystemHandleStorage } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
+export { AlertVariant, AlertBanner } from "./editor"
 
 // MODEL
-
-export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
-export type AlertVariant = typeof AlertVariant.Type
-
-export const AlertBanner = Schema.Struct({
-  message: Schema.String,
-  variant: AlertVariant,
-})
-export type AlertBanner = typeof AlertBanner.Type
 
 export const PendingImportFile = Schema.Struct({
   name: Schema.String,

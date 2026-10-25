@@ -1,6 +1,7 @@
 import { Array, Option, Order } from "effect"
 import {
   collectDirectoryHandles,
+  copyDirectory,
   findActiveStorage,
   getDirectory,
   normalizePath,
@@ -158,30 +159,6 @@ const api: IslandsApi = {
       await writable.close()
     }
   },
-}
-
-async function copyDirectory(
-  source: FileSystemDirectoryHandle,
-  target: FileSystemDirectoryHandle,
-  name: string,
-): Promise<void> {
-  const destDir = await target.getDirectoryHandle(name, { create: true })
-  const entries = await collectDirectoryHandles(source)
-  await Array.reduce(entries, Promise.resolve(), async (previous, entry) => {
-    await previous
-    if (entry.kind === "file") {
-      const blob = await entry.getFile()
-      const fileHandle = await destDir.getFileHandle(entry.name, { create: true })
-      const writable = await fileHandle.createWritable()
-      try {
-        await writable.write(blob)
-      } finally {
-        await writable.close()
-      }
-    } else {
-      await copyDirectory(entry, destDir, entry.name)
-    }
-  })
 }
 
 export default api
