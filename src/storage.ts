@@ -535,25 +535,38 @@ export const FS_TEMPLATES_FOLDER = "Vorlagen"
 export const OPFS_TEMPLATES_FOLDER = "PWA Islands Vorlagen"
 
 async function getTemplatesDir(
-  type: "opfs" | "fsapi" | string,
+  type: string,
   rootHandle: FileSystemDirectoryHandle,
+  create: boolean,
 ): Promise<FileSystemDirectoryHandle> {
   if (type === "opfs") {
     const realRoot = await navigator.storage.getDirectory()
-    return realRoot.getDirectoryHandle(OPFS_TEMPLATES_FOLDER, { create: true })
+    return realRoot.getDirectoryHandle(OPFS_TEMPLATES_FOLDER, { create })
   }
-  return rootHandle.getDirectoryHandle(FS_TEMPLATES_FOLDER, { create: true })
+  return rootHandle.getDirectoryHandle(FS_TEMPLATES_FOLDER, { create })
 }
 
-const templateFileName = (t: StoredUserTemplate): string =>
-  t.label.trim().replace(/[\\/]+/g, "_") || "Vorlage"
+// NOTE: label doubles as file name; strip chars illegal on common filesystems
+export const sanitizeTemplateName = (label: string): string => {
+  const noControl = Array.join(
+    Array.filter(Array.fromIterable(label), (ch) => ch.charCodeAt(0) >= 32),
+    "",
+  )
+  const cleaned = noControl
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .trim()
+    .replace(/[. ]+$/, "")
+  return cleaned === "" ? "Vorlage" : cleaned
+}
+
+const templateFileName = (t: StoredUserTemplate): string => sanitizeTemplateName(t.label)
 
 export async function getStoredUserTemplates(
   type: string,
   rootHandle: FileSystemDirectoryHandle,
 ): Promise<ReadonlyArray<StoredUserTemplate>> {
   try {
-    const dir = await getTemplatesDir(type, rootHandle)
+    const dir = await getTemplatesDir(type, rootHandle, false)
     const handles = await collectDirectoryHandles(dir)
     const results = await Promise.all(
       Array.map(
@@ -580,6 +593,7 @@ export async function getStoredUserTemplates(
     )
     return Array.flatten(results)
   } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") return []
     console.error("Fehler beim Abrufen der Benutzervorlagen:", error)
     return []
   }
@@ -590,7 +604,7 @@ export async function storeUserTemplates(
   rootHandle: FileSystemDirectoryHandle,
   templates: ReadonlyArray<StoredUserTemplate>,
 ): Promise<void> {
-  const dir = await getTemplatesDir(type, rootHandle)
+  const dir = await getTemplatesDir(type, rootHandle, true)
   const wanted = new Set(Array.map(templates, templateFileName))
   const existing = await collectDirectoryHandles(dir)
   await Promise.all(

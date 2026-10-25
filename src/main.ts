@@ -958,7 +958,12 @@ const handleStorageActivated = (
           onSome: (alert) => Option.some(alert),
         }),
     }),
-    commands: [toModalCommand(Modal.LoadEditorUserTemplates)],
+    commands: Option.exists(
+      payload.maybeModalState,
+      (modal) => modal._tag === "Editor" && modal.editor._tag === "CreateFile",
+    )
+      ? [toModalCommand(Modal.LoadEditorUserTemplates)]
+      : [],
   }
 }
 
@@ -1258,6 +1263,8 @@ export const update = (
 
         New: ({ subPath, target }) => {
           const newModalState = Modal.openCreate(target)
+          const templateLoadCommands =
+            target === "file" ? [toModalCommand(Modal.LoadEditorUserTemplates)] : []
 
           return whenReady(model, (readyState) => {
             const isSamePath = isSameSubPath(readyState.subPath, subPath)
@@ -1267,10 +1274,7 @@ export const update = (
                   isSettingsOpen: () => false,
                   modalState: () => newModalState,
                 }),
-                commands: [
-                  toModalCommand(Modal.FocusModalNameInput()),
-                  toModalCommand(Modal.LoadEditorUserTemplates),
-                ],
+                commands: [toModalCommand(Modal.FocusModalNameInput()), ...templateLoadCommands],
               }
             }
             return {
@@ -1285,7 +1289,7 @@ export const update = (
               commands: [
                 NavigateToSubfolder({ targetSubPath: subPath }),
                 toModalCommand(Modal.FocusModalNameInput()),
-                toModalCommand(Modal.LoadEditorUserTemplates),
+                ...templateLoadCommands,
               ],
             }
           })

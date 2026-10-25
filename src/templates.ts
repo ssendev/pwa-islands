@@ -148,7 +148,7 @@ export const BUILTIN_TEMPLATES: ReadonlyArray<StarterTemplate> = [
     id: "builtin:json",
     label: "JSON-Datei",
     defaultFileName: "daten.json",
-    content: `{\n  "hallo": [1,2,3]\n  "welt": "!"\n}\n`,
+    content: `{\n  "hallo": [1,2,3],\n  "welt": "!"\n}\n`,
     isBuiltin: true,
   },
   {

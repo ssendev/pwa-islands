@@ -17,7 +17,7 @@ import {
   requireActiveStorage,
   revokeActivePreviewUrl,
 } from "./files"
-import { getStoredUserTemplates, storeUserTemplates } from "./storage"
+import { getStoredUserTemplates, sanitizeTemplateName, storeUserTemplates } from "./storage"
 import { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate } from "./templates"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
@@ -570,21 +570,23 @@ export const update = (
         }
       }),
 
-    GeneratedTemplateTimestamp: ({ timestamp }) =>
+    GeneratedTemplateTimestamp: () =>
       whenCreateFile(model, (state) => {
         const trimmedLabel = state.newTemplateLabel.trim()
         if (!trimmedLabel) {
           return { model: state, outMessage: OutMessage.None() }
         }
-        const id = `user:${trimmedLabel.toLowerCase().replace(/\s+/g, "-")}-${timestamp}`
+        // NOTE: name, id and file name must match what storage reloads from disk
+        const name = sanitizeTemplateName(trimmedLabel)
+        const id = `user:${name}`
         const newTemplate: StarterTemplate = {
           id,
-          label: trimmedLabel,
-          defaultFileName: state.name.trim() || "Neu.html",
+          label: name,
+          defaultFileName: name,
           content: state.content,
           isBuiltin: false,
         }
-        const nextTemplates = [...state.userTemplates, newTemplate]
+        const nextTemplates = [...state.userTemplates.filter((t) => t.id !== id), newTemplate]
         return {
           model: modifyFields(state, {
             userTemplates: () => nextTemplates,

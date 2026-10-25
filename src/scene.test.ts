@@ -87,6 +87,7 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolveAll(
         [PushUrl, Message.CompletedPushUrl()],
         [Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()],
+        [Editor.LoadUserTemplates, Editor.Message.CompletedLoadUserTemplates({ templates: [] })],
       ),
       sceneExpect(selector(".modal-title")).toHaveText("Neue Datei erstellen"),
       type(selector("#modal-file-name"), "hallo.html"),

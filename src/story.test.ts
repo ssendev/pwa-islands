@@ -732,8 +732,16 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(Message.ClickedNewFile()),
-        Command.expectExact(PushUrl({ url: "/?pwaislands=new" }), FocusModalNameInput()),
+        Command.expectExact(
+          PushUrl({ url: "/?pwaislands=new" }),
+          FocusModalNameInput(),
+          Editor.LoadUserTemplates(),
+        ),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        Command.resolve(
+          Editor.LoadUserTemplates,
+          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
+        ),
         Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
@@ -779,7 +787,11 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(Message.ChangedUrl({ url: newUrl })),
-        Command.expectExact(FocusModalNameInput()),
+        Command.expectExact(FocusModalNameInput(), Editor.LoadUserTemplates()),
+        Command.resolve(
+          Editor.LoadUserTemplates,
+          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
+        ),
         Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
