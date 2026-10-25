@@ -31,12 +31,14 @@ import type { FileEntry } from "./route"
 
 const sampleEntries: ReadonlyArray<FileEntry> = [
   {
+    id: "directory:projekte",
     name: "projekte",
     kind: "directory",
     maybeSize: Option.none(),
     maybeLastModified: Option.none(),
   },
   {
+    id: "file:index.html",
     name: "index.html",
     kind: "file",
     maybeSize: Option.some(512),
@@ -67,6 +69,7 @@ describe("PWA Islands Scene Tests", () => {
     const updatedEntries: ReadonlyArray<FileEntry> = [
       ...sampleEntries,
       {
+        id: "file:hallo.html",
         name: "hallo.html",
         kind: "file",
         maybeSize: Option.some(24),

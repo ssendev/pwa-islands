@@ -48,12 +48,14 @@ const helpMsg = (m: Help.Message) =>
 
 const sampleEntries: ReadonlyArray<FileEntry> = [
   {
+    id: "directory:projekte",
     name: "projekte",
     kind: "directory",
     maybeSize: Option.none(),
     maybeLastModified: Option.none(),
   },
   {
+    id: "file:index.html",
     name: "index.html",
     kind: "file",
     maybeSize: Option.some(512),
@@ -185,6 +187,7 @@ describe("PWA Islands Story Tests", () => {
     it("navigates into directory via PushUrl and ChangedUrl", () => {
       const subEntries: ReadonlyArray<FileEntry> = [
         {
+          id: "file:app.html",
           name: "app.html",
           kind: "file",
           maybeSize: Option.some(128),
@@ -573,18 +576,21 @@ describe("PWA Islands Story Tests", () => {
           entriesState: EntriesState.Loaded({
             entries: [
               {
+                id: "file:file1.html",
                 name: "file1.html",
                 kind: "file" as const,
                 maybeSize: Option.some(100),
                 maybeLastModified: Option.some(1000),
               },
               {
+                id: "file:file2.html",
                 name: "file2.html",
                 kind: "file" as const,
                 maybeSize: Option.some(100),
                 maybeLastModified: Option.some(1000),
               },
               {
+                id: "file:file3.html",
                 name: "file3.html",
                 kind: "file" as const,
                 maybeSize: Option.some(100),
@@ -757,6 +763,7 @@ describe("PWA Islands Story Tests", () => {
       it("switches from FSA to OPFS remembering FSA state in otherBackend", () => {
         const opfsEntries: ReadonlyArray<FileEntry> = [
           {
+            id: "file:opfs-app.html",
             name: "opfs-app.html",
             kind: "file",
             maybeSize: Option.some(256),

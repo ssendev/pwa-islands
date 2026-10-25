@@ -12,6 +12,7 @@ export const FileEntryKind = Schema.Literals(["file", "directory"])
 export type FileEntryKind = typeof FileEntryKind.Type
 
 export const FileEntry = Schema.Struct({
+  id: Schema.String,
   name: Schema.String,
   kind: FileEntryKind,
   maybeSize: Schema.Option(Schema.Number),

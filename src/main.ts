@@ -1533,7 +1533,14 @@ export const update = (
     },
 
     ClickedSelectFolder: () => {
-      if (model.storageState._tag === "Ready" && model.storageState.storageType === "opfs") {
+      const isOpfsReady = StorageState.match(model.storageState, {
+        Ready: ({ storageType }) => storageType === "opfs",
+        Initializing: () => false,
+        Unsupported: () => false,
+        NoFolderSelected: () => false,
+        PermissionRequired: () => false,
+      })
+      if (isOpfsReady) {
         return handleUseFsa(model)
       }
       const otherBackend = getOtherBackend(model.storageState)
@@ -1968,7 +1975,7 @@ export const update = (
 
       return Modal.OutMessage.match(modalResult.outMessage, {
         None: () =>
-          mappedCommands.length > 0
+          Array.isReadonlyArrayNonEmpty(mappedCommands)
             ? {
                 model: modifyFields(model, {
                   modalState: () => modalResult.model,
@@ -2006,10 +2013,9 @@ export const update = (
             Match.orElse(() => model.storageState),
           )
 
-          const commands: Array<Command.Command<Message>> = [...mappedCommands]
-          if (shouldReplaceUrl) {
-            commands.push(ReplaceUrl({ url: buildFolderUrl(subPath) }))
-          }
+          const commands: ReadonlyArray<Command.Command<Message>> = shouldReplaceUrl
+            ? [...mappedCommands, ReplaceUrl({ url: buildFolderUrl(subPath) })]
+            : mappedCommands
 
           return {
             model: modifyFields(model, {
@@ -2026,10 +2032,9 @@ export const update = (
         },
 
         ShowAlert: ({ banner, replaceUrl: shouldReplaceUrl }) => {
-          const commands: Array<Command.Command<Message>> = [...mappedCommands]
-          if (shouldReplaceUrl) {
-            commands.push(ReplaceUrl({ url: buildFolderUrl(subPath) }))
-          }
+          const commands: ReadonlyArray<Command.Command<Message>> = shouldReplaceUrl
+            ? [...mappedCommands, ReplaceUrl({ url: buildFolderUrl(subPath) })]
+            : mappedCommands
           return {
             model: modifyFields(model, {
               modalState: () => modalResult.model,
@@ -2582,7 +2587,7 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
       })
 
   return h.keyed("tr")(
-    entry.name,
+    entry.id,
     [
       h.Class(`file-row ${isDir ? "is-directory" : "is-file"}`),
       h.DataAttribute("entry", entry.name),

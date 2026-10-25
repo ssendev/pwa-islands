@@ -212,10 +212,12 @@ export class FileSystemHandleStorage {
 
     const entries: ReadonlyArray<FileEntry> = await Promise.all(
       Array.map(rawHandles, async (entry) => {
+        const id = `${entry.kind}:${entry.name}`
         if (entry.kind === "file") {
           try {
             const file = await entry.getFile()
             return {
+              id,
               name: entry.name,
               kind: "file" as const,
               maybeSize: Option.some(file.size),
@@ -223,6 +225,7 @@ export class FileSystemHandleStorage {
             }
           } catch {
             return {
+              id,
               name: entry.name,
               kind: "file" as const,
               maybeSize: Option.none(),
@@ -231,6 +234,7 @@ export class FileSystemHandleStorage {
           }
         }
         return {
+          id,
           name: entry.name,
           kind: "directory" as const,
           maybeSize: Option.none(),

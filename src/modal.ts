@@ -543,7 +543,7 @@ export const update = (
             : []
           return Help.OutMessage.match(helpResult.outMessage, {
             None: () =>
-              mappedCommands.length > 0
+              Array.isReadonlyArrayNonEmpty(mappedCommands)
                 ? {
                     model: ModalState.Help({ help: helpResult.model }),
                     commands: mappedCommands,
@@ -554,7 +554,7 @@ export const update = (
                     outMessage: OutMessage.None(),
                   },
             ReplaceUrl: ({ url }) =>
-              mappedCommands.length > 0
+              Array.isReadonlyArrayNonEmpty(mappedCommands)
                 ? {
                     model: ModalState.Help({ help: helpResult.model }),
                     commands: mappedCommands,

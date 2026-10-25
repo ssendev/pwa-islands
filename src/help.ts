@@ -245,7 +245,6 @@ export const view = (
               h.div(
                 [h.Class("help-accordion")],
                 [
-                  // Topic 1: API
                   h.details(
                     [
                       h.Class("help-topic"),
@@ -454,7 +453,6 @@ export const view = (
                     ],
                   ),
 
-                  // Topic 2: File System & Storage
                   h.details(
                     [
                       h.Class("help-topic"),
