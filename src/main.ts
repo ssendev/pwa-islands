@@ -24,6 +24,7 @@ import {
   ReplaceUrl,
   SaveFileInfoPreference,
   SaveModalChanges,
+  ScrollHelpTopicIntoView,
   SelectImportFiles,
   TriggerInstallAppPrompt,
   WaitBeforeResetCopyDts,
@@ -553,6 +554,7 @@ export const update = (model: Model, message: Message) =>
     CompletedReplaceUrl: () => ({ model }),
     CompletedLoadUrl: () => ({ model }),
     CompletedFocusModalNameInput: () => ({ model }),
+    CompletedScrollHelpTopicIntoView: () => ({ model }),
 
     // Settings & Storage Actions
     ClickedToggleSettings: () => ({
@@ -1626,6 +1628,11 @@ export const update = (model: Model, message: Message) =>
             ? Option.some<HelpTopic>("fs")
             : Option.none()
 
+      const replaceUrlCommand = ReplaceUrl({ url: buildHelpUrl(subPath, maybeActiveTopic) })
+      const commands = isOpen
+        ? [replaceUrlCommand, ScrollHelpTopicIntoView({ topic })]
+        : [replaceUrlCommand]
+
       return {
         model: modifyFields(model, {
           modalState: () =>
@@ -1634,7 +1641,7 @@ export const update = (model: Model, message: Message) =>
               isFsOpen: () => nextIsFsOpen,
             }),
         }),
-        commands: [ReplaceUrl({ url: buildHelpUrl(subPath, maybeActiveTopic) })],
+        commands,
       }
     },
 

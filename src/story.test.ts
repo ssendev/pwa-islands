@@ -15,6 +15,7 @@ import {
   ReplaceUrl,
   SaveFileInfoPreference,
   SaveModalChanges,
+  ScrollHelpTopicIntoView,
   WaitBeforeResetCopyDts,
   WritePendingImportFiles,
 } from "./command"
@@ -255,8 +256,12 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
-        Command.expectExact(ReplaceUrl({ url: "/?pwaislands=help-fs" })),
+        Command.expectExact(
+          ReplaceUrl({ url: "/?pwaislands=help-fs" }),
+          ScrollHelpTopicIntoView({ topic: "fs" }),
+        ),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        Command.resolve(ScrollHelpTopicIntoView, Message.CompletedScrollHelpTopicIntoView()),
         message(Message.ToggledHelpTopic({ topic: "fs", isOpen: false })),
         model((m) => {
           expect(m.modalState).toEqual(

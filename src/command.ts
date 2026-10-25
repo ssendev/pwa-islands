@@ -36,6 +36,7 @@ import {
   AppRoute,
   CopyDtsState,
   type FileEntry,
+  HelpTopic,
   ModalState,
   OPFS_APP_FOLDER,
   ResolvedImportItem,
