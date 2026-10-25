@@ -30,6 +30,7 @@ import {
   type Model,
   ModalState,
   OPFS_APP_FOLDER,
+  OverwriteSource,
   SavedBackend,
   StorageState,
 } from "./model"
@@ -100,8 +101,7 @@ describe("PWA Islands Story Tests", () => {
       expect(result.model.storageState._tag).toBe("Initializing")
       expect(result.model.modalState).toEqual(
         ModalState.Help({
-          isApiOpen: false,
-          isFsOpen: true,
+          maybeOpenTopic: Option.some("fs"),
           copyDtsState: CopyDtsState.Idle(),
         }),
       )
@@ -218,8 +218,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              isApiOpen: true,
-              isFsOpen: false,
+              maybeOpenTopic: Option.some("api"),
               copyDtsState: CopyDtsState.Copying(),
             }),
           )
@@ -229,8 +228,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              isApiOpen: true,
-              isFsOpen: false,
+              maybeOpenTopic: Option.some("api"),
               copyDtsState: CopyDtsState.Copied(),
             }),
           )
@@ -240,8 +238,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              isApiOpen: true,
-              isFsOpen: false,
+              maybeOpenTopic: Option.some("api"),
               copyDtsState: CopyDtsState.Idle(),
             }),
           )
@@ -250,8 +247,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              isApiOpen: false,
-              isFsOpen: true,
+              maybeOpenTopic: Option.some("fs"),
               copyDtsState: CopyDtsState.Idle(),
             }),
           )
@@ -266,8 +262,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              isApiOpen: false,
-              isFsOpen: false,
+              maybeOpenTopic: Option.none(),
               copyDtsState: CopyDtsState.Idle(),
             }),
           )
@@ -282,8 +277,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              isApiOpen: false,
-              isFsOpen: false,
+              maybeOpenTopic: Option.none(),
               copyDtsState: CopyDtsState.Idle(),
             }),
           )
@@ -307,8 +301,7 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              isApiOpen: false,
-              isFsOpen: true,
+              maybeOpenTopic: Option.some("fs"),
               copyDtsState: CopyDtsState.Idle(),
             }),
           )
@@ -402,10 +395,9 @@ describe("PWA Islands Story Tests", () => {
           expect(m.modalState).toEqual(
             ModalState.ConfirmOverwrite({
               targetName: "index.html",
-              originalName: "index.html",
-              content: "<p>New</p>",
-              isBase64: false,
-              isEditing: false,
+              source: OverwriteSource.CreateFile({
+                content: "<p>New</p>",
+              }),
             }),
           )
         }),
@@ -414,10 +406,9 @@ describe("PWA Islands Story Tests", () => {
           SaveModalChanges({
             modalState: ModalState.ConfirmOverwrite({
               targetName: "index.html",
-              originalName: "index.html",
-              content: "<p>New</p>",
-              isBase64: false,
-              isEditing: false,
+              source: OverwriteSource.CreateFile({
+                content: "<p>New</p>",
+              }),
             }),
             subPath: [],
           }),
@@ -453,7 +444,7 @@ describe("PWA Islands Story Tests", () => {
           expect(m.modalState).toEqual(
             ModalState.ConfirmDelete({
               entryName: "index.html",
-              isFolder: false,
+              entryKind: "file",
             }),
           )
         }),
@@ -461,7 +452,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(
           DeleteModalEntry({
             entryName: "index.html",
-            isFolder: false,
+            entryKind: "file",
             subPath: [],
           }),
         ),

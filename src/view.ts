@@ -8,6 +8,8 @@ import {
   EditorFileMode,
   EntriesState,
   type FileEntry,
+  FileEntryKind,
+  HelpTopic,
   InstallPrompt,
   type Model,
   ModalState,
@@ -980,19 +982,19 @@ const viewHelpModal = (
     origin,
     hasDirectoryPicker,
     hasOPFS,
-    isApiOpen,
-    isFsOpen,
+    maybeOpenTopic,
     copyDtsState,
   }: {
     readonly origin: string
     readonly hasDirectoryPicker: boolean
     readonly hasOPFS: boolean
-    readonly isApiOpen: boolean
-    readonly isFsOpen: boolean
+    readonly maybeOpenTopic: Option.Option<HelpTopic>
     readonly copyDtsState: CopyDtsState
   },
   h: HtmlBuilder,
 ): Html.Html => {
+  const isApiOpen = Option.exists(maybeOpenTopic, (topic) => topic === "api")
+  const isFsOpen = Option.exists(maybeOpenTopic, (topic) => topic === "fs")
   return h.div(
     [
       h.Class("modal-overlay help-modal-overlay"),
@@ -1576,9 +1578,10 @@ const viewHelpModal = (
 
 const viewConfirmDeleteModal = (
   entryName: string,
-  isFolder: boolean,
+  entryKind: FileEntryKind,
   h: HtmlBuilder,
 ): Html.Html => {
+  const isFolder = entryKind === "directory"
   const noun = isFolder ? "den Ordner" : "die Datei"
   return h.div(
     [
@@ -1889,21 +1892,21 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
             h,
           ),
 
-        ConfirmDelete: ({ entryName, isFolder }) => viewConfirmDeleteModal(entryName, isFolder, h),
+        ConfirmDelete: ({ entryName, entryKind }) =>
+          viewConfirmDeleteModal(entryName, entryKind, h),
 
         ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
 
         ImportConflict: ({ current, suggestedName, queue, applyToAll }) =>
           viewImportConflictModal(current, suggestedName, queue, applyToAll, h),
 
-        Help: ({ isApiOpen, isFsOpen, copyDtsState }) =>
+        Help: ({ maybeOpenTopic, copyDtsState }) =>
           viewHelpModal(
             {
               origin: model.origin,
               hasDirectoryPicker: model.hasDirectoryPicker,
               hasOPFS: model.hasOPFS,
-              isApiOpen,
-              isFsOpen,
+              maybeOpenTopic,
               copyDtsState,
             },
             h,

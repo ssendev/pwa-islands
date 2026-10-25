@@ -45,8 +45,8 @@ import {
   Model,
   ModalState,
   OPFS_APP_FOLDER,
+  OverwriteSource,
   type PendingImportFile,
-  PreviewContent,
   type ResolvedImportItem,
   SavedBackend,
   StorageState,
@@ -84,14 +84,7 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
     Help: ({ maybeTopic }) =>
       Option.some(
         ModalState.Help({
-          isApiOpen: Option.match(maybeTopic, {
-            onNone: () => true,
-            onSome: (topic) => topic === "api",
-          }),
-          isFsOpen: Option.match(maybeTopic, {
-            onNone: () => false,
-            onSome: (topic) => topic === "fs",
-          }),
+          maybeOpenTopic: Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api")),
           copyDtsState: CopyDtsState.Idle(),
         }),
       ),
@@ -606,21 +599,13 @@ export const update = (model: Model, message: Message) =>
               isSettingsOpen: () => false,
               modalState: () =>
                 ModalState.Help({
-                  isApiOpen: Option.match(maybeTopic, {
+                  maybeOpenTopic: Option.match(maybeTopic, {
                     onNone: () =>
                       Option.match(maybeExistingHelp, {
-                        onNone: () => true,
-                        onSome: (existing) => existing.isApiOpen,
+                        onNone: () => Option.some<HelpTopic>("api"),
+                        onSome: (existing) => existing.maybeOpenTopic,
                       }),
-                    onSome: (topic) => topic === "api",
-                  }),
-                  isFsOpen: Option.match(maybeTopic, {
-                    onNone: () =>
-                      Option.match(maybeExistingHelp, {
-                        onNone: () => false,
-                        onSome: (existing) => existing.isFsOpen,
-                      }),
-                    onSome: (topic) => topic === "fs",
+                    onSome: (topic) => Option.some(topic),
                   }),
                   copyDtsState: Option.match(maybeExistingHelp, {
                     onNone: () => CopyDtsState.Idle(),
@@ -1406,10 +1391,9 @@ export const update = (model: Model, message: Message) =>
                 modalState: () =>
                   ModalState.ConfirmOverwrite({
                     targetName: trimmed,
-                    originalName: trimmed,
-                    content: createFile.content,
-                    isBase64: false,
-                    isEditing: false,
+                    source: OverwriteSource.CreateFile({
+                      content: createFile.content,
+                    }),
                   }),
               }),
             }
@@ -1464,33 +1448,31 @@ export const update = (model: Model, message: Message) =>
           }
 
           if (trimmed !== editFile.originalName && existingNames.has(trimmed)) {
+            const isText = EditorFileMode.match(editFile.fileMode, {
+              Text: () => true,
+              Binary: () => false,
+            })
+            if (!isText && Option.isNone(maybeBase64Content)) {
+              return {
+                model: modifyFields(model, {
+                  modalState: () =>
+                    modifyFields(editFile, {
+                      maybeValidationError: () =>
+                        Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+                    }),
+                }),
+              }
+            }
             return {
               model: modifyFields(model, {
                 modalState: () =>
-                  Option.match(
-                    EditorFileMode.match(editFile.fileMode, {
-                      Text: ({ content }) => Option.some({ content, isBase64: false }),
-                      Binary: () =>
-                        Option.map(maybeBase64Content, (content) => ({ content, isBase64: true })),
+                  ModalState.ConfirmOverwrite({
+                    targetName: trimmed,
+                    source: OverwriteSource.EditFile({
+                      originalName: editFile.originalName,
+                      fileMode: editFile.fileMode,
                     }),
-                    {
-                      onSome: ({ content, isBase64 }) =>
-                        ModalState.ConfirmOverwrite({
-                          targetName: trimmed,
-                          originalName: editFile.originalName,
-                          content,
-                          isBase64,
-                          isEditing: true,
-                        }),
-                      onNone: () =>
-                        modifyFields(editFile, {
-                          maybeValidationError: () =>
-                            Option.some(
-                              `Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`,
-                            ),
-                        }),
-                    },
-                  ),
+                  }),
               }),
             }
           }
@@ -1517,10 +1499,9 @@ export const update = (model: Model, message: Message) =>
 
     ClickedCancelOverwrite: () => {
       return Match.value(model.modalState).pipe(
-        Match.tag("ConfirmOverwrite", (state) => {
-          const { targetName, originalName, content, isBase64, isEditing } = state
-          if (!isEditing) {
-            return {
+        Match.tag("ConfirmOverwrite", ({ targetName, source }) =>
+          Match.value(source).pipe(
+            Match.tag("CreateFile", ({ content }) => ({
               model: modifyFields(model, {
                 modalState: () =>
                   ModalState.CreateFile({
@@ -1529,25 +1510,21 @@ export const update = (model: Model, message: Message) =>
                     maybeValidationError: Option.none(),
                   }),
               }),
-            }
-          }
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                ModalState.EditFile({
-                  originalName,
-                  name: targetName,
-                  fileMode: isBase64
-                    ? EditorFileMode.Binary({
-                        preview: PreviewContent.None(),
-                        edit: BinaryEdit.Editing({ content }),
-                      })
-                    : EditorFileMode.Text({ content }),
-                  maybeValidationError: Option.none(),
-                }),
-            }),
-          }
-        }),
+            })),
+            Match.tag("EditFile", ({ originalName, fileMode }) => ({
+              model: modifyFields(model, {
+                modalState: () =>
+                  ModalState.EditFile({
+                    originalName,
+                    name: targetName,
+                    fileMode,
+                    maybeValidationError: Option.none(),
+                  }),
+              }),
+            })),
+            Match.exhaustive,
+          ),
+        ),
         Match.orElse(() => ({ model })),
       )
     },
@@ -1556,13 +1533,14 @@ export const update = (model: Model, message: Message) =>
       Match.value(model.modalState).pipe(
         Match.tag("EditFolder", ({ originalName }) => ({
           model: modifyFields(model, {
-            modalState: () => ModalState.ConfirmDelete({ entryName: originalName, isFolder: true }),
+            modalState: () =>
+              ModalState.ConfirmDelete({ entryName: originalName, entryKind: "directory" }),
           }),
         })),
         Match.tag("EditFile", ({ originalName }) => ({
           model: modifyFields(model, {
             modalState: () =>
-              ModalState.ConfirmDelete({ entryName: originalName, isFolder: false }),
+              ModalState.ConfirmDelete({ entryName: originalName, entryKind: "file" }),
           }),
         })),
         Match.orElse(() => ({ model })),
@@ -1570,14 +1548,13 @@ export const update = (model: Model, message: Message) =>
 
     ConfirmedDeleteModalEntry: () => {
       return Match.value(model.modalState).pipe(
-        Match.tag("ConfirmDelete", (state) => {
-          const { entryName, isFolder } = state
+        Match.tag("ConfirmDelete", ({ entryName, entryKind }) => {
           const subPath = currentSubPathFromStorageState(model.storageState)
           return {
             model: modifyFields(model, {
               modalState: () => ModalState.Closed(),
             }),
-            commands: [DeleteModalEntry({ entryName, isFolder, subPath })],
+            commands: [DeleteModalEntry({ entryName, entryKind, subPath })],
           }
         }),
         Match.orElse(() => ({ model })),
@@ -1694,20 +1671,20 @@ export const update = (model: Model, message: Message) =>
     ClickedOpenHelp: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       const isFolderViewVisible = isReady(model.storageState)
+      const activeTopic: HelpTopic = isFolderViewVisible ? "api" : "fs"
       revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           modalState: () =>
             ModalState.Help({
-              isApiOpen: isFolderViewVisible,
-              isFsOpen: !isFolderViewVisible,
+              maybeOpenTopic: Option.some(activeTopic),
               copyDtsState: CopyDtsState.Idle(),
             }),
         }),
         commands: [
           PushUrl({
-            url: buildHelpUrl(subPath, Option.some(isFolderViewVisible ? "api" : "fs")),
+            url: buildHelpUrl(subPath, Option.some(activeTopic)),
           }),
         ],
       }
@@ -1715,22 +1692,23 @@ export const update = (model: Model, message: Message) =>
 
     ToggledHelpTopic: ({ topic, isOpen }) => {
       return whenHelp(model, (helpState) => {
-        const nextIsApiOpen = topic === "api" ? isOpen : isOpen ? false : helpState.isApiOpen
-        const nextIsFsOpen = topic === "fs" ? isOpen : isOpen ? false : helpState.isFsOpen
+        const nextMaybeOpenTopic: Option.Option<HelpTopic> = isOpen
+          ? Option.some(topic)
+          : Option.exists(helpState.maybeOpenTopic, (t) => t === topic)
+            ? Option.none()
+            : helpState.maybeOpenTopic
 
-        if (nextIsApiOpen === helpState.isApiOpen && nextIsFsOpen === helpState.isFsOpen) {
+        const isUnchanged = Option.match(helpState.maybeOpenTopic, {
+          onNone: () => Option.isNone(nextMaybeOpenTopic),
+          onSome: (current) => Option.exists(nextMaybeOpenTopic, (next) => next === current),
+        })
+
+        if (isUnchanged) {
           return { model }
         }
 
         const subPath = currentSubPathFromStorageState(model.storageState)
-        const maybeActiveTopic =
-          nextIsApiOpen && !nextIsFsOpen
-            ? Option.some<HelpTopic>("api")
-            : nextIsFsOpen && !nextIsApiOpen
-              ? Option.some<HelpTopic>("fs")
-              : Option.none()
-
-        const replaceUrlCommand = ReplaceUrl({ url: buildHelpUrl(subPath, maybeActiveTopic) })
+        const replaceUrlCommand = ReplaceUrl({ url: buildHelpUrl(subPath, nextMaybeOpenTopic) })
         const commands = isOpen
           ? [replaceUrlCommand, ScrollHelpTopicIntoView({ topic })]
           : [replaceUrlCommand]
@@ -1739,8 +1717,7 @@ export const update = (model: Model, message: Message) =>
           model: modifyFields(model, {
             modalState: () =>
               modifyFields(helpState, {
-                isApiOpen: () => nextIsApiOpen,
-                isFsOpen: () => nextIsFsOpen,
+                maybeOpenTopic: () => nextMaybeOpenTopic,
               }),
           }),
           commands,

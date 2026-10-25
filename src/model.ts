@@ -165,6 +165,17 @@ export const ResolvedImportItem = Schema.Struct({
 })
 export type ResolvedImportItem = typeof ResolvedImportItem.Type
 
+export const OverwriteSource = defineTaggedUnion({
+  CreateFile: {
+    content: Schema.String,
+  },
+  EditFile: {
+    originalName: Schema.String,
+    fileMode: EditorFileMode,
+  },
+})
+export type OverwriteSource = typeof OverwriteSource.Type
+
 export const ModalState = defineTaggedUnion({
   Closed: {},
   CreateFile: {
@@ -189,14 +200,11 @@ export const ModalState = defineTaggedUnion({
   },
   ConfirmDelete: {
     entryName: Schema.String,
-    isFolder: Schema.Boolean,
+    entryKind: FileEntryKind,
   },
   ConfirmOverwrite: {
     targetName: Schema.String,
-    originalName: Schema.String,
-    content: Schema.String,
-    isBase64: Schema.Boolean,
-    isEditing: Schema.Boolean,
+    source: OverwriteSource,
   },
   ImportConflict: {
     current: PendingImportFile,
@@ -206,8 +214,7 @@ export const ModalState = defineTaggedUnion({
     applyToAll: Schema.Boolean,
   },
   Help: {
-    isApiOpen: Schema.Boolean,
-    isFsOpen: Schema.Boolean,
+    maybeOpenTopic: Schema.Option(HelpTopic),
     copyDtsState: CopyDtsState,
   },
 })
@@ -435,14 +442,7 @@ export const initialHelpModalFromSearch = (initialSearch: string): Option.Option
     onSome: ({ maybeTopic }) =>
       Option.some<ModalState>(
         ModalState.Help({
-          isApiOpen: Option.match(maybeTopic, {
-            onNone: () => true,
-            onSome: (topic) => topic === "api",
-          }),
-          isFsOpen: Option.match(maybeTopic, {
-            onNone: () => false,
-            onSome: (topic) => topic === "fs",
-          }),
+          maybeOpenTopic: Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api")),
           copyDtsState: CopyDtsState.Idle(),
         }),
       ),
@@ -476,14 +476,10 @@ export const computeDocumentTitle = (model: Model): string => {
     ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
     ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
     ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
-    Help: ({ isApiOpen, isFsOpen }) => {
-      if (isApiOpen && !isFsOpen) {
-        return `${HELP_TOPIC_TITLES.api} — Hilfe — ${folderTitle}`
-      }
-      if (isFsOpen && !isApiOpen) {
-        return `${HELP_TOPIC_TITLES.fs} — Hilfe — ${folderTitle}`
-      }
-      return `Hilfe — ${folderTitle}`
-    },
+    Help: ({ maybeOpenTopic }) =>
+      Option.match(maybeOpenTopic, {
+        onNone: () => `Hilfe — ${folderTitle}`,
+        onSome: (topic) => `${HELP_TOPIC_TITLES[topic]} — Hilfe — ${folderTitle}`,
+      }),
   })
 }

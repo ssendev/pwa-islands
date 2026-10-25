@@ -38,6 +38,7 @@ import {
   CopyDtsState,
   EditorFileMode,
   type FileEntry,
+  FileEntryKind,
   HelpTopic,
   ModalState,
   OPFS_APP_FOLDER,
@@ -102,14 +103,7 @@ const resolveRouteDeepLink = async (
         entries,
         maybeModalState: Option.some(
           ModalState.Help({
-            isApiOpen: Option.match(maybeTopic, {
-              onNone: () => true,
-              onSome: (topic) => topic === "api",
-            }),
-            isFsOpen: Option.match(maybeTopic, {
-              onNone: () => false,
-              onSome: (topic) => topic === "fs",
-            }),
+            maybeOpenTopic: Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api")),
             copyDtsState: CopyDtsState.Idle(),
           }),
         ),
@@ -802,19 +796,36 @@ export const SaveModalChanges = Command.define("SaveModalChanges", {
               binaryRename: () => storage.renameBinaryFile(args.subPath, originalName, newName),
             })
           }),
-          Match.tag(
-            "ConfirmOverwrite",
-            async ({ targetName, originalName, content, isBase64, isEditing }) => {
-              if (isBase64) {
-                await storage.writeFileBuffer(args.subPath, targetName, base64ToUint8Array(content))
-              } else {
+          Match.tag("ConfirmOverwrite", async ({ targetName, source }) => {
+            await Match.value(source).pipe(
+              Match.tag("CreateFile", async ({ content }) => {
                 await storage.writeFile(args.subPath, targetName, content)
-              }
-              if (isEditing && originalName !== targetName) {
-                await storage.deleteEntry(args.subPath, originalName, "file")
-              }
-            },
-          ),
+              }),
+              Match.tag("EditFile", async ({ originalName, fileMode }) => {
+                await BinaryOrText(fileMode, {
+                  text: async (content) => {
+                    await storage.writeFile(args.subPath, targetName, content)
+                    if (originalName !== targetName) {
+                      await storage.deleteEntry(args.subPath, originalName, "file")
+                    }
+                  },
+                  binaryEditing: async (content) => {
+                    await storage.writeFileBuffer(
+                      args.subPath,
+                      targetName,
+                      base64ToUint8Array(content),
+                    )
+                    if (originalName !== targetName) {
+                      await storage.deleteEntry(args.subPath, originalName, "file")
+                    }
+                  },
+                  binaryRename: () =>
+                    storage.renameBinaryFile(args.subPath, originalName, targetName),
+                })
+              }),
+              Match.exhaustive,
+            )
+          }),
           Match.orElse(() => Promise.resolve()),
         )
 
@@ -837,7 +848,7 @@ export const SaveModalChanges = Command.define("SaveModalChanges", {
 export const DeleteModalEntry = Command.define("DeleteModalEntry", {
   args: {
     entryName: Schema.String,
-    isFolder: Schema.Boolean,
+    entryKind: FileEntryKind,
     subPath: Schema.Array(Schema.String),
   },
   messages: [Message.SucceededDeleteModalEntry, Message.FailedDeleteModalEntry],
@@ -846,11 +857,7 @@ export const DeleteModalEntry = Command.define("DeleteModalEntry", {
       try: async () => {
         const storage = requireActiveStorage()
 
-        await storage.deleteEntry(
-          args.subPath,
-          args.entryName,
-          args.isFolder ? "directory" : "file",
-        )
+        await storage.deleteEntry(args.subPath, args.entryName, args.entryKind)
         revokeActivePreviewUrl()
         const updatedEntries = await storage.listEntries(args.subPath)
         return Message.SucceededDeleteModalEntry({ entries: updatedEntries })
