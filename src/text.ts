@@ -1,3 +1,5 @@
+import { Option } from "effect"
+
 export type TextCheck =
   | { kind: "empty" }
   | { kind: "text"; text: string }
@@ -57,4 +59,3 @@ function decodeUtf8Strict(bytes: Uint8Array): Option.Option<string> {
 function toHex(byte: number): string {
   return `0x${byte.toString(16).padStart(2, "0")}`
 }
-import { Option } from "effect"

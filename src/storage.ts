@@ -309,18 +309,16 @@ export function invalidateRootCache(): void {
 
 // NOTE: Missing directory permission is intentionally un-cached so user prompts re-trigger
 async function findCachedActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
-  const maybeCachedRoot = Option.match(storageCache.root, {
-    onNone: () => Option.none<FileSystemDirectoryHandle>(),
-    onSome: (root) => Option.some(root),
+  return await Option.match(storageCache.root, {
+    onSome: (root) => Promise.resolve(Option.some(root)),
+    onNone: async () => {
+      const maybeRoot = await findActiveStorage()
+      if (Option.isSome(maybeRoot)) {
+        storageCache.root = maybeRoot
+      }
+      return maybeRoot
+    },
   })
-  if (Option.isSome(maybeCachedRoot)) {
-    return maybeCachedRoot
-  }
-  const maybeRoot = await findActiveStorage()
-  if (Option.isSome(maybeRoot)) {
-    storageCache.root = maybeRoot
-  }
-  return maybeRoot
 }
 
 export async function findSavedFile(
