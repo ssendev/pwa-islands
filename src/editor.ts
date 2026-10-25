@@ -221,7 +221,10 @@ export const LoadUserTemplates = Command.define("LoadUserTemplates", {
   messages: [Message.CompletedLoadUserTemplates],
   execute: Effect.tryPromise({
     try: async () => {
-      const stored = await getStoredUserTemplates()
+      const stored = await getStoredUserTemplates(
+        requireActiveStorage().type,
+        requireActiveStorage().rootHandle,
+      )
       const templates: ReadonlyArray<StarterTemplate> = Array.map(stored, (t) => ({
         id: t.id,
         label: t.label,
@@ -247,6 +250,8 @@ export const PersistUserTemplates = Command.define("PersistUserTemplates", {
     Effect.tryPromise({
       try: async () => {
         await storeUserTemplates(
+          requireActiveStorage().type,
+          requireActiveStorage().rootHandle,
           Array.map(templates, (t) => ({
             id: t.id,
             label: t.label,

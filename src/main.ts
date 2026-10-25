@@ -958,6 +958,7 @@ const handleStorageActivated = (
           onSome: (alert) => Option.some(alert),
         }),
     }),
+    commands: [toModalCommand(Modal.LoadEditorUserTemplates)],
   }
 }
 
@@ -1266,7 +1267,10 @@ export const update = (
                   isSettingsOpen: () => false,
                   modalState: () => newModalState,
                 }),
-                commands: [toModalCommand(Modal.FocusModalNameInput())],
+                commands: [
+                  toModalCommand(Modal.FocusModalNameInput()),
+                  toModalCommand(Modal.LoadEditorUserTemplates),
+                ],
               }
             }
             return {
@@ -1281,6 +1285,7 @@ export const update = (
               commands: [
                 NavigateToSubfolder({ targetSubPath: subPath }),
                 toModalCommand(Modal.FocusModalNameInput()),
+                toModalCommand(Modal.LoadEditorUserTemplates),
               ],
             }
           })
@@ -1529,6 +1534,7 @@ export const update = (
         commands: [
           PushUrl({ url: buildNewUrl(subPath, "file") }),
           toModalCommand(Modal.FocusModalNameInput()),
+          toModalCommand(Modal.LoadEditorUserTemplates),
         ],
       }
     },

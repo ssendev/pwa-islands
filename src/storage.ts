@@ -531,36 +531,54 @@ export interface StoredUserTemplate {
   readonly content: string
 }
 
-const isStoredUserTemplate = (value: unknown): value is StoredUserTemplate =>
-  typeof value === "object" &&
-  value !== null &&
-  "id" in value &&
-  typeof value.id === "string" &&
-  "label" in value &&
-  typeof value.label === "string" &&
-  "defaultFileName" in value &&
-  typeof value.defaultFileName === "string" &&
-  "content" in value &&
-  typeof value.content === "string"
+export const FS_TEMPLATES_FOLDER = "Vorlagen"
+export const OPFS_TEMPLATES_FOLDER = "PWA Islands Vorlagen"
 
-export async function getStoredUserTemplates(): Promise<ReadonlyArray<StoredUserTemplate>> {
+async function getTemplatesDir(
+  type: "opfs" | "fsapi" | string,
+  rootHandle: FileSystemDirectoryHandle,
+): Promise<FileSystemDirectoryHandle> {
+  if (type === "opfs") {
+    const realRoot = await navigator.storage.getDirectory()
+    return realRoot.getDirectoryHandle(OPFS_TEMPLATES_FOLDER, { create: true })
+  }
+  return rootHandle.getDirectoryHandle(FS_TEMPLATES_FOLDER, { create: true })
+}
+
+const templateFileName = (t: StoredUserTemplate): string =>
+  t.label.trim().replace(/[\\/]+/g, "_") || "Vorlage"
+
+export async function getStoredUserTemplates(
+  type: string,
+  rootHandle: FileSystemDirectoryHandle,
+): Promise<ReadonlyArray<StoredUserTemplate>> {
   try {
-    const db = await openDB()
-    return await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE_NAME, "readonly")
-      const store = tx.objectStore(STORE_NAME)
-      const req = store.get(USER_TEMPLATES_KEY)
-
-      req.onsuccess = () => {
-        const raw = req.result
-        if (Array.isArray(raw)) {
-          resolve(Array.filter(raw, isStoredUserTemplate))
-          return
-        }
-        resolve([])
-      }
-      req.onerror = () => reject(req.error)
-    })
+    const dir = await getTemplatesDir(type, rootHandle)
+    const handles = await collectDirectoryHandles(dir)
+    const results = await Promise.all(
+      Array.map(
+        Array.filter(handles, (h) => h.kind === "file"),
+        async (h): Promise<ReadonlyArray<StoredUserTemplate>> => {
+          try {
+            const file = await (h as FileSystemFileHandle).getFile()
+            const bytes = new Uint8Array(await file.arrayBuffer())
+            const text = decodeUtf8Strict(bytes)
+            if (Option.isNone(text)) return []
+            return [
+              {
+                id: `user:${h.name}`,
+                label: h.name,
+                defaultFileName: h.name,
+                content: text.value,
+              },
+            ]
+          } catch {
+            return []
+          }
+        },
+      ),
+    )
+    return Array.flatten(results)
   } catch (error) {
     console.error("Fehler beim Abrufen der Benutzervorlagen:", error)
     return []
@@ -568,15 +586,28 @@ export async function getStoredUserTemplates(): Promise<ReadonlyArray<StoredUser
 }
 
 export async function storeUserTemplates(
+  type: string,
+  rootHandle: FileSystemDirectoryHandle,
   templates: ReadonlyArray<StoredUserTemplate>,
 ): Promise<void> {
-  const db = await openDB()
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_NAME, "readwrite")
-    const store = tx.objectStore(STORE_NAME)
-    const req = store.put(templates, USER_TEMPLATES_KEY)
-
-    req.onsuccess = () => resolve()
-    req.onerror = () => reject(req.error)
-  })
+  const dir = await getTemplatesDir(type, rootHandle)
+  const wanted = new Set(Array.map(templates, templateFileName))
+  const existing = await collectDirectoryHandles(dir)
+  await Promise.all(
+    Array.map(
+      Array.filter(existing, (h) => h.kind === "file" && !wanted.has(h.name)),
+      (h) => dir.removeEntry(h.name),
+    ),
+  )
+  await Promise.all(
+    Array.map(templates, async (t) => {
+      const fh = await dir.getFileHandle(templateFileName(t), { create: true })
+      const w = await fh.createWritable()
+      try {
+        await w.write(t.content)
+      } finally {
+        await w.close()
+      }
+    }),
+  )
 }
