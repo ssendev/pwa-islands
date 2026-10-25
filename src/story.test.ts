@@ -513,7 +513,7 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
-        message(editorMsg(Editor.Message.ConfirmedDelete())),
+        message(editorMsg(Editor.Message.ClickedConfirmDelete())),
         Command.expectExact(
           DeleteEntry({
             entryName: "index.html",
@@ -953,9 +953,7 @@ describe("PWA Islands Story Tests", () => {
           message(Message.ClickedDisconnectFolder()),
           Command.expectExact(
             DisconnectStorage({
-              hasDirectoryPicker: true,
               hasOPFS: true,
-              route: AppRoute.Folder({ subPath: [] }),
             }),
             PushUrl({ url: "/?pwaislands" }),
           ),

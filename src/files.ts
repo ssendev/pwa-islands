@@ -154,7 +154,7 @@ const BASE64_CHUNK_SIZE = 0x8000 // 32 KB
 
 export const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer)
-  const chunkCount = Math.ceil(bytes.length / BASE64_CHUNK_SIZE)
+  const chunkCount = Math.ceil(bytes.byteLength / BASE64_CHUNK_SIZE)
   const chunks = Array.makeBy(chunkCount, (i) => {
     const start = i * BASE64_CHUNK_SIZE
     const slice = bytes.subarray(start, start + BASE64_CHUNK_SIZE)

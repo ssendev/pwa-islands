@@ -1,4 +1,5 @@
 import { Duration, Effect, Option, Schema } from "effect"
+import { Submodel } from "foldkit"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
 import type * as Html from "foldkit/html"
@@ -199,595 +200,602 @@ export const update = (
 
 // VIEW
 
-export const view = (
-  model: Model,
-  context: {
-    readonly origin: string
-    readonly hasDirectoryPicker: boolean
-    readonly hasOPFS: boolean
-  },
-  h: Html.HtmlBuilder<Message>,
-): Html.Html => {
-  const isApiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "api")
-  const isFsOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "fs")
-  return h.div(
-    [
-      h.Class("modal-overlay help-modal-overlay"),
-      h.Role("dialog"),
-      h.AriaModal(true),
-      h.AriaLabelledBy("help-modal-title"),
-    ],
-    [
-      h.div(
-        [h.Class("modal-content")],
-        [
-          h.header(
-            [h.Class("modal-header")],
-            [
-              h.h3(
-                [h.Id("help-modal-title"), h.Class("modal-title")],
-                [h.span([h.Class("help-title-icon"), h.AriaHidden(true)], ["❓"]), " Hilfe"],
-              ),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
-                  h.OnClick(Message.ClickedClose()),
-                ],
-                ["×"],
-              ),
-            ],
-          ),
-          h.div(
-            [h.Class("modal-body")],
-            [
-              h.div(
-                [h.Class("help-accordion")],
-                [
-                  h.details(
-                    [
-                      h.Class("help-topic"),
-                      h.Name("help-topic"),
-                      h.DataAttribute("topic", "api"),
-                      h.Open(isApiOpen),
-                      h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "api", isOpen })),
-                    ],
-                    [
-                      h.summary(
-                        [h.Class("help-topic-summary")],
-                        [
-                          h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["🧩"]),
-                          h.span([h.Class("help-topic-title")], ["PWA Islands bauen"]),
-                        ],
-                      ),
-                      h.div(
-                        [h.Class("help-topic-body")],
-                        [
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4([h.Class("help-heading")], ["Was ist eine Island?"]),
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Eine Island ist eine einzelne HTML-Datei, die in dieser App liegt. Sie läuft im Browser wie eine kleine eigene App und kann über die Islands-API Dateien lesen, schreiben und löschen.",
-                                ],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4([h.Class("help-heading")], ["So entsteht eine Island"]),
-                              h.ol(
-                                [h.Class("help-list")],
-                                [
-                                  h.li(
-                                    [],
-                                    [
-                                      "Über ",
-                                      h.strong([], ["+ Datei"]),
-                                      " eine neue ",
-                                      h.code([h.Class("help-path")], [".html"]),
-                                      "-Datei anlegen (zum Beispiel ",
-                                      h.code([h.Class("help-path")], ["uhr.html"]),
-                                      ") oder eine fertige HTML-Datei importieren.",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Die API im eigenen Modul einbinden: ",
-                                      h.code(
-                                        [h.Class("help-path")],
-                                        ["import islands from '/api.js'"],
-                                      ),
-                                      ". Das muss in einem ",
-                                      h.code([h.Class("help-path")], ['<script type="module">']),
-                                      " stehen.",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Die Datei in der Liste antippen. Sie wird unter ihrem eigenen Pfad geöffnet.",
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4([h.Class("help-heading")], ["Beispiel"]),
-                              h.pre(
-                                [h.Class("help-code")],
-                                [
-                                  h.code(
-                                    [],
-                                    [
-                                      `<script type="module">\n  import islands from '/api.js'\n\n  const eintraege = await islands.list()\n  await islands.write('notizen/idee.txt', 'Hallo Welt')\n  const inhalt = await islands.read('notizen/idee.txt')\n</script>`,
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              h.p(
-                                [h.Class("help-hint")],
-                                ["Alle Pfade sind relativ zur Wurzel des gewählten Ordners."],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4(
-                                [h.Class("help-heading")],
-                                ["App-Start und Startseiten (index.html)"],
-                              ),
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Beim Öffnen der App landen Sie standardmäßig im Hauptverzeichnis (",
-                                  h.code([h.Class("help-path")], ["/"]),
-                                  ").",
-                                ],
-                              ),
-                              h.ul(
-                                [h.Class("help-list")],
-                                [
-                                  h.li(
-                                    [],
-                                    [
-                                      "Zu Beginn sehen Sie hier eine Dateiliste, da noch keine Startseite existiert.",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Sobald Sie eine Datei namens ",
-                                      h.code([h.Class("help-path")], ["index.html"]),
-                                      " erstellen, wird diese automatisch geladen, wenn Sie die App öffnen.",
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Dieses Prinzip gilt auch für alle Unterordner: Die Adresse ",
-                                  h.code([h.Class("help-path")], ["/projekte/"]),
-                                  " lädt automatisch die Datei ",
-                                  h.code([h.Class("help-path")], ["/projekte/index.html"]),
-                                  ". Fehlt die Datei (oder existiert die aufgerufene Adresse gar nicht), zeigt die App stattdessen die Dateiliste des Ordners.",
-                                ],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4(
-                                [h.Class("help-heading")],
-                                ["Der Bearbeitungsmodus (?pwaislands)"],
-                              ),
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Wenn die App eine fertige Webseite (wie die ",
-                                  h.code([h.Class("help-path")], ["index.html"]),
-                                  ") anzeigt, können Sie mit dem Parameter ",
-                                  h.code([h.Class("help-path")], ["?pwaislands"]),
-                                  " in der Adresse zurück in die Bearbeitungs-App wechseln:",
-                                ],
-                              ),
-                              h.ul(
-                                [h.Class("help-list")],
-                                [
-                                  h.li(
-                                    [],
-                                    [
-                                      h.code(
-                                        [h.Class("help-path")],
-                                        [`${context.origin}/?pwaislands`],
-                                      ),
-                                      " → Erzwingt die Dateiliste des Hauptverzeichnisses (auch wenn eine ",
-                                      h.code([h.Class("help-path")], ["index.html"]),
-                                      " existiert).",
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4([h.Class("help-heading")], ["Typen für Werkzeuge und Agenten"]),
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Die Datei ",
-                                  h.code(
-                                    [h.Class("help-path")],
-                                    [
-                                      h.a(
-                                        [
-                                          h.Class("help-link"),
-                                          h.Href(API_DTS_HREF),
-                                          h.Target("_blank"),
-                                          h.Rel("noopener"),
-                                        ],
-                                        [`${context.origin}/api.d.ts`],
-                                      ),
-                                    ],
-                                  ),
-                                  " beschreibt die komplette API mit allen Typen. Kopieren Sie sie in die Zwischenablage und geben Sie sie einem KI-Agenten als Kontext — damit kann er Islands schreiben, ohne die API zu raten.",
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-
-                  h.details(
-                    [
-                      h.Class("help-topic"),
-                      h.Name("help-topic"),
-                      h.DataAttribute("topic", "fs"),
-                      h.Open(isFsOpen),
-                      h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "fs", isOpen })),
-                    ],
-                    [
-                      h.summary(
-                        [h.Class("help-topic-summary")],
-                        [
-                          h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["💾"]),
-                          h.span([h.Class("help-topic-title")], ["Speicher: FS API und OPFS"]),
-                        ],
-                      ),
-                      h.div(
-                        [h.Class("help-topic-body")],
-                        [
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Beide Speicherarten beruhen auf derselben Browser-Schnittstelle, der ",
-                                  h.code([h.Class("help-path")], ["File System Access API"]),
-                                  ". Sie liefern dasselbe ",
-                                  h.code([h.Class("help-path")], ["FileSystemDirectoryHandle"]),
-                                  " — die Islands-API arbeitet in beiden Fällen ausschließlich mit Pfaden relativ zur Wurzel.",
-                                ],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4([h.Class("help-heading")], ["📁 Lokaler Ordner (FS API)"]),
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Ein normaler Ordner auf dem Gerät, gewählt über ",
-                                  h.code([h.Class("help-path")], ["showDirectoryPicker()"]),
-                                  ". Die Dateien lassen sich jederzeit mit anderen Programmen öffnen und liegen im Dateisystem, sind also mitsamt Ordnerstruktur leicht zu sichern.",
-                                ],
-                              ),
-                              h.ul(
-                                [h.Class("help-list")],
-                                [
-                                  h.li(
-                                    [],
-                                    [
-                                      "Der Ordner-Handle wird in IndexedDB gemerkt. Nach einem Neustart fehlt aber die ",
-                                      h.strong([], ["Berechtigung"]),
-                                      ": der Browser braucht einen Klick, um sie erneut zu erteilen („Zugriff erlauben“).",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Ein Umbenennen oder Verschieben des Ordners außerhalb des Browsers macht das gemerkte Handle ungültig — dann neu auswählen.",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Nur in Browsern mit ",
-                                      h.code([h.Class("help-path")], ["showDirectoryPicker"]),
-                                      " (Chromium-basiert).",
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4([h.Class("help-heading")], ["📦 App-Speicher (OPFS)"]),
-                              h.p(
-                                [h.Class("help-text")],
-                                [
-                                  "Das ",
-                                  h.em([], ["Origin Private File System"]),
-                                  " ist ein privater Speicherbereich des Browsers, erreichbar über ",
-                                  h.code(
-                                    [h.Class("help-path")],
-                                    ["navigator.storage.getDirectory()"],
-                                  ),
-                                  ". Hier liegt alles unter dem Ordner ",
-                                  h.code([h.Class("help-path")], [OPFS_APP_FOLDER]),
-                                  ".",
-                                ],
-                              ),
-                              h.ul(
-                                [h.Class("help-list")],
-                                [
-                                  h.li(
-                                    [],
-                                    [
-                                      "Braucht ",
-                                      h.strong([], ["keine Ordnerauswahl und keine Berechtigung"]),
-                                      " — die App ist nach dem Start sofort einsatzbereit.",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Die Dateien sind ",
-                                      h.strong([], ["an diesen Browser gebunden"]),
-                                      ": in einem anderen Browser oder Profil sind sie nicht sichtbar, und mit dem Löschen der Websitedaten sind sie weg.",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Ein Export auf die Festplatte ist von Hand nötig (Datei herunterladen).",
-                                    ],
-                                  ),
-                                  h.li(
-                                    [],
-                                    [
-                                      "Der Browser darf den Speicher bei Platzmangel räumen; eine dauerhafte Ablage ist es nicht.",
-                                    ],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          h.div(
-                            [h.Class("help-section")],
-                            [
-                              h.h4([h.Class("help-heading")], ["Welche Art wann?"]),
-                              h.div(
-                                [h.Class("help-table-wrap")],
-                                [
-                                  h.table(
-                                    [h.Class("help-table")],
-                                    [
-                                      h.thead(
-                                        [],
-                                        [
-                                          h.tr(
-                                            [],
-                                            [
-                                              h.th([]),
-                                              h.th([], ["📁 Lokaler Ordner"]),
-                                              h.th([], ["📦 App-Speicher"]),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                      h.tbody(
-                                        [],
-                                        [
-                                          h.tr(
-                                            [],
-                                            [
-                                              h.td([], ["Berechtigung nötig"]),
-                                              h.td([], ["ja, bei jedem Start"]),
-                                              h.td([], ["nein"]),
-                                            ],
-                                          ),
-                                          h.tr(
-                                            [],
-                                            [
-                                              h.td([], ["Andere Programme"]),
-                                              h.td([], ["ja"]),
-                                              h.td([], ["nein"]),
-                                            ],
-                                          ),
-                                          h.tr(
-                                            [],
-                                            [
-                                              h.td([], ["Anderer Browser"]),
-                                              h.td([], ["ja, Ordner erneut wählen"]),
-                                              h.td([], ["nein"]),
-                                            ],
-                                          ),
-                                          h.tr(
-                                            [],
-                                            [
-                                              h.td([], ["Sicherung"]),
-                                              h.td([], ["Dateisystem-Backup"]),
-                                              h.td([], ["von Hand"]),
-                                            ],
-                                          ),
-                                          h.tr(
-                                            [],
-                                            [
-                                              h.td([], ["Verfügbar in"]),
-                                              h.td([], ["nur Chromium"]),
-                                              h.td([], ["allen modernen Browsern"]),
-                                            ],
-                                          ),
-                                          h.tr(
-                                            [h.Class("help-supported-row")],
-                                            [
-                                              h.td([], ["In diesem Browser"]),
-                                              h.td(
-                                                [h.DataAttribute("support", "fsa")],
-                                                [
-                                                  h.span(
-                                                    [
-                                                      h.Class("help-supported"),
-                                                      h.DataAttribute(
-                                                        "supported",
-                                                        context.hasDirectoryPicker ? "yes" : "no",
-                                                      ),
-                                                    ],
-                                                    [
-                                                      context.hasDirectoryPicker
-                                                        ? "✅ verfügbar"
-                                                        : "❌ nicht verfügbar",
-                                                    ],
-                                                  ),
-                                                ],
-                                              ),
-                                              h.td(
-                                                [h.DataAttribute("support", "opfs")],
-                                                [
-                                                  h.span(
-                                                    [
-                                                      h.Class("help-supported"),
-                                                      h.DataAttribute(
-                                                        "supported",
-                                                        context.hasOPFS ? "yes" : "no",
-                                                      ),
-                                                    ],
-                                                    [
-                                                      context.hasOPFS
-                                                        ? "✅ verfügbar"
-                                                        : "❌ nicht verfügbar",
-                                                    ],
-                                                  ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              h.p(
-                                [h.Class("help-hint")],
-                                [
-                                  "Wechseln lässt sich die Art jederzeit über das Zahnrad ⚙️. Die Wahl wird gemerkt, die Dateien der jeweils anderen Art bleiben dabei unangetastet.",
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              CopyDtsState.match(model.copyDtsState, {
-                Error: ({ message }) =>
-                  h.div(
-                    [h.Id("help-copy-error"), h.Class("alert alert-danger")],
-                    [
-                      `Kopieren hat nicht geklappt: ${message} Öffnen Sie ${context.origin}/api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`,
-                    ],
-                  ),
-                Copied: () => h.empty,
-                Copying: () => h.empty,
-                Idle: () => h.empty,
-              }),
-            ],
-          ),
-          h.footer(
-            [h.Class("modal-footer")],
-            [
-              h.div([h.Class("modal-footer-left")]),
-              h.div(
-                [h.Class("modal-footer-right")],
-                [
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Id("help-btn-copy-dts"),
-                      h.Class("btn btn-primary icon-label-btn copy-dts-btn"),
-                      h.AriaLabel("/api.d.ts kopieren"),
-                      h.DataAttribute("tip", "/api.d.ts kopieren"),
-                      h.Disabled(
-                        CopyDtsState.match(model.copyDtsState, {
-                          Idle: () => false,
-                          Copying: () => true,
-                          Copied: () => false,
-                          Error: () => false,
-                        }),
-                      ),
-                      h.OnClick(Message.ClickedCopyDts()),
-                    ],
-                    [
-                      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["📋"]),
-                      CopyDtsState.match(model.copyDtsState, {
-                        Idle: () =>
-                          h.span(
-                            [h.Class("icon-label-btn-text")],
-                            ["/api.d.ts", h.span([h.Class("copy-dts-action")], [" kopieren"])],
-                          ),
-                        Copying: () => h.span([h.Class("icon-label-btn-text")], ["Wird kopiert …"]),
-                        Copied: () => h.span([h.Class("icon-label-btn-text")], ["✅ Kopiert!"]),
-                        Error: () =>
-                          h.span(
-                            [h.Class("icon-label-btn-text")],
-                            ["/api.d.ts", h.span([h.Class("copy-dts-action")], [" kopieren"])],
-                          ),
-                      }),
-                    ],
-                  ),
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Id("help-btn-close"),
-                      h.Class("btn btn-secondary icon-label-btn"),
-                      h.AriaLabel("Schließen"),
-                      h.DataAttribute("tip", "Schließen"),
-                      h.OnClick(Message.ClickedClose()),
-                    ],
-                    [
-                      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
-                      h.span([h.Class("icon-label-btn-text")], ["Schließen"]),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
-    ],
-  )
+export type ViewInputs = {
+  readonly origin: string
+  readonly hasDirectoryPicker: boolean
+  readonly hasOPFS: boolean
 }
+
+export const view = Submodel.defineView<Model, Message, ViewInputs>(
+  (model, context, h): Html.Html => {
+    const isApiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "api")
+    const isFsOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "fs")
+    return h.div(
+      [
+        h.Class("modal-overlay help-modal-overlay"),
+        h.Role("dialog"),
+        h.AriaModal(true),
+        h.AriaLabelledBy("help-modal-title"),
+      ],
+      [
+        h.div(
+          [h.Class("modal-content")],
+          [
+            h.header(
+              [h.Class("modal-header")],
+              [
+                h.h3(
+                  [h.Id("help-modal-title"), h.Class("modal-title")],
+                  [h.span([h.Class("help-title-icon"), h.AriaHidden(true)], ["❓"]), " Hilfe"],
+                ),
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("modal-close-btn"),
+                    h.AriaLabel("Schließen"),
+                    h.OnClick(Message.ClickedClose()),
+                  ],
+                  ["×"],
+                ),
+              ],
+            ),
+            h.div(
+              [h.Class("modal-body")],
+              [
+                h.div(
+                  [h.Class("help-accordion")],
+                  [
+                    h.details(
+                      [
+                        h.Class("help-topic"),
+                        h.Name("help-topic"),
+                        h.DataAttribute("topic", "api"),
+                        h.Open(isApiOpen),
+                        h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "api", isOpen })),
+                      ],
+                      [
+                        h.summary(
+                          [h.Class("help-topic-summary")],
+                          [
+                            h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["🧩"]),
+                            h.span([h.Class("help-topic-title")], ["PWA Islands bauen"]),
+                          ],
+                        ),
+                        h.div(
+                          [h.Class("help-topic-body")],
+                          [
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4([h.Class("help-heading")], ["Was ist eine Island?"]),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Eine Island ist eine einzelne HTML-Datei, die in dieser App liegt. Sie läuft im Browser wie eine kleine eigene App und kann über die Islands-API Dateien lesen, schreiben und löschen.",
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4([h.Class("help-heading")], ["So entsteht eine Island"]),
+                                h.ol(
+                                  [h.Class("help-list")],
+                                  [
+                                    h.li(
+                                      [],
+                                      [
+                                        "Über ",
+                                        h.strong([], ["+ Datei"]),
+                                        " eine neue ",
+                                        h.code([h.Class("help-path")], [".html"]),
+                                        "-Datei anlegen (zum Beispiel ",
+                                        h.code([h.Class("help-path")], ["uhr.html"]),
+                                        ") oder eine fertige HTML-Datei importieren.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Die API im eigenen Modul einbinden: ",
+                                        h.code(
+                                          [h.Class("help-path")],
+                                          ["import islands from '/api.js'"],
+                                        ),
+                                        ". Das muss in einem ",
+                                        h.code([h.Class("help-path")], ['<script type="module">']),
+                                        " stehen.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Die Datei in der Liste antippen. Sie wird unter ihrem eigenen Pfad geöffnet.",
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4([h.Class("help-heading")], ["Beispiel"]),
+                                h.pre(
+                                  [h.Class("help-code")],
+                                  [
+                                    h.code(
+                                      [],
+                                      [
+                                        `<script type="module">\n  import islands from '/api.js'\n\n  const eintraege = await islands.list()\n  await islands.write('notizen/idee.txt', 'Hallo Welt')\n  const inhalt = await islands.read('notizen/idee.txt')\n</script>`,
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                h.p(
+                                  [h.Class("help-hint")],
+                                  ["Alle Pfade sind relativ zur Wurzel des gewählten Ordners."],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4(
+                                  [h.Class("help-heading")],
+                                  ["App-Start und Startseiten (index.html)"],
+                                ),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Beim Öffnen der App landen Sie standardmäßig im Hauptverzeichnis (",
+                                    h.code([h.Class("help-path")], ["/"]),
+                                    ").",
+                                  ],
+                                ),
+                                h.ul(
+                                  [h.Class("help-list")],
+                                  [
+                                    h.li(
+                                      [],
+                                      [
+                                        "Zu Beginn sehen Sie hier eine Dateiliste, da noch keine Startseite existiert.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Sobald Sie eine Datei namens ",
+                                        h.code([h.Class("help-path")], ["index.html"]),
+                                        " erstellen, wird diese automatisch geladen, wenn Sie die App öffnen.",
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Dieses Prinzip gilt auch für alle Unterordner: Die Adresse ",
+                                    h.code([h.Class("help-path")], ["/projekte/"]),
+                                    " lädt automatisch die Datei ",
+                                    h.code([h.Class("help-path")], ["/projekte/index.html"]),
+                                    ". Fehlt die Datei (oder existiert die aufgerufene Adresse gar nicht), zeigt die App stattdessen die Dateiliste des Ordners.",
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4(
+                                  [h.Class("help-heading")],
+                                  ["Der Bearbeitungsmodus (?pwaislands)"],
+                                ),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Wenn die App eine fertige Webseite (wie die ",
+                                    h.code([h.Class("help-path")], ["index.html"]),
+                                    ") anzeigt, können Sie mit dem Parameter ",
+                                    h.code([h.Class("help-path")], ["?pwaislands"]),
+                                    " in der Adresse zurück in die Bearbeitungs-App wechseln:",
+                                  ],
+                                ),
+                                h.ul(
+                                  [h.Class("help-list")],
+                                  [
+                                    h.li(
+                                      [],
+                                      [
+                                        h.code(
+                                          [h.Class("help-path")],
+                                          [`${context.origin}/?pwaislands`],
+                                        ),
+                                        " → Erzwingt die Dateiliste des Hauptverzeichnisses (auch wenn eine ",
+                                        h.code([h.Class("help-path")], ["index.html"]),
+                                        " existiert).",
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4(
+                                  [h.Class("help-heading")],
+                                  ["Typen für Werkzeuge und Agenten"],
+                                ),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Die Datei ",
+                                    h.code(
+                                      [h.Class("help-path")],
+                                      [
+                                        h.a(
+                                          [
+                                            h.Class("help-link"),
+                                            h.Href(API_DTS_HREF),
+                                            h.Target("_blank"),
+                                            h.Rel("noopener"),
+                                          ],
+                                          [`${context.origin}/api.d.ts`],
+                                        ),
+                                      ],
+                                    ),
+                                    " beschreibt die komplette API mit allen Typen. Kopieren Sie sie in die Zwischenablage und geben Sie sie einem KI-Agenten als Kontext — damit kann er Islands schreiben, ohne die API zu raten.",
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+
+                    h.details(
+                      [
+                        h.Class("help-topic"),
+                        h.Name("help-topic"),
+                        h.DataAttribute("topic", "fs"),
+                        h.Open(isFsOpen),
+                        h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "fs", isOpen })),
+                      ],
+                      [
+                        h.summary(
+                          [h.Class("help-topic-summary")],
+                          [
+                            h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["💾"]),
+                            h.span([h.Class("help-topic-title")], ["Speicher: FS API und OPFS"]),
+                          ],
+                        ),
+                        h.div(
+                          [h.Class("help-topic-body")],
+                          [
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Beide Speicherarten beruhen auf derselben Browser-Schnittstelle, der ",
+                                    h.code([h.Class("help-path")], ["File System Access API"]),
+                                    ". Sie liefern dasselbe ",
+                                    h.code([h.Class("help-path")], ["FileSystemDirectoryHandle"]),
+                                    " — die Islands-API arbeitet in beiden Fällen ausschließlich mit Pfaden relativ zur Wurzel.",
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4([h.Class("help-heading")], ["📁 Lokaler Ordner (FS API)"]),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Ein normaler Ordner auf dem Gerät, gewählt über ",
+                                    h.code([h.Class("help-path")], ["showDirectoryPicker()"]),
+                                    ". Die Dateien lassen sich jederzeit mit anderen Programmen öffnen und liegen im Dateisystem, sind also mitsamt Ordnerstruktur leicht zu sichern.",
+                                  ],
+                                ),
+                                h.ul(
+                                  [h.Class("help-list")],
+                                  [
+                                    h.li(
+                                      [],
+                                      [
+                                        "Der Ordner-Handle wird in IndexedDB gemerkt. Nach einem Neustart fehlt aber die ",
+                                        h.strong([], ["Berechtigung"]),
+                                        ": der Browser braucht einen Klick, um sie erneut zu erteilen („Zugriff erlauben“).",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Ein Umbenennen oder Verschieben des Ordners außerhalb des Browsers macht das gemerkte Handle ungültig — dann neu auswählen.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Nur in Browsern mit ",
+                                        h.code([h.Class("help-path")], ["showDirectoryPicker"]),
+                                        " (Chromium-basiert).",
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4([h.Class("help-heading")], ["📦 App-Speicher (OPFS)"]),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "Das ",
+                                    h.em([], ["Origin Private File System"]),
+                                    " ist ein privater Speicherbereich des Browsers, erreichbar über ",
+                                    h.code(
+                                      [h.Class("help-path")],
+                                      ["navigator.storage.getDirectory()"],
+                                    ),
+                                    ". Hier liegt alles unter dem Ordner ",
+                                    h.code([h.Class("help-path")], [OPFS_APP_FOLDER]),
+                                    ".",
+                                  ],
+                                ),
+                                h.ul(
+                                  [h.Class("help-list")],
+                                  [
+                                    h.li(
+                                      [],
+                                      [
+                                        "Braucht ",
+                                        h.strong(
+                                          [],
+                                          ["keine Ordnerauswahl und keine Berechtigung"],
+                                        ),
+                                        " — die App ist nach dem Start sofort einsatzbereit.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Die Dateien sind ",
+                                        h.strong([], ["an diesen Browser gebunden"]),
+                                        ": in einem anderen Browser oder Profil sind sie nicht sichtbar, und mit dem Löschen der Websitedaten sind sie weg.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Ein Export auf die Festplatte ist von Hand nötig (Datei herunterladen).",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Der Browser darf den Speicher bei Platzmangel räumen; eine dauerhafte Ablage ist es nicht.",
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4([h.Class("help-heading")], ["Welche Art wann?"]),
+                                h.div(
+                                  [h.Class("help-table-wrap")],
+                                  [
+                                    h.table(
+                                      [h.Class("help-table")],
+                                      [
+                                        h.thead(
+                                          [],
+                                          [
+                                            h.tr(
+                                              [],
+                                              [
+                                                h.th([]),
+                                                h.th([], ["📁 Lokaler Ordner"]),
+                                                h.th([], ["📦 App-Speicher"]),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        h.tbody(
+                                          [],
+                                          [
+                                            h.tr(
+                                              [],
+                                              [
+                                                h.td([], ["Berechtigung nötig"]),
+                                                h.td([], ["ja, bei jedem Start"]),
+                                                h.td([], ["nein"]),
+                                              ],
+                                            ),
+                                            h.tr(
+                                              [],
+                                              [
+                                                h.td([], ["Andere Programme"]),
+                                                h.td([], ["ja"]),
+                                                h.td([], ["nein"]),
+                                              ],
+                                            ),
+                                            h.tr(
+                                              [],
+                                              [
+                                                h.td([], ["Anderer Browser"]),
+                                                h.td([], ["ja, Ordner erneut wählen"]),
+                                                h.td([], ["nein"]),
+                                              ],
+                                            ),
+                                            h.tr(
+                                              [],
+                                              [
+                                                h.td([], ["Sicherung"]),
+                                                h.td([], ["Dateisystem-Backup"]),
+                                                h.td([], ["von Hand"]),
+                                              ],
+                                            ),
+                                            h.tr(
+                                              [],
+                                              [
+                                                h.td([], ["Verfügbar in"]),
+                                                h.td([], ["nur Chromium"]),
+                                                h.td([], ["allen modernen Browsern"]),
+                                              ],
+                                            ),
+                                            h.tr(
+                                              [h.Class("help-supported-row")],
+                                              [
+                                                h.td([], ["In diesem Browser"]),
+                                                h.td(
+                                                  [h.DataAttribute("support", "fsa")],
+                                                  [
+                                                    h.span(
+                                                      [
+                                                        h.Class("help-supported"),
+                                                        h.DataAttribute(
+                                                          "supported",
+                                                          context.hasDirectoryPicker ? "yes" : "no",
+                                                        ),
+                                                      ],
+                                                      [
+                                                        context.hasDirectoryPicker
+                                                          ? "✅ verfügbar"
+                                                          : "❌ nicht verfügbar",
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                                h.td(
+                                                  [h.DataAttribute("support", "opfs")],
+                                                  [
+                                                    h.span(
+                                                      [
+                                                        h.Class("help-supported"),
+                                                        h.DataAttribute(
+                                                          "supported",
+                                                          context.hasOPFS ? "yes" : "no",
+                                                        ),
+                                                      ],
+                                                      [
+                                                        context.hasOPFS
+                                                          ? "✅ verfügbar"
+                                                          : "❌ nicht verfügbar",
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                h.p(
+                                  [h.Class("help-hint")],
+                                  [
+                                    "Wechseln lässt sich die Art jederzeit über das Zahnrad ⚙️. Die Wahl wird gemerkt, die Dateien der jeweils anderen Art bleiben dabei unangetastet.",
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                CopyDtsState.match(model.copyDtsState, {
+                  Error: ({ message }) =>
+                    h.div(
+                      [h.Id("help-copy-error"), h.Class("alert alert-danger")],
+                      [
+                        `Kopieren hat nicht geklappt: ${message} Öffnen Sie ${context.origin}/api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`,
+                      ],
+                    ),
+                  Copied: () => h.empty,
+                  Copying: () => h.empty,
+                  Idle: () => h.empty,
+                }),
+              ],
+            ),
+            h.footer(
+              [h.Class("modal-footer")],
+              [
+                h.div([h.Class("modal-footer-left")]),
+                h.div(
+                  [h.Class("modal-footer-right")],
+                  [
+                    h.button(
+                      [
+                        h.Type("button"),
+                        h.Id("help-btn-copy-dts"),
+                        h.Class("btn btn-primary icon-label-btn copy-dts-btn"),
+                        h.AriaLabel("/api.d.ts kopieren"),
+                        h.DataAttribute("tip", "/api.d.ts kopieren"),
+                        h.Disabled(
+                          CopyDtsState.match(model.copyDtsState, {
+                            Idle: () => false,
+                            Copying: () => true,
+                            Copied: () => false,
+                            Error: () => false,
+                          }),
+                        ),
+                        h.OnClick(Message.ClickedCopyDts()),
+                      ],
+                      [
+                        h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["📋"]),
+                        CopyDtsState.match(model.copyDtsState, {
+                          Idle: () =>
+                            h.span(
+                              [h.Class("icon-label-btn-text")],
+                              ["/api.d.ts", h.span([h.Class("copy-dts-action")], [" kopieren"])],
+                            ),
+                          Copying: () =>
+                            h.span([h.Class("icon-label-btn-text")], ["Wird kopiert …"]),
+                          Copied: () => h.span([h.Class("icon-label-btn-text")], ["✅ Kopiert!"]),
+                          Error: () =>
+                            h.span(
+                              [h.Class("icon-label-btn-text")],
+                              ["/api.d.ts", h.span([h.Class("copy-dts-action")], [" kopieren"])],
+                            ),
+                        }),
+                      ],
+                    ),
+                    h.button(
+                      [
+                        h.Type("button"),
+                        h.Id("help-btn-close"),
+                        h.Class("btn btn-secondary icon-label-btn"),
+                        h.AriaLabel("Schließen"),
+                        h.DataAttribute("tip", "Schließen"),
+                        h.OnClick(Message.ClickedClose()),
+                      ],
+                      [
+                        h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                        h.span([h.Class("icon-label-btn-text")], ["Schließen"]),
+                      ],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ],
+    )
+  },
+)

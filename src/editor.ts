@@ -1,4 +1,5 @@
-import { Effect, Match, Option, Schema } from "effect"
+import { Array, Effect, Match, Option, Schema } from "effect"
+import { Submodel } from "foldkit"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
 import type * as Html from "foldkit/html"
@@ -101,7 +102,7 @@ export const Message = defineMessageUnion({
   ClickedConfirmOverwrite: {},
   ClickedCancelOverwrite: {},
   ClickedDelete: {},
-  ConfirmedDelete: {},
+  ClickedConfirmDelete: {},
   ClickedCancelDelete: {},
   ClickedClose: {},
   SucceededSaveChanges: {
@@ -268,6 +269,8 @@ export const SaveChanges = Command.define("SaveChanges", {
               Match.exhaustive,
             )
           }),
+          Match.tag("ConfirmDelete", () => Promise.resolve()),
+          Match.exhaustive,
         )
 
         revokeActivePreviewUrl()
@@ -511,7 +514,7 @@ export const update = (
         return Option.none()
       }
 
-      const existingNames = new Set(context.existingEntries.map((e) => e.name))
+      const existingNames = new Set(Array.map(context.existingEntries, (e) => e.name))
 
       return Model.match(model, {
         CreateFolder: (createFolder) => {
@@ -727,7 +730,7 @@ export const update = (
         ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
 
-    ConfirmedDelete: () =>
+    ClickedConfirmDelete: () =>
       Model.match(model, {
         ConfirmDelete: ({ entryName, entryKind }) => ({
           model,
@@ -1132,7 +1135,7 @@ const viewConfirmDeleteModal = (
                     [
                       h.Type("button"),
                       h.Class("btn btn-danger"),
-                      h.OnClick(Message.ConfirmedDelete()),
+                      h.OnClick(Message.ClickedConfirmDelete()),
                     ],
                     ["Löschen"],
                   ),
@@ -1216,7 +1219,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
     ],
   )
 
-export const view = (model: Model, h: Html.HtmlBuilder<Message>): Html.Html =>
+export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
   Model.match(model, {
     CreateFile: ({ name, content, maybeValidationError }) =>
       viewEditorModal(
@@ -1277,4 +1280,5 @@ export const view = (model: Model, h: Html.HtmlBuilder<Message>): Html.Html =>
     ConfirmDelete: ({ entryName, entryKind }) => viewConfirmDeleteModal(entryName, entryKind, h),
 
     ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
-  })
+  }),
+)

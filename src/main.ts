@@ -41,7 +41,7 @@ import {
 import * as Editor from "./editor"
 import * as Help from "./help"
 import * as Modal from "./modal"
-import { AlertBanner, mapHtmlBuilder } from "./modal"
+import { AlertBanner } from "./modal"
 import {
   AppRoute,
   HelpTopic,
@@ -854,9 +854,7 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
 
 export const DisconnectStorage = Command.define("DisconnectStorage", {
   args: {
-    hasDirectoryPicker: Schema.Boolean,
     hasOPFS: Schema.Boolean,
-    route: AppRoute,
   },
   messages: [Message.SucceededDisconnectStorage, Message.FailedDisconnectStorage],
   execute: (args) =>
@@ -1397,10 +1395,7 @@ export const update = (
       const route = parseUrlToRoute(url)
       return AppRoute.match(route, {
         Folder: ({ subPath }) => {
-          const nextModalState = Match.value(model.modalState).pipe(
-            Match.tag("Closed", () => model.modalState),
-            Match.orElse(() => Modal.ModalState.Closed()),
-          )
+          const nextModalState = Modal.ModalState.Closed()
           return Match.value(model.storageState).pipe(
             Match.tag("Ready", (readyState) => {
               const isSamePath = isSameSubPath(readyState.subPath, subPath)
@@ -1696,9 +1691,7 @@ export const update = (
         }),
         commands: [
           DisconnectStorage({
-            hasDirectoryPicker: model.hasDirectoryPicker,
             hasOPFS: model.hasOPFS,
-            route: AppRoute.Folder({ subPath: [] }),
           }),
           PushUrl({ url: buildFolderUrl([]) }),
         ],
@@ -2820,15 +2813,17 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
 // VIEW MODALS
 
 const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
-  Modal.view(
-    model.modalState,
-    {
+  h.submodel({
+    slotId: "modal",
+    model: model.modalState,
+    viewInputs: {
       origin: model.origin,
       hasDirectoryPicker: model.hasDirectoryPicker,
       hasOPFS: model.hasOPFS,
     },
-    mapHtmlBuilder(h, (msg) => Message.GotModalMessage({ message: msg })),
-  )
+    view: Modal.view,
+    toParentMessage: (msg) => Message.GotModalMessage({ message: msg }),
+  })
 
 // VIEW DOCUMENT
 

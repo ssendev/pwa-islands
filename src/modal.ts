@@ -1,4 +1,5 @@
 import { Array, Effect, Match, Option, Schema, pipe } from "effect"
+import { Submodel } from "foldkit"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
 import * as File from "foldkit/file"
@@ -95,7 +96,7 @@ export const Message = defineMessageUnion({
   ToggledImportConflictApplyToAll: {
     applyToAll: Schema.Boolean,
   },
-  CancelledImportConflict: {},
+  ClickedCancelImportConflict: {},
   CompletedWritePendingImportFiles: {
     entries: Schema.Array(FileEntry),
     maybeAlertBanner: Schema.Option(AlertBanner),
@@ -173,7 +174,7 @@ export const SelectImportFiles = Command.define("SelectImportFiles", {
   execute: File.selectMultiple([]).pipe(
     Effect.map((selectedFiles) => {
       setPendingImportFiles(selectedFiles)
-      const pendingFiles = selectedFiles.map((file) => ({
+      const pendingFiles = Array.map(selectedFiles, (file) => ({
         name: file.name,
         size: file.size,
         lastModified: file.lastModified,
@@ -197,7 +198,9 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
         const pendingFiles = getPendingImportFiles()
         setPendingImportFiles([])
 
-        const fileMap = new Map<string, globalThis.File>(pendingFiles.map((f) => [f.name, f]))
+        const fileMap = new Map<string, globalThis.File>(
+          Array.map(pendingFiles, (f) => [f.name, f]),
+        )
 
         const importResults = await Array.reduce(
           args.items,
@@ -409,7 +412,7 @@ export const update = (
       }
 
       const existingByName = new Map<string, FileEntry>(
-        context.existingEntries.map((e) => [e.name, e]),
+        Array.map(context.existingEntries, (e) => [e.name, e]),
       )
       const reservedNames = new Set<string>(existingByName.keys())
 
@@ -486,14 +489,14 @@ export const update = (
           ]
 
           const reservedNames = new Set<string>([
-            ...context.existingEntries.map((e) => e.name),
-            ...updatedResolved.map((r) => r.targetName),
+            ...Array.map(context.existingEntries, (e) => e.name),
+            ...Array.map(updatedResolved, (r) => r.targetName),
           ])
 
           if (applyToAll) {
             const batchResolved: ReadonlyArray<ResolvedImportItem> = [
               ...updatedResolved,
-              ...queue.map((item) => {
+              ...Array.map(queue, (item) => {
                 const itemTarget =
                   action === "rename" ? findFreeFileName(item.name, reservedNames) : item.name
                 reservedNames.add(itemTarget)
@@ -551,7 +554,7 @@ export const update = (
         Match.orElse(() => ({ model: modalState, outMessage: OutMessage.None() })),
       ),
 
-    CancelledImportConflict: () => ({
+    ClickedCancelImportConflict: () => ({
       model: ModalState.Closed(),
       commands: [RevokeActivePreviewUrl()],
       outMessage: OutMessage.None(),
@@ -579,34 +582,10 @@ export const update = (
 
 // VIEW
 
-export const mapHtmlBuilder = <ChildMessage, ParentMessage>(
-  h: Html.HtmlBuilder<ParentMessage>,
-  toParent: (message: ChildMessage) => ParentMessage,
-): Html.HtmlBuilder<ChildMessage> => {
-  return new Proxy(h as unknown as Html.HtmlBuilder<ChildMessage>, {
-    get(target, prop, receiver) {
-      if (prop === "OnClick") {
-        return (message: ChildMessage, options?: any) =>
-          (target as any).OnClick(toParent(message), options)
-      }
-      if (prop === "OnSubmit") {
-        return (message: ChildMessage) => (target as any).OnSubmit(toParent(message))
-      }
-      if (prop === "OnChange") {
-        return (toMessage: (value: string) => ChildMessage) =>
-          (target as any).OnChange((value: string) => toParent(toMessage(value)))
-      }
-      if (prop === "OnInput") {
-        return (toMessage: (value: string) => ChildMessage) =>
-          (target as any).OnInput((value: string) => toParent(toMessage(value)))
-      }
-      if (prop === "OnToggle") {
-        return (toMessage: (isOpen: boolean) => ChildMessage) =>
-          (target as any).OnToggle((isOpen: boolean) => toParent(toMessage(isOpen)))
-      }
-      return Reflect.get(target, prop, receiver)
-    },
-  })
+export type ViewInputs = {
+  readonly origin: string
+  readonly hasDirectoryPicker: boolean
+  readonly hasOPFS: boolean
 }
 
 const viewImportConflictModal = (
@@ -638,7 +617,7 @@ const viewImportConflictModal = (
                   h.Type("button"),
                   h.Class("modal-close-btn"),
                   h.AriaLabel("Schließen"),
-                  h.OnClick(Message.CancelledImportConflict()),
+                  h.OnClick(Message.ClickedCancelImportConflict()),
                 ],
                 ["×"],
               ),
@@ -716,36 +695,34 @@ const viewImportConflictModal = (
   )
 }
 
-export const view = (
-  model: ModalState,
-  context: {
-    readonly origin: string
-    readonly hasDirectoryPicker: boolean
-    readonly hasOPFS: boolean
-  },
-  h: Html.HtmlBuilder<Message>,
-): Html.Html =>
-  h.div(
-    [h.Id("files-modal-container")],
-    [
-      ModalState.match(model, {
-        Closed: () => h.empty,
+export const view = Submodel.defineView<ModalState, Message, ViewInputs>(
+  (model, context, h): Html.Html =>
+    h.div(
+      [h.Id("files-modal-container")],
+      [
+        ModalState.match(model, {
+          Closed: () => h.empty,
 
-        Editor: ({ editor }) =>
-          Editor.view(
-            editor,
-            mapHtmlBuilder(h, (msg) => Message.GotEditorMessage({ message: msg })),
-          ),
+          Editor: ({ editor }) =>
+            h.submodel({
+              slotId: "editor",
+              model: editor,
+              view: Editor.view,
+              toParentMessage: (msg) => Message.GotEditorMessage({ message: msg }),
+            }),
 
-        ImportConflict: ({ current, suggestedName, queue, applyToAll }) =>
-          viewImportConflictModal(current, suggestedName, queue, applyToAll, h),
+          ImportConflict: ({ current, suggestedName, queue, applyToAll }) =>
+            viewImportConflictModal(current, suggestedName, queue, applyToAll, h),
 
-        Help: ({ help }) =>
-          Help.view(
-            help,
-            context,
-            mapHtmlBuilder(h, (msg) => Message.GotHelpMessage({ message: msg })),
-          ),
-      }),
-    ],
-  )
+          Help: ({ help }) =>
+            h.submodel({
+              slotId: "help",
+              model: help,
+              viewInputs: context,
+              view: Help.view,
+              toParentMessage: (msg) => Message.GotHelpMessage({ message: msg }),
+            }),
+        }),
+      ],
+    ),
+)

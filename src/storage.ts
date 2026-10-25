@@ -375,7 +375,7 @@ export function normalizePath(path: string): string {
 
 export function splitPath(path: string): ReadonlyArray<string> {
   const clean = normalizePath(path)
-  return clean ? clean.split("/").filter(Boolean) : []
+  return clean ? Array.filter(clean.split("/"), Boolean) : []
 }
 
 export async function findActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
