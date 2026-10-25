@@ -1574,7 +1574,7 @@ export const update = (model: Model, message: Message) =>
         model: modifyFields(model, {
           modalState: () => ModalState.Closed(),
         }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })],
+        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
       }
     },
 

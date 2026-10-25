@@ -26,33 +26,33 @@ const storageCache: {
 
 // NOTE: IndexedDB instance is cached to avoid reconnect overhead on island asset fetches
 export function openDB(): Promise<IDBDatabase> {
-  if (Option.isSome(storageCache.dbPromise)) {
-    return storageCache.dbPromise.value
-  }
+  return Option.match(storageCache.dbPromise, {
+    onSome: (cached) => cached,
+    onNone: () => {
+      const pending: Promise<IDBDatabase> = new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION)
 
-  const pending: Promise<IDBDatabase> = new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION)
+        request.onupgradeneeded = () => {
+          const db = request.result
+          if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME)
+          }
+        }
 
-    request.onupgradeneeded = () => {
-      const db = request.result
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        db.createObjectStore(STORE_NAME)
-      }
-    }
+        request.onsuccess = () => resolve(request.result)
+        request.onerror = () => reject(request.error)
+      })
 
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+      storageCache.dbPromise = Option.some(pending)
+      void pending.catch(() => {
+        if (Option.exists(storageCache.dbPromise, (cached) => cached === pending)) {
+          storageCache.dbPromise = Option.none()
+        }
+      })
+
+      return pending
+    },
   })
-
-  storageCache.dbPromise = Option.some(pending)
-  // NOTE: Evict failed connection so future calls can retry
-  void pending.catch(() => {
-    if (Option.isSome(storageCache.dbPromise) && storageCache.dbPromise.value === pending) {
-      storageCache.dbPromise = Option.none()
-    }
-  })
-
-  return pending
 }
 
 export async function getStoredDirectoryHandle(): Promise<
@@ -309,8 +309,12 @@ export function invalidateRootCache(): void {
 
 // NOTE: Missing directory permission is intentionally un-cached so user prompts re-trigger
 async function findCachedActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
-  if (Option.isSome(storageCache.root)) {
-    return storageCache.root
+  const maybeCachedRoot = Option.match(storageCache.root, {
+    onNone: () => Option.none<FileSystemDirectoryHandle>(),
+    onSome: (root) => Option.some(root),
+  })
+  if (Option.isSome(maybeCachedRoot)) {
+    return maybeCachedRoot
   }
   const maybeRoot = await findActiveStorage()
   if (Option.isSome(maybeRoot)) {

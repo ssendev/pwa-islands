@@ -10,10 +10,10 @@ export function checkTextBytes(bytes: Uint8Array): TextCheck {
   }
 
   const decoded = decodeUtf8Strict(bytes)
-  if (decoded === null) {
+  if (Option.isNone(decoded)) {
     return { kind: "binary", reason: "ungültiges UTF-8" }
   }
-  const text = decoded
+  const text = decoded.value
 
   const roundTrip = new TextEncoder().encode(text)
   if (roundTrip.byteLength !== bytes.byteLength) {
@@ -46,14 +46,15 @@ export async function readTextOrThrow(blob: Blob, path: string): Promise<string>
   return result.kind === "text" ? result.text : ""
 }
 
-function decodeUtf8Strict(bytes: Uint8Array): string | null {
+function decodeUtf8Strict(bytes: Uint8Array): Option.Option<string> {
   try {
-    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
+    return Option.some(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes))
   } catch {
-    return null
+    return Option.none()
   }
 }
 
 function toHex(byte: number): string {
   return `0x${byte.toString(16).padStart(2, "0")}`
 }
+import { Option } from "effect"

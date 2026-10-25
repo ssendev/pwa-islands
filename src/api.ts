@@ -138,11 +138,11 @@ const api: IslandsApi = {
   },
 
   async copy(from, to) {
-    const source = await resolveDirectory(from).catch(() => null)
-    if (source) {
+    const maybeSource = await resolveDirectory(from).then(Option.some, () => Option.none())
+    if (Option.isSome(maybeSource)) {
       const { dirs: toDirs, name: toName } = splitEntryPath(to)
       const target = await resolveDirectory(toDirs.join("/"), true)
-      await copyDirectory(source, target, toName)
+      await copyDirectory(maybeSource.value, target, toName)
       return
     }
 
