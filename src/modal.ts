@@ -86,6 +86,7 @@ export const resolveModalForRoute = async (
   storage: FileSystemHandleStorage,
   route: AppRoute,
   entries: ReadonlyArray<FileEntry>,
+  didFallback: boolean = false,
 ): Promise<{
   readonly maybeModalState: Option.Option<ModalState>
   readonly maybeAlertBanner: Option.Option<AlertBanner>
@@ -101,13 +102,18 @@ export const resolveModalForRoute = async (
         maybeAlertBanner: Option.none(),
       }),
 
-    Folder: () =>
+    Folder: ({ subPath }) =>
       Promise.resolve({
         maybeModalState: Option.none(),
-        maybeAlertBanner: Option.none(),
+        maybeAlertBanner: didFallback
+          ? Option.some<AlertBanner>({
+              message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+              variant: "warning",
+            })
+          : Option.none(),
       }),
 
-    New: ({ target }) =>
+    New: ({ subPath, target }) =>
       Promise.resolve({
         maybeModalState: Option.some(
           ModalState.Editor({
@@ -124,10 +130,25 @@ export const resolveModalForRoute = async (
                   }),
           }),
         ),
-        maybeAlertBanner: Option.none(),
+        maybeAlertBanner: didFallback
+          ? Option.some<AlertBanner>({
+              message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+              variant: "warning",
+            })
+          : Option.none(),
       }),
 
     Edit: async ({ subPath, name }) => {
+      if (didFallback) {
+        return {
+          maybeModalState: Option.none(),
+          maybeAlertBanner: Option.some<AlertBanner>({
+            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            variant: "warning",
+          }),
+        }
+      }
+
       const maybeEntry = Array.findFirst(entries, (entry) => entry.name === name)
       return await Option.match(maybeEntry, {
         onNone: () =>

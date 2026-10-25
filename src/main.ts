@@ -397,22 +397,11 @@ const resolveRouteDeepLink = async (
 
   const { resolvedSubPath, entries, didFallback } = await listEntriesOrRoot(storage, targetSubPath)
 
-  if (didFallback) {
-    return {
-      subPath: [],
-      entries,
-      maybeModalState: Option.none(),
-      maybeAlertBanner: Option.some<AlertBanner>({
-        message: `Pfad "/${targetSubPath.join("/")}" wurde nicht gefunden.`,
-        variant: "warning",
-      }),
-    }
-  }
-
   const { maybeModalState, maybeAlertBanner } = await Modal.resolveModalForRoute(
     storage,
     route,
     entries,
+    didFallback,
   )
 
   return {
