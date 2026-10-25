@@ -225,7 +225,8 @@ export class FileSystemHandleStorage {
       }
     }
 
-    for (const handle of handles) {
+    await Array.reduce(handles, Promise.resolve(), async (previous, handle) => {
+      await previous
       if (handle.kind === "file") {
         const file = await handle.getFile()
         const newFileHandle = await target.getFileHandle(handle.name, {
@@ -240,7 +241,7 @@ export class FileSystemHandleStorage {
         })
         await this.copyDirectoryRecursive(handle, newSubDir)
       }
-    }
+    })
   }
 
   async listEntries(subPath: ReadonlyArray<string>): Promise<ReadonlyArray<FileEntry>> {

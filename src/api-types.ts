@@ -42,7 +42,7 @@ export interface ReadOptions {
 
 export interface IslandsApi {
   /** Listet den Inhalt eines Verzeichnisses auf (Standard: Wurzel). Sortiert: Ordner zuerst, dann alphabetisch. */
-  list(path?: string): Promise<IslandEntry[]>
+  list(path?: string): Promise<ReadonlyArray<IslandEntry>>
 
   /** Liest den Inhalt einer Datei als Text (Mit `ensureText: true` wird geprüft, ob die Datei verlustfrei Text ist). */
   read(path: string, options?: ReadOptions): Promise<string>

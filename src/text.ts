@@ -42,15 +42,16 @@ export type TextCheck =
  * darf dieses Zeichen enthalten.
  */
 export function checkTextBytes(bytes: Uint8Array): TextCheck {
-  if (bytes.length === 0) return { kind: "empty" }
+  if (bytes.byteLength === 0) {
+    return { kind: "empty" }
+  }
 
-  let text: string
-  try {
-    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
-  } catch {
+  const decoded = decodeUtf8Strict(bytes)
+  if (decoded === null) {
     // `fatal: true` wirft bei ungültigem UTF-8 -- genau der Binärfall.
     return { kind: "binary", reason: "ungültiges UTF-8" }
   }
+  const text = decoded
 
   const roundTrip = new TextEncoder().encode(text)
   if (roundTrip.length !== bytes.length) {
@@ -60,14 +61,11 @@ export function checkTextBytes(bytes: Uint8Array): TextCheck {
     }
   }
 
-  for (let index = 0; index < bytes.length; index += 1) {
-    const found = bytes[index]
-    const rewritten = roundTrip[index]
-    if (found !== rewritten) {
-      return {
-        kind: "binary",
-        reason: `Abweichung an Byte ${index} (gelesen ${toHex(found)}, zurückgeschrieben ${toHex(rewritten)})`,
-      }
+  const firstMismatch = bytes.findIndex((found, index) => found !== roundTrip[index])
+  if (firstMismatch !== -1) {
+    return {
+      kind: "binary",
+      reason: `Abweichung an Byte ${firstMismatch} (gelesen ${toHex(bytes[firstMismatch])}, zurückgeschrieben ${toHex(roundTrip[firstMismatch])})`,
     }
   }
 
@@ -91,6 +89,15 @@ export async function readTextOrThrow(blob: Blob, path: string): Promise<string>
     throw new Error(`Datei ist kein gültiger UTF-8-Text: ${result.reason} (${path}).`)
   }
   return result.kind === "text" ? result.text : ""
+}
+
+/** Dekodiert strikt als UTF-8; liefert null bei ungültigen Sequenzen. */
+function decodeUtf8Strict(bytes: Uint8Array): string | null {
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes)
+  } catch {
+    return null
+  }
 }
 
 /** Ein Byte als zweistelliger Hex-Wert, z. B. `0x8f`. */

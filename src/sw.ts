@@ -62,7 +62,9 @@ registerRoute(
 
     try {
       const saved = await findSavedFile(relativePath)
-      if (saved) return fileResponse(saved)
+      if (saved) {
+        return fileResponse(saved)
+      }
     } catch (err) {
       console.error("SW: Fehler beim Laden der Datei:", err)
     }
@@ -87,7 +89,9 @@ registerRoute(
     const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ""))
     try {
       const saved = relativePath ? await findSavedFile(relativePath) : null
-      if (saved) return fileResponse(saved)
+      if (saved) {
+        return fileResponse(saved)
+      }
     } catch (err) {
       console.error("SW: Fehler beim Laden der Datei:", err)
     }

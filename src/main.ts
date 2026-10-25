@@ -195,6 +195,8 @@ const handleUseFsa = (model: Model): Update.Return<Model, Message> => {
   })
 }
 
+const isSameSubPath = Array.makeEquivalence<string>((a, b) => a === b)
+
 type ReadyStorageState = Extract<StorageState, { readonly _tag: "Ready" }>
 
 const isReady = (storageState: StorageState): storageState is ReadyStorageState =>
@@ -469,9 +471,7 @@ export const update = (model: Model, message: Message) =>
             }
           }
           const readyState = model.storageState
-          const isSamePath =
-            readyState.subPath.length === subPath.length &&
-            readyState.subPath.every((seg, idx) => seg === subPath[idx])
+          const isSamePath = isSameSubPath(readyState.subPath, subPath)
 
           if (isSamePath) {
             return {
@@ -520,9 +520,7 @@ export const update = (model: Model, message: Message) =>
           }
 
           const readyState = model.storageState
-          const isSamePath =
-            readyState.subPath.length === subPath.length &&
-            readyState.subPath.every((seg, idx) => seg === subPath[idx])
+          const isSamePath = isSameSubPath(readyState.subPath, subPath)
 
           if (isSamePath) {
             return {
@@ -557,9 +555,7 @@ export const update = (model: Model, message: Message) =>
           }
 
           const readyState = model.storageState
-          const isSamePath =
-            readyState.subPath.length === subPath.length &&
-            readyState.subPath.every((seg, idx) => seg === subPath[idx])
+          const isSamePath = isSameSubPath(readyState.subPath, subPath)
 
           const entry = isSamePath
             ? EntriesState.match(readyState.entriesState, {
@@ -886,7 +882,9 @@ export const update = (model: Model, message: Message) =>
           },
           (acc, file) => {
             const rawName = file.name.trim()
-            if (!rawName) return acc
+            if (!rawName) {
+              return acc
+            }
 
             if (existingByName.has(rawName)) {
               return {

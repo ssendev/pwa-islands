@@ -33,7 +33,9 @@ let dbPromise: Promise<IDBDatabase> | null = null
  * ausmacht.
  */
 export function openDB(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise
+  if (dbPromise) {
+    return dbPromise
+  }
 
   const pending: Promise<IDBDatabase> = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
@@ -227,16 +229,24 @@ async function walkToParent(
   root: FileSystemDirectoryHandle,
   segments: ReadonlyArray<string>,
 ): Promise<FileSystemDirectoryHandle | null> {
-  let current = root
-  for (const segment of segments) {
-    try {
-      current = await current.getDirectoryHandle(segment)
-    } catch (err) {
-      if (err instanceof DOMException && MISS_ERRORS.has(err.name)) return null
-      throw err
-    }
-  }
-  return current
+  return await Array.reduce(
+    segments,
+    Promise.resolve<FileSystemDirectoryHandle | null>(root),
+    async (currentPromise, segment) => {
+      const current = await currentPromise
+      if (!current) {
+        return null
+      }
+      try {
+        return await current.getDirectoryHandle(segment)
+      } catch (err) {
+        if (err instanceof DOMException && MISS_ERRORS.has(err.name)) {
+          return null
+        }
+        throw err
+      }
+    },
+  )
 }
 
 /**
@@ -256,10 +266,14 @@ export async function resolveFileInDirectory(
   indexFile = DEFAULT_INDEX_FILE,
 ): Promise<SavedFile | null> {
   const parts = splitPath(relativePath)
-  if (Array.isReadonlyArrayEmpty(parts)) return null
+  if (Array.isReadonlyArrayEmpty(parts)) {
+    return null
+  }
 
   const parent = await walkToParent(root, parts.slice(0, -1))
-  if (!parent) return null
+  if (!parent) {
+    return null
+  }
 
   const name = parts[parts.length - 1]
   const filePath = parts.join("/")
@@ -269,18 +283,24 @@ export async function resolveFileInDirectory(
     const fileHandle = await parent.getFileHandle(name)
     return { file: await fileHandle.getFile(), path: filePath }
   } catch (err) {
-    if (!(err instanceof DOMException && MISS_ERRORS.has(err.name))) throw err
+    if (!(err instanceof DOMException && MISS_ERRORS.has(err.name))) {
+      throw err
+    }
   }
 
   // 2. Ordner mit Index-Datei. Der zweite Versuch ist kein Fehler, sondern der
   //    Normalfall fuer /foo und /foo/ -- deshalb erst hier, nicht vorher.
-  if (!indexFile) return null
+  if (!indexFile) {
+    return null
+  }
   try {
     const dir = await parent.getDirectoryHandle(name)
     const fileHandle = await dir.getFileHandle(indexFile)
     return { file: await fileHandle.getFile(), path: `${filePath}/${indexFile}` }
   } catch (err) {
-    if (err instanceof DOMException && MISS_ERRORS.has(err.name)) return null
+    if (err instanceof DOMException && MISS_ERRORS.has(err.name)) {
+      return null
+    }
     throw err
   }
 }
@@ -305,7 +325,9 @@ export function invalidateRootCache(): void {
  * der Benutzer jederzeit erteilen, ohne dass ein Ereignis hier ankaeme.
  */
 async function findCachedActiveStorage(): Promise<FileSystemDirectoryHandle | null> {
-  if (rootCache) return rootCache.root
+  if (rootCache) {
+    return rootCache.root
+  }
   const root = await findActiveStorage()
   // null (kein Speicher) nicht festschreiben -- sonst bliebe die App nach dem
   // spaeteren Waehlen eines Ordners stumm.
@@ -321,11 +343,15 @@ export async function findSavedFile(
   relativePath: string,
   indexFile = DEFAULT_INDEX_FILE,
 ): Promise<SavedFile | null> {
-  if (Array.isReadonlyArrayEmpty(splitPath(relativePath))) return null
+  if (Array.isReadonlyArrayEmpty(splitPath(relativePath))) {
+    return null
+  }
 
   try {
     const root = await findCachedActiveStorage()
-    if (!root) return null
+    if (!root) {
+      return null
+    }
     return await resolveFileInDirectory(root, relativePath, indexFile)
   } catch (err) {
     console.warn("findSavedFile Fehler:", err)
@@ -389,15 +415,12 @@ export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | n
 
     const storedHandle = await getStoredDirectoryHandle()
     if (storedHandle) {
-      let perm: PermissionState = "granted"
-      if (storedHandle.queryPermission) {
-        try {
-          perm = await storedHandle.queryPermission({ mode: "readwrite" })
-        } catch {
-          perm = "prompt"
-        }
+      const perm: PermissionState = storedHandle.queryPermission
+        ? await storedHandle.queryPermission({ mode: "readwrite" }).catch(() => "prompt" as const)
+        : "granted"
+      if (perm === "granted") {
+        return storedHandle
       }
-      if (perm === "granted") return storedHandle
     }
 
     if (!storedType) {
@@ -419,11 +442,9 @@ export async function getDirectory(
   dirs: ReadonlyArray<string>,
   create = false,
 ): Promise<FileSystemDirectoryHandle> {
-  let current = root
-  for (const segment of dirs) {
-    current = await current.getDirectoryHandle(segment, { create })
-  }
-  return current
+  return await Array.reduce(dirs, Promise.resolve(root), async (currentPromise, segment) =>
+    (await currentPromise).getDirectoryHandle(segment, { create }),
+  )
 }
 
 export function getMimeType(filename: string, fallback?: string): string {

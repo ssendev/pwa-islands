@@ -87,7 +87,9 @@ const getExtension = (name: string): string => {
 }
 
 export const fileIconFor = (name: string, isDirectory: boolean): string => {
-  if (isDirectory) return "📁"
+  if (isDirectory) {
+    return "📁"
+  }
   const ext = getExtension(name)
   return pipe(
     FILE_ICON_GROUPS,
@@ -130,7 +132,7 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
           const segmentNodes = pipe(
             subPath,
             Array.flatMap((segment, i) => {
-              const isLast = i === subPath.length - 1
+              const isLast = Array.isArrayEmpty(Array.drop(subPath, i + 1))
               const accumulatedPath = pipe(Array.take(subPath, i + 1), Array.join("/"))
               const separator = h.span([h.Class("breadcrumb-separator"), h.AriaHidden(true)], ["/"])
               const item = isLast
@@ -1723,7 +1725,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: HtmlBuilder): Html.Htm
 const viewImportConflictModal = (
   current: PendingImportFile,
   suggestedName: string,
-  queueLength: number,
+  queue: ReadonlyArray<PendingImportFile>,
   applyToAll: boolean,
   h: HtmlBuilder,
 ): Html.Html =>
@@ -1757,7 +1759,7 @@ const viewImportConflictModal = (
             [h.Class("modal-body")],
             [
               h.p([], [`Die Datei „${current.name}“ existiert bereits in diesem Ordner.`]),
-              queueLength > 0
+              Array.isReadonlyArrayNonEmpty(queue)
                 ? h.div(
                     [h.Class("form-check mt-3")],
                     [
@@ -1773,8 +1775,8 @@ const viewImportConflictModal = (
                               }),
                             ),
                           ]),
-                          ` Auswahl auf alle weiteren ${queueLength} ${
-                            queueLength === 1 ? "Konflikt" : "Konflikte"
+                          ` Auswahl auf alle weiteren ${queue.length} ${
+                            queue.length === 1 ? "Konflikt" : "Konflikte"
                           } anwenden`,
                         ],
                       ),
@@ -1892,7 +1894,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
         ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
 
         ImportConflict: ({ current, suggestedName, queue, applyToAll }) =>
-          viewImportConflictModal(current, suggestedName, queue.length, applyToAll, h),
+          viewImportConflictModal(current, suggestedName, queue, applyToAll, h),
 
         Help: ({ isApiOpen, isFsOpen, copyDtsState }) =>
           viewHelpModal(

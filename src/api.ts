@@ -73,23 +73,21 @@ const api: IslandsApi = {
     for await (const entry of dir.values()) {
       const entryPath = path ? `${normalizePath(path)}/${entry.name}` : entry.name
       if (entry.kind === "file") {
-        let size: number | undefined
-        let lastModified: number | undefined
-        try {
-          const file = await entry.getFile()
-          size = file.size
-          lastModified = file.lastModified
-        } catch {
-          // Größe/Änderungsdatum nicht ermittelbar – Eintrag trotzdem liefern.
-        }
-        entries.push({ name: entry.name, path: entryPath, kind: "file", size, lastModified })
+        // Größe/Änderungsdatum nicht ermittelbar – Eintrag trotzdem liefern.
+        const stats = await entry
+          .getFile()
+          .then((file) => ({ size: file.size, lastModified: file.lastModified }))
+          .catch(() => ({ size: undefined, lastModified: undefined }))
+        entries.push({ name: entry.name, path: entryPath, kind: "file", ...stats })
       } else {
         entries.push({ name: entry.name, path: entryPath, kind: "directory" })
       }
     }
 
     entries.sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1
+      if (a.kind !== b.kind) {
+        return a.kind === "directory" ? -1 : 1
+      }
       return a.name.localeCompare(b.name, "de", { sensitivity: "base", numeric: true })
     })
 

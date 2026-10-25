@@ -46,6 +46,25 @@ import {
   encodeSubPath,
 } from "./model"
 
+const listEntriesOrRoot = async (
+  storage: FileSystemHandleStorage,
+  subPath: ReadonlyArray<string>,
+): Promise<{
+  readonly resolvedSubPath: ReadonlyArray<string>
+  readonly entries: ReadonlyArray<FileEntry>
+  readonly didFallback: boolean
+}> => {
+  try {
+    return {
+      resolvedSubPath: subPath,
+      entries: await storage.listEntries(subPath),
+      didFallback: false,
+    }
+  } catch {
+    return { resolvedSubPath: [], entries: await storage.listEntries([]), didFallback: true }
+  }
+}
+
 const resolveRouteDeepLink = async (
   storage: FileSystemHandleStorage,
   route: AppRoute,
@@ -57,14 +76,7 @@ const resolveRouteDeepLink = async (
 }> => {
   return await AppRoute.match(route, {
     Help: async ({ subPath, maybeTopic }) => {
-      let resolvedSubPath = subPath
-      let entries: ReadonlyArray<FileEntry>
-      try {
-        entries = await storage.listEntries(subPath)
-      } catch {
-        resolvedSubPath = []
-        entries = await storage.listEntries([])
-      }
+      const { resolvedSubPath, entries } = await listEntriesOrRoot(storage, subPath)
       return {
         subPath: resolvedSubPath,
         entries,
@@ -109,19 +121,13 @@ const resolveRouteDeepLink = async (
     },
 
     New: async ({ subPath, target }) => {
-      let resolvedSubPath = subPath
-      let entries: ReadonlyArray<FileEntry>
-      let maybeAlertBanner = Option.none<AlertBanner>()
-      try {
-        entries = await storage.listEntries(subPath)
-      } catch {
-        resolvedSubPath = []
-        entries = await storage.listEntries([])
-        maybeAlertBanner = Option.some<AlertBanner>({
-          message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
-          variant: "warning",
-        })
-      }
+      const { resolvedSubPath, entries, didFallback } = await listEntriesOrRoot(storage, subPath)
+      const maybeAlertBanner = didFallback
+        ? Option.some<AlertBanner>({
+            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            variant: "warning",
+          })
+        : Option.none<AlertBanner>()
       return {
         subPath: resolvedSubPath,
         entries,
@@ -142,13 +148,8 @@ const resolveRouteDeepLink = async (
     },
 
     Edit: async ({ subPath, name }) => {
-      let entries: ReadonlyArray<FileEntry>
-      let currentSubPath = subPath
-      try {
-        entries = await storage.listEntries(subPath)
-      } catch {
-        currentSubPath = []
-        entries = await storage.listEntries([])
+      const { entries, didFallback } = await listEntriesOrRoot(storage, subPath)
+      if (didFallback) {
         return {
           subPath: [],
           entries,
@@ -168,7 +169,7 @@ const resolveRouteDeepLink = async (
 
       if (!targetEntry) {
         return {
-          subPath: currentSubPath,
+          subPath,
           entries,
           maybeModalState: Option.none(),
           maybeAlertBanner: Option.some<AlertBanner>({
@@ -180,7 +181,7 @@ const resolveRouteDeepLink = async (
 
       if (targetEntry.kind === "directory") {
         return {
-          subPath: currentSubPath,
+          subPath: subPath,
           entries,
           maybeModalState: Option.some(
             ModalState.EditFolder({
@@ -193,9 +194,9 @@ const resolveRouteDeepLink = async (
         }
       }
 
-      const fileMode = await loadEditorFileModeForEntry(storage, currentSubPath, targetEntry.name)
+      const fileMode = await loadEditorFileModeForEntry(storage, subPath, targetEntry.name)
       return {
-        subPath: currentSubPath,
+        subPath: subPath,
         entries,
         maybeModalState: Option.some(
           ModalState.EditFile({
@@ -307,9 +308,13 @@ export const InitializeStorage = Command.define("InitializeStorage", {
           : SavedBackend.Unsupported()
 
         const determineFsaSavedBackend = async (): Promise<SavedBackend> => {
-          if (!args.hasDirectoryPicker) return SavedBackend.Unsupported()
+          if (!args.hasDirectoryPicker) {
+            return SavedBackend.Unsupported()
+          }
           const savedHandle = await getSavedDirectoryHandle()
-          if (!savedHandle) return SavedBackend.NoFolderSelected()
+          if (!savedHandle) {
+            return SavedBackend.NoFolderSelected()
+          }
           setSavedFsaHandle(savedHandle)
           const perm = await queryDirectoryPermission(savedHandle, "readwrite")
           if (perm === "granted") {
