@@ -3,6 +3,7 @@ import {
   BinaryEdit,
   EditorFileMode,
   type FileEntry,
+  FileInspection,
   PreviewContent,
   type StorageType,
 } from "./model"
@@ -90,11 +91,12 @@ export const requestDirectoryPermission = async (
 }
 
 export const getOPFSRootDirectory = async (): Promise<FileSystemDirectoryHandle> => {
-  const handle = await getOPFSDirectoryHandle()
-  if (!handle) {
-    throw new Error("Interner Browser-Speicher (OPFS) ist nicht verfügbar.")
-  }
-  return handle
+  return Option.match(await getOPFSDirectoryHandle(), {
+    onNone: () => {
+      throw new Error("Interner Browser-Speicher (OPFS) ist nicht verfügbar.")
+    },
+    onSome: (handle) => handle,
+  })
 }
 
 export const saveDirectoryHandle = async (
@@ -103,14 +105,14 @@ export const saveDirectoryHandle = async (
 ): Promise<void> => {
   if (type === "fsa") {
     await storeDirectoryHandle(handle)
-    runtimeBridge.savedFsaHandle = handle
+    runtimeBridge.savedFsaHandle = Option.some(handle)
   }
   await storeStorageType(type)
 }
 
 export const clearSavedDirectoryHandle = async (): Promise<void> => {
-  runtimeBridge.savedFsaHandle = null
-  runtimeBridge.pendingHandle = null
+  runtimeBridge.savedFsaHandle = Option.none()
+  runtimeBridge.pendingHandle = Option.none()
   await clearStoredDirectoryHandle()
 }
 
@@ -300,40 +302,24 @@ export class FileSystemHandleStorage {
     return sortedEntries
   }
 
-  async inspectFile(
-    subPath: ReadonlyArray<string>,
-    name: string,
-  ): Promise<{
-    size: number
-    isEditableText: boolean
-    text?: string
-  }> {
+  async inspectFile(subPath: ReadonlyArray<string>, name: string): Promise<FileInspection> {
     const dir = await this.getDirectoryHandle(subPath)
     const fileHandle = await dir.getFileHandle(name)
     const file = await fileHandle.getFile()
 
     if (file.size > MAX_TEXT_EDIT_SIZE_BYTES) {
-      return {
-        size: file.size,
-        isEditableText: false,
-      }
+      return FileInspection.Binary({ size: file.size })
     }
 
     const buffer = await file.arrayBuffer()
     const bytes = new Uint8Array(buffer)
     const textCheck = checkTextBytes(bytes)
-    if (textCheck.kind === "binary") {
-      return {
-        size: file.size,
-        isEditableText: false,
-      }
-    }
-
-    return {
-      size: file.size,
-      isEditableText: true,
-      text: textCheck.kind === "text" ? textCheck.text : "",
-    }
+    return textCheck.kind === "binary"
+      ? FileInspection.Binary({ size: file.size })
+      : FileInspection.EditableText({
+          size: file.size,
+          text: textCheck.kind === "text" ? textCheck.text : "",
+        })
   }
 
   async readFileBuffer(subPath: ReadonlyArray<string>, name: string): Promise<ArrayBuffer> {
@@ -429,25 +415,25 @@ export class FileSystemHandleStorage {
 // ---------------------------------------------------------------------------
 
 const runtimeBridge: {
-  activeStorage: FileSystemHandleStorage | null
-  pendingHandle: FileSystemDirectoryHandle | null
-  savedFsaHandle: FileSystemDirectoryHandle | null
-  activePreviewObjectUrl: string | null
-  deferredInstallPrompt: BeforeInstallPromptEvent | null
+  activeStorage: Option.Option<FileSystemHandleStorage>
+  pendingHandle: Option.Option<FileSystemDirectoryHandle>
+  savedFsaHandle: Option.Option<FileSystemDirectoryHandle>
+  maybeActivePreviewObjectUrl: Option.Option<string>
+  deferredInstallPrompt: Option.Option<BeforeInstallPromptEvent>
   pendingImportFiles: ReadonlyArray<globalThis.File>
 } = {
-  activeStorage: null,
-  pendingHandle: null,
-  savedFsaHandle: null,
-  activePreviewObjectUrl: null,
-  deferredInstallPrompt: null,
+  activeStorage: Option.none(),
+  pendingHandle: Option.none(),
+  savedFsaHandle: Option.none(),
+  maybeActivePreviewObjectUrl: Option.none(),
+  deferredInstallPrompt: Option.none(),
   pendingImportFiles: [],
 }
 
-export const getSavedFsaHandle = (): FileSystemDirectoryHandle | null =>
+export const getSavedFsaHandle = (): Option.Option<FileSystemDirectoryHandle> =>
   runtimeBridge.savedFsaHandle
 
-export const setSavedFsaHandle = (handle: FileSystemDirectoryHandle | null): void => {
+export const setSavedFsaHandle = (handle: Option.Option<FileSystemDirectoryHandle>): void => {
   runtimeBridge.savedFsaHandle = handle
 }
 
@@ -458,50 +444,46 @@ export const setPendingImportFiles = (files: ReadonlyArray<globalThis.File>): vo
   runtimeBridge.pendingImportFiles = files
 }
 
-export const getActiveStorage = (): FileSystemHandleStorage | null => runtimeBridge.activeStorage
+export const getActiveStorage = (): Option.Option<FileSystemHandleStorage> =>
+  runtimeBridge.activeStorage
 
-export const setActiveStorage = (storage: FileSystemHandleStorage | null): void => {
+export const setActiveStorage = (storage: Option.Option<FileSystemHandleStorage>): void => {
   runtimeBridge.activeStorage = storage
 }
 
-export const getPendingHandle = (): FileSystemDirectoryHandle | null => runtimeBridge.pendingHandle
+export const getPendingHandle = (): Option.Option<FileSystemDirectoryHandle> =>
+  runtimeBridge.pendingHandle
 
-export const setPendingHandle = (handle: FileSystemDirectoryHandle | null): void => {
+export const setPendingHandle = (handle: Option.Option<FileSystemDirectoryHandle>): void => {
   runtimeBridge.pendingHandle = handle
 }
 
 export const revokeActivePreviewUrl = (): void => {
-  if (runtimeBridge.activePreviewObjectUrl !== null) {
-    URL.revokeObjectURL(runtimeBridge.activePreviewObjectUrl)
-    runtimeBridge.activePreviewObjectUrl = null
-  }
+  Option.match(runtimeBridge.maybeActivePreviewObjectUrl, {
+    onNone: () => undefined,
+    onSome: (url) => URL.revokeObjectURL(url),
+  })
+  runtimeBridge.maybeActivePreviewObjectUrl = Option.none()
 }
 
 export const setActivePreviewUrl = (url: string): void => {
   revokeActivePreviewUrl()
-  runtimeBridge.activePreviewObjectUrl = url
+  runtimeBridge.maybeActivePreviewObjectUrl = Option.some(url)
 }
 
-export const getDeferredInstallPrompt = (): BeforeInstallPromptEvent | null =>
+export const getDeferredInstallPrompt = (): Option.Option<BeforeInstallPromptEvent> =>
   runtimeBridge.deferredInstallPrompt
 
-export const setDeferredInstallPrompt = (prompt: BeforeInstallPromptEvent | null): void => {
+export const setDeferredInstallPrompt = (prompt: Option.Option<BeforeInstallPromptEvent>): void => {
   runtimeBridge.deferredInstallPrompt = prompt
 }
 
-export const loadEditorFileModeForEntry = async (
+const loadBinaryEditorFileMode = async (
   storage: FileSystemHandleStorage,
   subPath: ReadonlyArray<string>,
   entryName: string,
+  size: number,
 ): Promise<EditorFileMode> => {
-  revokeActivePreviewUrl()
-  const inspection = await storage.inspectFile(subPath, entryName)
-  if (inspection.isEditableText) {
-    return EditorFileMode.Text({
-      content: inspection.text ?? "",
-    })
-  }
-
   const maybePreviewKind = getPreviewType(entryName)
   const preview = await Option.match(maybePreviewKind, {
     onNone: () => Promise.resolve(PreviewContent.None()),
@@ -520,15 +502,28 @@ export const loadEditorFileModeForEntry = async (
   })
 
   const edit =
-    inspection.size > MAX_TEXT_EDIT_SIZE_BYTES
+    size > MAX_TEXT_EDIT_SIZE_BYTES
       ? BinaryEdit.Locked({
-          reason: `Die Datei ist größer als 10 MB (${(inspection.size / (1024 * 1024)).toFixed(1)} MB) und kann nicht im Texteditor bearbeitet werden.`,
+          reason: `Die Datei ist größer als 10 MB (${(size / (1024 * 1024)).toFixed(1)} MB) und kann nicht im Texteditor bearbeitet werden.`,
         })
       : BinaryEdit.Disabled()
 
   return EditorFileMode.Binary({
     preview,
     edit,
+  })
+}
+
+export const loadEditorFileModeForEntry = async (
+  storage: FileSystemHandleStorage,
+  subPath: ReadonlyArray<string>,
+  entryName: string,
+): Promise<EditorFileMode> => {
+  revokeActivePreviewUrl()
+  const inspection = await storage.inspectFile(subPath, entryName)
+  return await FileInspection.match(inspection, {
+    EditableText: ({ text }) => Promise.resolve(EditorFileMode.Text({ content: text })),
+    Binary: ({ size }) => loadBinaryEditorFileMode(storage, subPath, entryName, size),
   })
 }
 

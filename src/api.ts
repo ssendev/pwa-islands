@@ -20,6 +20,7 @@
  *   </script>
  */
 
+import { Option } from "effect"
 import { findActiveStorage, normalizePath, splitPath, getDirectory } from "./storage.ts"
 import { readTextOrThrow } from "./text.ts"
 import type { IslandEntry, IslandsApi } from "./api-types.ts"
@@ -49,11 +50,12 @@ async function resolveDirectory(path: string, create = false): Promise<FileSyste
 }
 
 async function requireRoot(): Promise<FileSystemDirectoryHandle> {
-  const root = await findActiveStorage()
-  if (!root) {
-    throw new Error("Kein Speicher ausgewählt. Bitte zuerst einen Ordner auswählen.")
-  }
-  return root
+  return Option.match(await findActiveStorage(), {
+    onNone: () => {
+      throw new Error("Kein Speicher ausgewählt. Bitte zuerst einen Ordner auswählen.")
+    },
+    onSome: (root) => root,
+  })
 }
 
 function splitEntryPath(path: string): { dirs: ReadonlyArray<string>; name: string } {

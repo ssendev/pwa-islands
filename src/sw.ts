@@ -1,4 +1,5 @@
 /// <reference lib="webworker" />
+import { Option } from "effect"
 import {
   precacheAndRoute,
   cleanupOutdatedCaches,
@@ -61,9 +62,9 @@ registerRoute(
     const relativePath = resolveRequestPath(url.pathname)
 
     try {
-      const saved = await findSavedFile(relativePath)
-      if (saved) {
-        return fileResponse(saved)
+      const maybeSaved = await findSavedFile(relativePath)
+      if (Option.isSome(maybeSaved)) {
+        return fileResponse(maybeSaved.value)
       }
     } catch (err) {
       console.error("SW: Fehler beim Laden der Datei:", err)
@@ -88,9 +89,9 @@ registerRoute(
   async ({ request, url }) => {
     const relativePath = decodeURIComponent(url.pathname.replace(/^\//, ""))
     try {
-      const saved = relativePath ? await findSavedFile(relativePath) : null
-      if (saved) {
-        return fileResponse(saved)
+      const maybeSaved = relativePath ? await findSavedFile(relativePath) : Option.none()
+      if (Option.isSome(maybeSaved)) {
+        return fileResponse(maybeSaved.value)
       }
     } catch (err) {
       console.error("SW: Fehler beim Laden der Datei:", err)

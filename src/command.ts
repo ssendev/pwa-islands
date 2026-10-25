@@ -46,6 +46,26 @@ import {
   encodeSubPath,
 } from "./model"
 
+const requireActiveStorage = (): FileSystemHandleStorage =>
+  Option.match(getActiveStorage(), {
+    onNone: () => {
+      throw new Error("Kein aktiver Speicher verfügbar.")
+    },
+    onSome: (storage) => storage,
+  })
+
+const findCachedHandle = async ({
+  includePending,
+}: {
+  readonly includePending: boolean
+}): Promise<Option.Option<FileSystemDirectoryHandle>> => {
+  const maybeCached = Option.orElse(
+    includePending ? getPendingHandle() : Option.none(),
+    getSavedFsaHandle,
+  )
+  return Option.isSome(maybeCached) ? maybeCached : await getSavedDirectoryHandle()
+}
+
 const listEntriesOrRoot = async (
   storage: FileSystemHandleStorage,
   subPath: ReadonlyArray<string>,
@@ -161,53 +181,56 @@ const resolveRouteDeepLink = async (
         }
       }
 
-      const targetEntry = pipe(
-        entries,
-        Array.findFirst((entry) => entry.name === name),
-        Option.getOrUndefined,
-      )
-
-      if (!targetEntry) {
-        return {
-          subPath,
+      return await Option.match(
+        pipe(
           entries,
-          maybeModalState: Option.none(),
-          maybeAlertBanner: Option.some<AlertBanner>({
-            message: `Eintrag "${name}" wurde in diesem Ordner nicht gefunden.`,
-            variant: "warning",
-          }),
-        }
-      }
-
-      if (targetEntry.kind === "directory") {
-        return {
-          subPath: subPath,
-          entries,
-          maybeModalState: Option.some(
-            ModalState.EditFolder({
-              originalName: targetEntry.name,
-              name: targetEntry.name,
-              maybeValidationError: Option.none(),
-            }),
-          ),
-          maybeAlertBanner: Option.none(),
-        }
-      }
-
-      const fileMode = await loadEditorFileModeForEntry(storage, subPath, targetEntry.name)
-      return {
-        subPath: subPath,
-        entries,
-        maybeModalState: Option.some(
-          ModalState.EditFile({
-            originalName: targetEntry.name,
-            name: targetEntry.name,
-            fileMode,
-            maybeValidationError: Option.none(),
-          }),
+          Array.findFirst((entry) => entry.name === name),
         ),
-        maybeAlertBanner: Option.none(),
-      }
+        {
+          onNone: async () => {
+            return {
+              subPath,
+              entries,
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.some<AlertBanner>({
+                message: `Eintrag "${name}" wurde in diesem Ordner nicht gefunden.`,
+                variant: "warning",
+              }),
+            }
+          },
+          onSome: async (targetEntry) => {
+            if (targetEntry.kind === "directory") {
+              return {
+                subPath: subPath,
+                entries,
+                maybeModalState: Option.some(
+                  ModalState.EditFolder({
+                    originalName: targetEntry.name,
+                    name: targetEntry.name,
+                    maybeValidationError: Option.none(),
+                  }),
+                ),
+                maybeAlertBanner: Option.none(),
+              }
+            }
+
+            const fileMode = await loadEditorFileModeForEntry(storage, subPath, targetEntry.name)
+            return {
+              subPath: subPath,
+              entries,
+              maybeModalState: Option.some(
+                ModalState.EditFile({
+                  originalName: targetEntry.name,
+                  name: targetEntry.name,
+                  fileMode,
+                  maybeValidationError: Option.none(),
+                }),
+              ),
+              maybeAlertBanner: Option.none(),
+            }
+          },
+        },
+      )
     },
   })
 }
@@ -220,10 +243,10 @@ const activateStorageBackend = async (
 ): Promise<Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">> => {
   await saveDirectoryHandle(handle, type)
   const storage = new FileSystemHandleStorage(handle, type)
-  setActiveStorage(storage)
+  setActiveStorage(Option.some(storage))
   if (type === "fsa") {
-    setSavedFsaHandle(handle)
-    setPendingHandle(null)
+    setSavedFsaHandle(Option.some(handle))
+    setPendingHandle(Option.none())
   }
 
   const resolved = await resolveRouteDeepLink(storage, route)
@@ -301,7 +324,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const savedType = await getSavedStorageType()
+        const maybeSavedType = await getSavedStorageType()
 
         const opfsSavedBackend: SavedBackend = args.hasOPFS
           ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
@@ -311,22 +334,25 @@ export const InitializeStorage = Command.define("InitializeStorage", {
           if (!args.hasDirectoryPicker) {
             return SavedBackend.Unsupported()
           }
-          const savedHandle = await getSavedDirectoryHandle()
-          if (!savedHandle) {
-            return SavedBackend.NoFolderSelected()
-          }
-          setSavedFsaHandle(savedHandle)
-          const perm = await queryDirectoryPermission(savedHandle, "readwrite")
-          if (perm === "granted") {
-            return SavedBackend.Granted({ rootName: savedHandle.name || "Gespeicherter Ordner" })
-          }
-          setPendingHandle(savedHandle)
-          return SavedBackend.PermissionRequired({
-            folderName: savedHandle.name || "Gespeicherter Ordner",
+          return await Option.match(await getSavedDirectoryHandle(), {
+            onNone: async () => SavedBackend.NoFolderSelected(),
+            onSome: async (savedHandle): Promise<SavedBackend> => {
+              setSavedFsaHandle(Option.some(savedHandle))
+              const perm = await queryDirectoryPermission(savedHandle, "readwrite")
+              if (perm === "granted") {
+                return SavedBackend.Granted({
+                  rootName: savedHandle.name || "Gespeicherter Ordner",
+                })
+              }
+              setPendingHandle(Option.some(savedHandle))
+              return SavedBackend.PermissionRequired({
+                folderName: savedHandle.name || "Gespeicherter Ordner",
+              })
+            },
           })
         }
 
-        if (savedType === "opfs" && args.hasOPFS) {
+        if (Option.exists(maybeSavedType, (savedType) => savedType === "opfs") && args.hasOPFS) {
           const fsaSavedBackend = await determineFsaSavedBackend()
           const opfsRoot = await getOPFSRootDirectory()
           return Message.SucceededInitializeStorage(
@@ -335,25 +361,27 @@ export const InitializeStorage = Command.define("InitializeStorage", {
         }
 
         if (args.hasDirectoryPicker) {
-          const savedHandle = await getSavedDirectoryHandle()
-          if (savedHandle) {
-            setSavedFsaHandle(savedHandle)
-            const perm = await queryDirectoryPermission(savedHandle, "readwrite")
-            if (perm === "granted") {
-              return Message.SucceededInitializeStorage(
-                await activateStorageBackend(savedHandle, "fsa", args.route, opfsSavedBackend),
-              )
-            }
-            setPendingHandle(savedHandle)
-            return Message.CompletedInitializeStoragePermissionRequired({
-              storageType: "fsa",
-              folderName: savedHandle.name || "Gespeicherter Ordner",
-              otherBackend: opfsSavedBackend,
-            })
-          }
-          return Message.CompletedInitializeStorageNoFolderSelected({
-            storageType: "fsa",
-            otherBackend: opfsSavedBackend,
+          return await Option.match(await getSavedDirectoryHandle(), {
+            onNone: async () =>
+              Message.CompletedInitializeStorageNoFolderSelected({
+                storageType: "fsa",
+                otherBackend: opfsSavedBackend,
+              }),
+            onSome: async (savedHandle) => {
+              setSavedFsaHandle(Option.some(savedHandle))
+              const perm = await queryDirectoryPermission(savedHandle, "readwrite")
+              if (perm === "granted") {
+                return Message.SucceededInitializeStorage(
+                  await activateStorageBackend(savedHandle, "fsa", args.route, opfsSavedBackend),
+                )
+              }
+              setPendingHandle(Option.some(savedHandle))
+              return Message.CompletedInitializeStoragePermissionRequired({
+                storageType: "fsa",
+                folderName: savedHandle.name || "Gespeicherter Ordner",
+                otherBackend: opfsSavedBackend,
+              })
+            },
           })
         }
 
@@ -431,23 +459,25 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const pending =
-          getPendingHandle() ?? getSavedFsaHandle() ?? (await getSavedDirectoryHandle())
-        if (!pending) {
-          return Message.CompletedGrantDirectoryPermissionNoFolderSelected({
-            storageType: "fsa",
-            otherBackend: args.otherBackend,
-          })
-        }
-        const state = await requestDirectoryPermission(pending, "readwrite")
-        if (state === "granted") {
-          return Message.SucceededGrantDirectoryPermission(
-            await activateStorageBackend(pending, "fsa", args.route, args.otherBackend),
-          )
-        }
-        return Message.FailedGrantDirectoryPermission({
-          message:
-            "Zugriff auf den Ordner wurde verweigert. Bitte wählen Sie den Ordner erneut aus.",
+        return await Option.match(await findCachedHandle({ includePending: true }), {
+          onNone: async () => {
+            return Message.CompletedGrantDirectoryPermissionNoFolderSelected({
+              storageType: "fsa",
+              otherBackend: args.otherBackend,
+            })
+          },
+          onSome: async (pending) => {
+            const state = await requestDirectoryPermission(pending, "readwrite")
+            if (state === "granted") {
+              return Message.SucceededGrantDirectoryPermission(
+                await activateStorageBackend(pending, "fsa", args.route, args.otherBackend),
+              )
+            }
+            return Message.FailedGrantDirectoryPermission({
+              message:
+                "Zugriff auf den Ordner wurde verweigert. Bitte wählen Sie den Ordner erneut aus.",
+            })
+          },
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -502,24 +532,27 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const handle = getSavedFsaHandle() ?? (await getSavedDirectoryHandle())
-        if (!handle) {
-          return Message.CompletedActivateFsaBackendNoFolderSelected({
-            storageType: "fsa",
-            otherBackend: args.otherBackend,
-          })
-        }
-        const perm = await queryDirectoryPermission(handle, "readwrite")
-        if (perm === "granted") {
-          return Message.SucceededActivateFsaBackend(
-            await activateStorageBackend(handle, "fsa", args.route, args.otherBackend),
-          )
-        }
-        setPendingHandle(handle)
-        return Message.CompletedActivateFsaBackendPermissionRequired({
-          storageType: "fsa",
-          folderName: handle.name || "Gespeicherter Ordner",
-          otherBackend: args.otherBackend,
+        return await Option.match(await findCachedHandle({ includePending: false }), {
+          onNone: async () => {
+            return Message.CompletedActivateFsaBackendNoFolderSelected({
+              storageType: "fsa",
+              otherBackend: args.otherBackend,
+            })
+          },
+          onSome: async (handle) => {
+            const perm = await queryDirectoryPermission(handle, "readwrite")
+            if (perm === "granted") {
+              return Message.SucceededActivateFsaBackend(
+                await activateStorageBackend(handle, "fsa", args.route, args.otherBackend),
+              )
+            }
+            setPendingHandle(Option.some(handle))
+            return Message.CompletedActivateFsaBackendPermissionRequired({
+              storageType: "fsa",
+              folderName: handle.name || "Gespeicherter Ordner",
+              otherBackend: args.otherBackend,
+            })
+          },
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -545,14 +578,14 @@ export const DisconnectStorage = Command.define("DisconnectStorage", {
     Effect.tryPromise({
       try: async () => {
         revokeActivePreviewUrl()
-        const active = getActiveStorage()
-        if (active) {
-          await active.disconnect()
-        }
+        await Option.match(getActiveStorage(), {
+          onNone: () => Promise.resolve(),
+          onSome: (active) => active.disconnect(),
+        })
         await clearSavedDirectoryHandle()
-        setActiveStorage(null)
-        setPendingHandle(null)
-        setSavedFsaHandle(null)
+        setActiveStorage(Option.none())
+        setPendingHandle(Option.none())
+        setSavedFsaHandle(Option.none())
 
         const opfsSavedBackend: SavedBackend = args.hasOPFS
           ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
@@ -583,10 +616,7 @@ export const RefreshEntries = Command.define("RefreshEntries", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = getActiveStorage()
-        if (!storage) {
-          throw new Error("Kein aktiver Speicher verfügbar.")
-        }
+        const storage = requireActiveStorage()
         const entries = await storage.listEntries(args.subPath)
         return Message.SucceededRefreshEntries({
           subPath: args.subPath,
@@ -613,10 +643,7 @@ export const NavigateToSubfolder = Command.define("NavigateToSubfolder", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = getActiveStorage()
-        if (!storage) {
-          throw new Error("Kein aktiver Speicher verfügbar.")
-        }
+        const storage = requireActiveStorage()
         const entries = await storage.listEntries(args.targetSubPath)
         return Message.SucceededNavigateToSubfolder({
           subPath: args.targetSubPath,
@@ -680,10 +707,7 @@ export const InspectFileForEditor = Command.define("InspectFileForEditor", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = getActiveStorage()
-        if (!storage) {
-          throw new Error("Kein aktiver Speicher verfügbar.")
-        }
+        const storage = requireActiveStorage()
         const fileMode = await loadEditorFileModeForEntry(storage, args.subPath, args.entryName)
         return Message.SucceededInspectFileForEditor({
           originalName: args.entryName,
@@ -719,10 +743,7 @@ export const LoadModalBase64 = Command.define("LoadModalBase64", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = getActiveStorage()
-        if (!storage) {
-          throw new Error("Kein aktiver Speicher verfügbar.")
-        }
+        const storage = requireActiveStorage()
         const buffer = await storage.readFileBuffer(args.subPath, args.entryName)
         const base64Content = arrayBufferToBase64(buffer)
         return Message.SucceededLoadModalBase64({ base64Content })
@@ -748,10 +769,7 @@ export const SaveModalChanges = Command.define("SaveModalChanges", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = getActiveStorage()
-        if (!storage) {
-          throw new Error("Kein aktiver Speicher verfügbar.")
-        }
+        const storage = requireActiveStorage()
 
         await Match.value(args.modalState).pipe(
           Match.tag("CreateFolder", ({ name }) =>
@@ -826,10 +844,7 @@ export const DeleteModalEntry = Command.define("DeleteModalEntry", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = getActiveStorage()
-        if (!storage) {
-          throw new Error("Kein aktiver Speicher verfügbar.")
-        }
+        const storage = requireActiveStorage()
 
         await storage.deleteEntry(
           args.subPath,
@@ -876,10 +891,7 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = getActiveStorage()
-        if (!storage) {
-          throw new Error("Kein aktiver Speicher verfügbar.")
-        }
+        const storage = requireActiveStorage()
 
         const pendingFiles = getPendingImportFiles()
         setPendingImportFiles([])
@@ -984,15 +996,16 @@ export const TriggerInstallAppPrompt = Command.define("TriggerInstallAppPrompt",
   messages: [Message.CompletedTriggerInstallAppPrompt],
   execute: Effect.tryPromise({
     try: async () => {
-      const promptEvent = getDeferredInstallPrompt()
-      if (!promptEvent) {
-        return Message.CompletedTriggerInstallAppPrompt({ didAccept: false })
-      }
-      setDeferredInstallPrompt(null)
-      await promptEvent.prompt()
-      const choice = await promptEvent.userChoice
-      return Message.CompletedTriggerInstallAppPrompt({
-        didAccept: choice.outcome === "accepted",
+      return await Option.match(getDeferredInstallPrompt(), {
+        onNone: async () => Message.CompletedTriggerInstallAppPrompt({ didAccept: false }),
+        onSome: async (promptEvent) => {
+          setDeferredInstallPrompt(Option.none())
+          await promptEvent.prompt()
+          const choice = await promptEvent.userChoice
+          return Message.CompletedTriggerInstallAppPrompt({
+            didAccept: choice.outcome === "accepted",
+          })
+        },
       })
     },
     catch: (error) => (error instanceof Error ? error : new Error(String(error))),

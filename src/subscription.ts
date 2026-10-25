@@ -63,7 +63,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       target: window,
       type: "beforeinstallprompt",
       filterMapEvent: (event) => {
-        setDeferredInstallPrompt(event as BeforeInstallPromptEvent)
+        setDeferredInstallPrompt(Option.some(event as BeforeInstallPromptEvent))
         return Option.some(Message.CapturedInstallPrompt())
       },
     }),
@@ -74,7 +74,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       target: window,
       type: "appinstalled",
       mapEvent: () => {
-        setDeferredInstallPrompt(null)
+        setDeferredInstallPrompt(Option.none())
         return Message.InstalledApp()
       },
     }),

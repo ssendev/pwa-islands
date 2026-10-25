@@ -107,7 +107,10 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
         showFileInfo: true,
         isSettingsOpen: false,
         installPrompt: InstallPrompt.Unavailable(),
-        modalState: Option.getOrElse(maybeInitialModal, () => ModalState.Closed()),
+        modalState: Option.match(maybeInitialModal, {
+          onNone: () => ModalState.Closed(),
+          onSome: (modalState) => modalState,
+        }),
         maybeAlertBanner: Option.some({
           message:
             "Browser wird nicht unterstützt: Weder die File System Access API noch OPFS sind in diesem Browser verfügbar. Bitte verwenden Sie einen aktuellen Browser (z. B. Chrome, Edge, Firefox oder Safari).",
@@ -126,7 +129,10 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
       showFileInfo: true,
       isSettingsOpen: false,
       installPrompt: InstallPrompt.Unavailable(),
-      modalState: Option.getOrElse(maybeInitialModal, () => ModalState.Closed()),
+      modalState: Option.match(maybeInitialModal, {
+        onNone: () => ModalState.Closed(),
+        onSome: (modalState) => modalState,
+      }),
       maybeAlertBanner: Option.none(),
     },
     commands: [
@@ -246,9 +252,10 @@ const handleStorageActivated = (
     maybeAlertBanner,
   }: Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">,
 ): Update.Return<Model, Message> => {
-  const nextModalState = Option.getOrElse(maybeModalState, () =>
-    isModal("Help")(model.modalState) ? model.modalState : ModalState.Closed(),
-  )
+  const nextModalState = Option.match(maybeModalState, {
+    onNone: () => (isModal("Help")(model.modalState) ? model.modalState : ModalState.Closed()),
+    onSome: (modalState) => modalState,
+  })
 
   const shouldFocusModal = ModalState.match(nextModalState, {
     Closed: () => false,
@@ -557,20 +564,15 @@ export const update = (model: Model, message: Message) =>
           const readyState = model.storageState
           const isSamePath = isSameSubPath(readyState.subPath, subPath)
 
-          const entry = isSamePath
+          const maybeEntry = isSamePath
             ? EntriesState.match(readyState.entriesState, {
-                Loaded: ({ entries }) =>
-                  pipe(
-                    entries,
-                    Array.findFirst((e) => e.name === name),
-                    Option.getOrUndefined,
-                  ),
-                Loading: () => undefined,
-                Error: () => undefined,
+                Loaded: ({ entries }) => Array.findFirst(entries, (e) => e.name === name),
+                Loading: () => Option.none(),
+                Error: () => Option.none(),
               })
-            : undefined
+            : Option.none()
 
-          if (entry && entry.kind === "directory") {
+          if (Option.exists(maybeEntry, (entry) => entry.kind === "directory")) {
             return {
               model: modifyFields(model, {
                 isSettingsOpen: () => false,

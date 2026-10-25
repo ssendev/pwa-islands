@@ -21,6 +21,17 @@ export const FileEntry = Schema.Struct({
 })
 export type FileEntry = typeof FileEntry.Type
 
+export const FileInspection = defineTaggedUnion({
+  EditableText: {
+    size: Schema.Number,
+    text: Schema.String,
+  },
+  Binary: {
+    size: Schema.Number,
+  },
+})
+export type FileInspection = typeof FileInspection.Type
+
 export const EntriesState = defineTaggedUnion({
   Loading: {},
   Loaded: {
@@ -325,11 +336,13 @@ export const buildHelpUrl = (
 }
 
 export const parseHelpParam = (
-  raw: string | null,
+  maybeRaw: Option.Option<string>,
+): Option.Option<{ readonly maybeTopic: Option.Option<HelpTopic> }> =>
+  Option.flatMap(maybeRaw, parseHelpValue)
+
+const parseHelpValue = (
+  raw: string,
 ): Option.Option<{ readonly maybeTopic: Option.Option<HelpTopic> }> => {
-  if (raw === null) {
-    return Option.none()
-  }
   const normalized = raw.trim().toLowerCase()
   if (normalized === "help" || normalized === "h" || normalized === "hilfe") {
     return Option.some({ maybeTopic: Option.none() })
@@ -344,11 +357,10 @@ export const parseHelpParam = (
 }
 
 export const parseNewActionParam = (
-  raw: string | null,
-): Option.Option<{ readonly target: NewTarget }> => {
-  if (raw === null) {
-    return Option.none()
-  }
+  maybeRaw: Option.Option<string>,
+): Option.Option<{ readonly target: NewTarget }> => Option.flatMap(maybeRaw, parseNewActionValue)
+
+const parseNewActionValue = (raw: string): Option.Option<{ readonly target: NewTarget }> => {
   const normalized = raw.trim().toLowerCase()
   if (normalized === "new" || normalized === "neu" || normalized === "new-file") {
     return Option.some({ target: "file" as const })
@@ -376,9 +388,9 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
   const segments = decodeUrlPathnameSegments(url.pathname)
   const searchStr = Option.getOrElse(url.search, () => "")
   const searchParams = new URLSearchParams(searchStr.startsWith("?") ? searchStr : `?${searchStr}`)
-  const pwaislandsParam = searchParams.get("pwaislands")
+  const maybePwaislandsParam = Option.fromNullishOr(searchParams.get("pwaislands"))
 
-  const maybeHelp = parseHelpParam(pwaislandsParam)
+  const maybeHelp = parseHelpParam(maybePwaislandsParam)
   if (Option.isSome(maybeHelp)) {
     return AppRoute.Help({
       subPath: segments,
@@ -386,7 +398,7 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
     })
   }
 
-  const maybeNew = parseNewActionParam(pwaislandsParam)
+  const maybeNew = parseNewActionParam(maybePwaislandsParam)
   if (Option.isSome(maybeNew)) {
     return AppRoute.New({
       subPath: segments,
@@ -394,7 +406,7 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
     })
   }
 
-  if (isEditActionParam(pwaislandsParam)) {
+  if (isEditActionParam(maybePwaislandsParam)) {
     if (Array.isReadonlyArrayNonEmpty(segments)) {
       const name = Array.lastNonEmpty(segments)
       const subPath = Array.dropRight(segments, 1)
@@ -417,26 +429,30 @@ export const initialHelpModalFromSearch = (initialSearch: string): Option.Option
   const params = new URLSearchParams(
     initialSearch.startsWith("?") ? initialSearch : `?${initialSearch}`,
   )
-  const maybeHelp = parseHelpParam(params.get("pwaislands"))
-  return Option.map(maybeHelp, ({ maybeTopic }) =>
-    ModalState.Help({
-      isApiOpen: Option.match(maybeTopic, {
-        onNone: () => true,
-        onSome: (topic) => topic === "api",
-      }),
-      isFsOpen: Option.match(maybeTopic, {
-        onNone: () => false,
-        onSome: (topic) => topic === "fs",
-      }),
-      copyDtsState: CopyDtsState.Idle(),
-    }),
-  )
+  const maybeHelp = parseHelpParam(Option.fromNullishOr(params.get("pwaislands")))
+  return Option.match(maybeHelp, {
+    onNone: () => Option.none<ModalState>(),
+    onSome: ({ maybeTopic }) =>
+      Option.some<ModalState>(
+        ModalState.Help({
+          isApiOpen: Option.match(maybeTopic, {
+            onNone: () => true,
+            onSome: (topic) => topic === "api",
+          }),
+          isFsOpen: Option.match(maybeTopic, {
+            onNone: () => false,
+            onSome: (topic) => topic === "fs",
+          }),
+          copyDtsState: CopyDtsState.Idle(),
+        }),
+      ),
+  })
 }
 
-export const isEditActionParam = (raw: string | null): boolean => {
-  if (raw === null) {
-    return false
-  }
+export const isEditActionParam = (maybeRaw: Option.Option<string>): boolean =>
+  Option.exists(maybeRaw, isEditActionValue)
+
+const isEditActionValue = (raw: string): boolean => {
   const normalized = raw.trim().toLowerCase()
   return (
     normalized === "edit" ||

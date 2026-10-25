@@ -1,4 +1,4 @@
-import { Array } from "effect"
+import { Array, Option } from "effect"
 
 export const DB_NAME = "pwa-islands-db"
 export const DB_VERSION = 1
@@ -62,7 +62,9 @@ export function openDB(): Promise<IDBDatabase> {
   return pending
 }
 
-export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+export async function getStoredDirectoryHandle(): Promise<
+  Option.Option<FileSystemDirectoryHandle>
+> {
   try {
     const db = await openDB()
     return new Promise((resolve, reject) => {
@@ -70,12 +72,12 @@ export async function getStoredDirectoryHandle(): Promise<FileSystemDirectoryHan
       const store = tx.objectStore(STORE_NAME)
       const req = store.get(HANDLE_KEY)
 
-      req.onsuccess = () => resolve(req.result ?? null)
+      req.onsuccess = () => resolve(Option.fromNullishOr(req.result))
       req.onerror = () => reject(req.error)
     })
   } catch (error) {
     console.error("Fehler beim Abrufen des gespeicherten Ordners:", error)
-    return null
+    return Option.none()
   }
 }
 
@@ -106,7 +108,7 @@ export async function clearStoredDirectoryHandle(): Promise<void> {
 }
 
 /** Liest die zuletzt gewählte Speicherart ('fsa' oder 'opfs'). */
-export async function getStoredStorageType(): Promise<"fsa" | "opfs" | null> {
+export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opfs">> {
   try {
     const db = await openDB()
     return new Promise((resolve, reject) => {
@@ -114,12 +116,13 @@ export async function getStoredStorageType(): Promise<"fsa" | "opfs" | null> {
       const store = tx.objectStore(STORE_NAME)
       const req = store.get(STORAGE_TYPE_KEY)
 
-      req.onsuccess = () => resolve((req.result as "fsa" | "opfs") ?? null)
+      req.onsuccess = () =>
+        resolve(Option.fromNullishOr(req.result as "fsa" | "opfs" | null | undefined))
       req.onerror = () => reject(req.error)
     })
   } catch (error) {
     console.error("Fehler beim Abrufen der gespeicherten Speicherart:", error)
-    return null
+    return Option.none()
   }
 }
 
@@ -187,7 +190,7 @@ export async function clearStoredStorageType(): Promise<void> {
   })
 }
 
-export async function getOPFSDirectoryHandle(): Promise<FileSystemDirectoryHandle | null> {
+export async function getOPFSDirectoryHandle(): Promise<Option.Option<FileSystemDirectoryHandle>> {
   if (
     typeof navigator !== "undefined" &&
     "storage" in navigator &&
@@ -195,13 +198,13 @@ export async function getOPFSDirectoryHandle(): Promise<FileSystemDirectoryHandl
   ) {
     try {
       const root = await navigator.storage.getDirectory()
-      return await root.getDirectoryHandle(OPFS_APP_FOLDER, { create: true })
+      return Option.some(await root.getDirectoryHandle(OPFS_APP_FOLDER, { create: true }))
     } catch (err) {
       console.error("Fehler beim Abrufen des OPFS-Handles:", err)
-      return null
+      return Option.none()
     }
   }
-  return null
+  return Option.none()
 }
 
 /** Dateiname des Ordner-Index, wie bei einem Webserver. */
@@ -222,26 +225,26 @@ export interface SavedFile {
 const MISS_ERRORS = new Set(["NotFoundError", "TypeMismatchError"])
 
 /**
- * Lauft den Pfad bis zum Elternordner ab. Liefert null, sobald ein Abschnitt
+ * Lauft den Pfad bis zum Elternordner ab. Liefert none, sobald ein Abschnitt
  * fehlt oder auf eine Datei zeigt -- ohne Ausnahme nach aussen.
  */
 async function walkToParent(
   root: FileSystemDirectoryHandle,
   segments: ReadonlyArray<string>,
-): Promise<FileSystemDirectoryHandle | null> {
+): Promise<Option.Option<FileSystemDirectoryHandle>> {
   return await Array.reduce(
     segments,
-    Promise.resolve<FileSystemDirectoryHandle | null>(root),
+    Promise.resolve(Option.some(root)),
     async (currentPromise, segment) => {
-      const current = await currentPromise
-      if (!current) {
-        return null
+      const maybeCurrent = await currentPromise
+      if (Option.isNone(maybeCurrent)) {
+        return Option.none<FileSystemDirectoryHandle>()
       }
       try {
-        return await current.getDirectoryHandle(segment)
+        return Option.some(await maybeCurrent.value.getDirectoryHandle(segment))
       } catch (err) {
         if (err instanceof DOMException && MISS_ERRORS.has(err.name)) {
-          return null
+          return Option.none<FileSystemDirectoryHandle>()
         }
         throw err
       }
@@ -264,16 +267,17 @@ export async function resolveFileInDirectory(
   root: FileSystemDirectoryHandle,
   relativePath: string,
   indexFile = DEFAULT_INDEX_FILE,
-): Promise<SavedFile | null> {
+): Promise<Option.Option<SavedFile>> {
   const parts = splitPath(relativePath)
   if (Array.isReadonlyArrayEmpty(parts)) {
-    return null
+    return Option.none()
   }
 
-  const parent = await walkToParent(root, parts.slice(0, -1))
-  if (!parent) {
-    return null
+  const maybeParent = await walkToParent(root, parts.slice(0, -1))
+  if (Option.isNone(maybeParent)) {
+    return Option.none()
   }
+  const parent = maybeParent.value
 
   const name = parts[parts.length - 1]
   const filePath = parts.join("/")
@@ -281,7 +285,7 @@ export async function resolveFileInDirectory(
   // 1. Der uebliche Fall: unter dem Pfad liegt direkt eine Datei.
   try {
     const fileHandle = await parent.getFileHandle(name)
-    return { file: await fileHandle.getFile(), path: filePath }
+    return Option.some({ file: await fileHandle.getFile(), path: filePath })
   } catch (err) {
     if (!(err instanceof DOMException && MISS_ERRORS.has(err.name))) {
       throw err
@@ -291,21 +295,21 @@ export async function resolveFileInDirectory(
   // 2. Ordner mit Index-Datei. Der zweite Versuch ist kein Fehler, sondern der
   //    Normalfall fuer /foo und /foo/ -- deshalb erst hier, nicht vorher.
   if (!indexFile) {
-    return null
+    return Option.none()
   }
   try {
     const dir = await parent.getDirectoryHandle(name)
     const fileHandle = await dir.getFileHandle(indexFile)
-    return { file: await fileHandle.getFile(), path: `${filePath}/${indexFile}` }
+    return Option.some({ file: await fileHandle.getFile(), path: `${filePath}/${indexFile}` })
   } catch (err) {
     if (err instanceof DOMException && MISS_ERRORS.has(err.name)) {
-      return null
+      return Option.none()
     }
     throw err
   }
 }
 
-let rootCache: { root: FileSystemDirectoryHandle | null } | null = null
+let rootCache: { root: FileSystemDirectoryHandle } | null = null
 
 /**
  * Verwirft den zwischengespeicherten Wurzel-Handle. Wird bei jedem Wechsel der
@@ -324,15 +328,17 @@ export function invalidateRootCache(): void {
  * Eine fehlende Berechtigung wird bewusst NICHT zwischengespeichert: sie kann
  * der Benutzer jederzeit erteilen, ohne dass ein Ereignis hier ankaeme.
  */
-async function findCachedActiveStorage(): Promise<FileSystemDirectoryHandle | null> {
+async function findCachedActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
   if (rootCache) {
-    return rootCache.root
+    return Option.some(rootCache.root)
   }
-  const root = await findActiveStorage()
-  // null (kein Speicher) nicht festschreiben -- sonst bliebe die App nach dem
+  const maybeRoot = await findActiveStorage()
+  // none (kein Speicher) nicht festschreiben -- sonst bliebe die App nach dem
   // spaeteren Waehlen eines Ordners stumm.
-  if (root) rootCache = { root }
-  return root
+  if (Option.isSome(maybeRoot)) {
+    rootCache = { root: maybeRoot.value }
+  }
+  return maybeRoot
 }
 
 /**
@@ -342,20 +348,20 @@ async function findCachedActiveStorage(): Promise<FileSystemDirectoryHandle | nu
 export async function findSavedFile(
   relativePath: string,
   indexFile = DEFAULT_INDEX_FILE,
-): Promise<SavedFile | null> {
+): Promise<Option.Option<SavedFile>> {
   if (Array.isReadonlyArrayEmpty(splitPath(relativePath))) {
-    return null
+    return Option.none()
   }
 
   try {
-    const root = await findCachedActiveStorage()
-    if (!root) {
-      return null
+    const maybeRoot = await findCachedActiveStorage()
+    if (Option.isNone(maybeRoot)) {
+      return Option.none()
     }
-    return await resolveFileInDirectory(root, relativePath, indexFile)
+    return await resolveFileInDirectory(maybeRoot.value, relativePath, indexFile)
   } catch (err) {
     console.warn("findSavedFile Fehler:", err)
-    return null
+    return Option.none()
   }
 }
 
@@ -398,39 +404,40 @@ export function splitPath(path: string): ReadonlyArray<string> {
 
 /**
  * Findet die aktive Speicher-Wurzel: zuerst der gespeicherte FSA-Ordner,
- * danach OPFS. Liefert null, wenn keiner verfügbar ist (z. B. wenn die
+ * danach OPFS. Liefert none, wenn keiner verfügbar ist (z. B. wenn die
  * Berechtigung für den gespeicherten Ordner fehlt).
  */
-export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | null> {
+export async function findActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
   try {
-    const storedType = await getStoredStorageType()
-    if (storedType === "opfs") {
+    const maybeStoredType = await getStoredStorageType()
+    if (Option.exists(maybeStoredType, (storedType) => storedType === "opfs")) {
       try {
         return await getOPFSDirectoryHandle()
       } catch (err) {
         console.warn("findActiveStorage OPFS Fehler:", err)
-        return null
+        return Option.none()
       }
     }
 
-    const storedHandle = await getStoredDirectoryHandle()
-    if (storedHandle) {
+    const maybeStoredHandle = await getStoredDirectoryHandle()
+    if (Option.isSome(maybeStoredHandle)) {
+      const storedHandle = maybeStoredHandle.value
       const perm: PermissionState = storedHandle.queryPermission
         ? await storedHandle.queryPermission({ mode: "readwrite" }).catch(() => "prompt" as const)
         : "granted"
       if (perm === "granted") {
-        return storedHandle
+        return maybeStoredHandle
       }
     }
 
-    if (!storedType) {
+    if (Option.isNone(maybeStoredType)) {
       return await getOPFSDirectoryHandle()
     }
   } catch (err) {
     console.warn("findActiveStorage Fehler:", err)
   }
 
-  return null
+  return Option.none()
 }
 
 /**
