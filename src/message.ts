@@ -71,6 +71,7 @@ export const Message = defineMessageUnion({
   CompletedReplaceUrl: {},
   CompletedLoadUrl: {},
   CompletedFocusModalNameInput: {},
+  CompletedScrollHelpTopicIntoView: {},
 
   // Settings & Storage Actions
   ClickedToggleSettings: {},

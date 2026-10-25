@@ -976,3 +976,17 @@ export const TriggerInstallAppPrompt = Command.define("TriggerInstallAppPrompt",
     ),
   ),
 })
+
+export const ScrollHelpTopicIntoView = Command.define("ScrollHelpTopicIntoView", {
+  args: {
+    topic: HelpTopic,
+  },
+  messages: [Message.CompletedScrollHelpTopicIntoView],
+  execute: ({ topic }) =>
+    Dom.scrollIntoViewAfterPaint(`.help-topic[data-topic="${topic}"] > .help-topic-summary`, {
+      block: "nearest",
+    }).pipe(
+      Effect.as(Message.CompletedScrollHelpTopicIntoView()),
+      Effect.catch(() => Effect.succeed(Message.CompletedScrollHelpTopicIntoView())),
+    ),
+})

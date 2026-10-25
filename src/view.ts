@@ -915,13 +915,6 @@ const viewHelpModal = (
   },
   h: HtmlBuilder,
 ): Html.Html => {
-  const copyBtnLabel = CopyDtsState.match(copyDtsState, {
-    Idle: () => "/api.d.ts kopieren",
-    Copying: () => "Wird kopiert …",
-    Copied: () => "✅ Kopiert!",
-    Error: () => "/api.d.ts kopieren",
-  })
-
   return h.div(
     [
       h.Class("modal-overlay help-modal-overlay"),
@@ -1448,7 +1441,7 @@ const viewHelpModal = (
                     [
                       h.Type("button"),
                       h.Id("help-btn-copy-dts"),
-                      h.Class("btn btn-primary icon-label-btn"),
+                      h.Class("btn btn-primary icon-label-btn copy-dts-btn"),
                       h.AriaLabel("/api.d.ts kopieren"),
                       h.DataAttribute("tip", "/api.d.ts kopieren"),
                       h.Disabled(copyDtsState._tag === "Copying"),
@@ -1456,7 +1449,20 @@ const viewHelpModal = (
                     ],
                     [
                       h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["📋"]),
-                      h.span([h.Class("icon-label-btn-text")], [copyBtnLabel]),
+                      CopyDtsState.match(copyDtsState, {
+                        Idle: () =>
+                          h.span(
+                            [h.Class("icon-label-btn-text")],
+                            ["/api.d.ts", h.span([h.Class("copy-dts-action")], [" kopieren"])],
+                          ),
+                        Copying: () => h.span([h.Class("icon-label-btn-text")], ["Wird kopiert …"]),
+                        Copied: () => h.span([h.Class("icon-label-btn-text")], ["✅ Kopiert!"]),
+                        Error: () =>
+                          h.span(
+                            [h.Class("icon-label-btn-text")],
+                            ["/api.d.ts", h.span([h.Class("copy-dts-action")], [" kopieren"])],
+                          ),
+                      }),
                     ],
                   ),
                   h.button(

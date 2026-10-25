@@ -933,6 +933,21 @@ code {
     width: 38px;
     height: 38px;
   }
+
+  .modal-footer .copy-dts-btn {
+    width: auto;
+    max-width: 100%;
+    padding: 0 10px;
+  }
+
+  .copy-dts-btn .icon-label-btn-text {
+    display: inline;
+    white-space: nowrap;
+  }
+
+  .copy-dts-btn .copy-dts-action {
+    display: none;
+  }
 }
 
 /* Ab 521px steht die Beschriftung im Button -- dann kein Tooltip. */
