@@ -9,6 +9,7 @@ import {
 } from "./model"
 import {
   OPFS_APP_FOLDER,
+  checkTextBytes,
   clearStoredDirectoryHandle,
   collectDirectoryHandles,
   getOPFSDirectoryHandle,
@@ -19,7 +20,6 @@ import {
   storeFileInfoVisible,
   storeStorageType,
 } from "./storage"
-import { checkTextBytes } from "./text"
 
 // CAPABILITIES
 

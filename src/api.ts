@@ -4,9 +4,9 @@ import {
   findActiveStorage,
   getDirectory,
   normalizePath,
+  readTextOrThrow,
   splitPath,
 } from "./storage"
-import { readTextOrThrow } from "./text"
 import type { IslandEntry, IslandsApi } from "./api-types"
 
 export type {
