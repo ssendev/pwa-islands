@@ -1032,6 +1032,7 @@ export const update = (model: Model, message: Message) =>
       model: modifyFields(model, {
         modalState: () => ModalState.Closed(),
       }),
+      commands: [RevokeActivePreviewUrl()],
     }),
 
     CompletedWritePendingImportFiles: ({ entries, maybeAlertBanner }) =>
@@ -1117,7 +1118,7 @@ export const update = (model: Model, message: Message) =>
               variant: "danger",
             }),
         }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })],
+        commands: [RevokeActivePreviewUrl(), ReplaceUrl({ url: buildFolderUrl(subPath) })],
       }
     },
 

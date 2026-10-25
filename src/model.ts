@@ -424,31 +424,6 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
   return AppRoute.Folder({ subPath: segments })
 }
 
-export const routeToUrl = (route: AppRoute): string =>
-  AppRoute.match(route, {
-    Folder: ({ subPath }) => buildFolderUrl(subPath),
-    New: ({ subPath, target }) => buildNewUrl(subPath, target),
-    Edit: ({ subPath, name }) => buildEditUrl(subPath, name),
-    Help: ({ subPath, maybeTopic }) => buildHelpUrl(subPath, maybeTopic),
-  })
-
-export const initialHelpModalFromSearch = (initialSearch: string): Option.Option<ModalState> => {
-  const params = new URLSearchParams(
-    initialSearch.startsWith("?") ? initialSearch : `?${initialSearch}`,
-  )
-  const maybeHelp = parseHelpParam(Option.fromNullishOr(params.get("pwaislands")))
-  return Option.match(maybeHelp, {
-    onNone: () => Option.none<ModalState>(),
-    onSome: ({ maybeTopic }) =>
-      Option.some<ModalState>(
-        ModalState.Help({
-          maybeOpenTopic: Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api")),
-          copyDtsState: CopyDtsState.Idle(),
-        }),
-      ),
-  })
-}
-
 export const isEditActionParam = (maybeRaw: Option.Option<string>): boolean =>
   Option.exists(maybeRaw, isEditActionValue)
 

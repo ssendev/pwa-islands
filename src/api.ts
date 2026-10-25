@@ -5,9 +5,9 @@ import {
   getDirectory,
   normalizePath,
   splitPath,
-} from "./storage.ts"
-import { readTextOrThrow } from "./text.ts"
-import type { IslandEntry, IslandsApi } from "./api-types.ts"
+} from "./storage"
+import { readTextOrThrow } from "./text"
+import type { IslandEntry, IslandsApi } from "./api-types"
 
 export type {
   IslandEntry,
@@ -16,7 +16,7 @@ export type {
   ReadOptions,
   WriteOptions,
   RemoveOptions,
-} from "./api-types.ts"
+} from "./api-types"
 
 async function resolveFile(path: string, createParents = false): Promise<FileSystemFileHandle> {
   const root = await requireRoot()

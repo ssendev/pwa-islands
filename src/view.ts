@@ -1727,8 +1727,10 @@ const viewImportConflictModal = (
   queue: ReadonlyArray<PendingImportFile>,
   applyToAll: boolean,
   h: HtmlBuilder,
-): Html.Html =>
-  h.div(
+): Html.Html => {
+  const queueCount = Array.length(queue)
+
+  return h.div(
     [
       h.Class("modal-overlay"),
       h.Role("dialog"),
@@ -1774,8 +1776,8 @@ const viewImportConflictModal = (
                               }),
                             ),
                           ]),
-                          ` Auswahl auf alle weiteren ${Array.length(queue)} ${
-                            Array.length(queue) === 1 ? "Konflikt" : "Konflikte"
+                          ` Auswahl auf alle weiteren ${queueCount} ${
+                            queueCount === 1 ? "Konflikt" : "Konflikte"
                           } anwenden`,
                         ],
                       ),
@@ -1824,6 +1826,7 @@ const viewImportConflictModal = (
       ),
     ],
   )
+}
 
 const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
   h.div(

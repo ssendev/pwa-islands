@@ -16,12 +16,18 @@ export const ISLAND_PARAM = "pwaislands"
 // NOTE: OPFS has a single root per origin; files are placed in a subfolder
 export const OPFS_APP_FOLDER = "PWA Islands"
 
-let dbPromise: Promise<IDBDatabase> | null = null
+const storageCache: {
+  dbPromise: Option.Option<Promise<IDBDatabase>>
+  root: Option.Option<FileSystemDirectoryHandle>
+} = {
+  dbPromise: Option.none(),
+  root: Option.none(),
+}
 
 // NOTE: IndexedDB instance is cached to avoid reconnect overhead on island asset fetches
 export function openDB(): Promise<IDBDatabase> {
-  if (dbPromise) {
-    return dbPromise
+  if (Option.isSome(storageCache.dbPromise)) {
+    return storageCache.dbPromise.value
   }
 
   const pending: Promise<IDBDatabase> = new Promise((resolve, reject) => {
@@ -38,11 +44,11 @@ export function openDB(): Promise<IDBDatabase> {
     request.onerror = () => reject(request.error)
   })
 
-  dbPromise = pending
+  storageCache.dbPromise = Option.some(pending)
   // NOTE: Evict failed connection so future calls can retry
   void pending.catch(() => {
-    if (dbPromise === pending) {
-      dbPromise = null
+    if (Option.isSome(storageCache.dbPromise) && storageCache.dbPromise.value === pending) {
+      storageCache.dbPromise = Option.none()
     }
   })
 
@@ -297,20 +303,18 @@ export async function resolveFileInDirectory(
   }
 }
 
-let rootCache: { root: FileSystemDirectoryHandle } | null = null
-
 export function invalidateRootCache(): void {
-  rootCache = null
+  storageCache.root = Option.none()
 }
 
 // NOTE: Missing directory permission is intentionally un-cached so user prompts re-trigger
 async function findCachedActiveStorage(): Promise<Option.Option<FileSystemDirectoryHandle>> {
-  if (rootCache) {
-    return Option.some(rootCache.root)
+  if (Option.isSome(storageCache.root)) {
+    return storageCache.root
   }
   const maybeRoot = await findActiveStorage()
   if (Option.isSome(maybeRoot)) {
-    rootCache = { root: maybeRoot.value }
+    storageCache.root = maybeRoot
   }
   return maybeRoot
 }

@@ -13,9 +13,9 @@ import {
   getMimeType,
   ISLAND_PARAM,
   type SavedFile,
-} from "./storage.ts"
+} from "./storage"
 
-declare let self: ServiceWorkerGlobalScope & {
+declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>
 }
 

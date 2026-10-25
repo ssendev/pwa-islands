@@ -16,10 +16,10 @@ export function checkTextBytes(bytes: Uint8Array): TextCheck {
   const text = decoded
 
   const roundTrip = new TextEncoder().encode(text)
-  if (roundTrip.length !== bytes.length) {
+  if (roundTrip.byteLength !== bytes.byteLength) {
     return {
       kind: "binary",
-      reason: `${bytes.length} Bytes gelesen, ${roundTrip.length} Bytes beim Zurückschreiben`,
+      reason: `${bytes.byteLength} Bytes gelesen, ${roundTrip.byteLength} Bytes beim Zurückschreiben`,
     }
   }
 
