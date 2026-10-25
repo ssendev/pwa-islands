@@ -570,14 +570,23 @@ export const update = (
         }
       }),
 
-    GeneratedTemplateTimestamp: () =>
+    GeneratedTemplateTimestamp: ({ timestamp }) =>
       whenCreateFile(model, (state) => {
         const trimmedLabel = state.newTemplateLabel.trim()
         if (!trimmedLabel) {
           return { model: state, outMessage: OutMessage.None() }
         }
         // NOTE: name, id and file name must match what storage reloads from disk
-        const name = sanitizeTemplateName(trimmedLabel)
+        const takenNames = new Set(Array.map(state.userTemplates, (t) => t.label.toLowerCase()))
+        const baseName = sanitizeTemplateName(trimmedLabel)
+        const dot = baseName.lastIndexOf(".")
+        const stem = dot > 0 ? baseName.slice(0, dot) : baseName
+        const ext = dot > 0 ? baseName.slice(dot) : ""
+        // NOTE: never overwrite an existing template; append a counter instead
+        const name =
+          Array.makeBy(1000, (i) => (i === 0 ? baseName : `${stem} (${i + 1})${ext}`)).find(
+            (candidate) => !takenNames.has(candidate.toLowerCase()),
+          ) ?? `${stem}-${timestamp}${ext}`
         const id = `user:${name}`
         const newTemplate: StarterTemplate = {
           id,
@@ -586,7 +595,7 @@ export const update = (
           content: state.content,
           isBuiltin: false,
         }
-        const nextTemplates = [...state.userTemplates.filter((t) => t.id !== id), newTemplate]
+        const nextTemplates = [...state.userTemplates, newTemplate]
         return {
           model: modifyFields(state, {
             userTemplates: () => nextTemplates,
