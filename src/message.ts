@@ -82,6 +82,7 @@ export const Message = defineMessageUnion({
   CompletedLoadUrl: {},
   CompletedFocusModalNameInput: {},
   CompletedScrollHelpTopicIntoView: {},
+  CompletedRevokeActivePreviewUrl: {},
 
   // Settings & Storage Actions
   ClickedToggleSettings: {},

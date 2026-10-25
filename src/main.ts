@@ -30,7 +30,7 @@ import {
   WaitBeforeResetCopyDts,
   WritePendingImportFiles,
 } from "./command"
-import { base64ToUint8Array, findFreeFileName, revokeActivePreviewUrl } from "./files"
+import { base64ToUint8Array, findFreeFileName } from "./files"
 import { Message } from "./message"
 import {
   AppRoute,
@@ -459,7 +459,6 @@ export const update = (model: Model, message: Message) =>
       const route = parseUrlToRoute(url)
       return AppRoute.match(route, {
         Folder: ({ subPath }) => {
-          revokeActivePreviewUrl()
           const nextModalState = !isModal("Closed")(model.modalState)
             ? ModalState.Closed()
             : model.modalState
@@ -489,7 +488,6 @@ export const update = (model: Model, message: Message) =>
         },
 
         New: ({ subPath, target }) => {
-          revokeActivePreviewUrl()
           const isAlreadyNew =
             (target === "folder" && isModal("CreateFolder")(model.modalState)) ||
             (target === "file" && isModal("CreateFile")(model.modalState))
@@ -589,7 +587,6 @@ export const update = (model: Model, message: Message) =>
         },
 
         Help: ({ maybeTopic }) => {
-          revokeActivePreviewUrl()
           const maybeExistingHelp = isModal("Help")(model.modalState)
             ? Option.some(model.modalState)
             : Option.none()
@@ -623,6 +620,7 @@ export const update = (model: Model, message: Message) =>
     CompletedLoadUrl: () => ({ model }),
     CompletedFocusModalNameInput: () => ({ model }),
     CompletedScrollHelpTopicIntoView: () => ({ model }),
+    CompletedRevokeActivePreviewUrl: () => ({ model }),
 
     // Settings & Storage Actions
     ClickedToggleSettings: () => ({
@@ -801,7 +799,6 @@ export const update = (model: Model, message: Message) =>
     // Toolbar & File/Folder Creation
     ClickedNewFile: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -818,7 +815,6 @@ export const update = (model: Model, message: Message) =>
 
     ClickedNewFolder: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1058,7 +1054,6 @@ export const update = (model: Model, message: Message) =>
     // Editor Modal
     ClickedEditEntry: ({ entry }) => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      revokeActivePreviewUrl()
       if (entry.kind === "directory") {
         return {
           model: modifyFields(model, {
@@ -1563,7 +1558,6 @@ export const update = (model: Model, message: Message) =>
 
     ClickedCancelDeleteModal: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
           modalState: () => ModalState.Closed(),
@@ -1574,7 +1568,6 @@ export const update = (model: Model, message: Message) =>
 
     ClickedCloseModal: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
           modalState: () => ModalState.Closed(),
@@ -1586,7 +1579,6 @@ export const update = (model: Model, message: Message) =>
     PressedEscape: () => {
       if (!isModal("Closed")(model.modalState)) {
         const subPath = currentSubPathFromStorageState(model.storageState)
-        revokeActivePreviewUrl()
         return {
           model: modifyFields(model, {
             isSettingsOpen: () => false,
@@ -1672,7 +1664,6 @@ export const update = (model: Model, message: Message) =>
       const subPath = currentSubPathFromStorageState(model.storageState)
       const isFolderViewVisible = isReady(model.storageState)
       const activeTopic: HelpTopic = isFolderViewVisible ? "api" : "fs"
-      revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,

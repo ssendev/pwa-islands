@@ -24,15 +24,6 @@ import { checkTextBytes } from "./text"
 // Browser File System Access API Types & Capabilities
 // ---------------------------------------------------------------------------
 
-interface DirectoryPickerWindow extends Window {
-  showDirectoryPicker(options?: { mode?: "read" | "readwrite" }): Promise<FileSystemDirectoryHandle>
-}
-
-interface PermissionCapableHandle {
-  queryPermission?: (options?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>
-  requestPermission?: (options?: { mode?: "read" | "readwrite" }) => Promise<PermissionState>
-}
-
 interface IterableDirectoryCapable {
   values?: () => AsyncIterableIterator<FileSystemDirectoryHandle | FileSystemFileHandle>
   entries?: () => AsyncIterableIterator<[string, FileSystemDirectoryHandle | FileSystemFileHandle]>
@@ -48,9 +39,7 @@ export interface BeforeInstallPromptEvent extends Event {
 }
 
 export const supportsDirectoryPicker = (): boolean =>
-  typeof window !== "undefined" &&
-  "showDirectoryPicker" in window &&
-  typeof (window as unknown as DirectoryPickerWindow).showDirectoryPicker === "function"
+  typeof window !== "undefined" && typeof window.showDirectoryPicker === "function"
 
 export const supportsOPFS = (): boolean =>
   typeof navigator !== "undefined" &&
@@ -65,16 +54,15 @@ export const showDirectoryPicker = (options?: {
       new Error("Die File System Access API wird in diesem Browser nicht unterstützt."),
     )
   }
-  return (window as unknown as DirectoryPickerWindow).showDirectoryPicker(options)
+  return window.showDirectoryPicker!(options)
 }
 
 export const queryDirectoryPermission = async (
   handle: FileSystemDirectoryHandle,
   mode: "read" | "readwrite" = "readwrite",
 ): Promise<PermissionState> => {
-  const permHandle = handle as unknown as PermissionCapableHandle
-  if (typeof permHandle.queryPermission === "function") {
-    return await permHandle.queryPermission({ mode })
+  if (typeof handle.queryPermission === "function") {
+    return await handle.queryPermission({ mode })
   }
   return "granted"
 }
@@ -83,9 +71,8 @@ export const requestDirectoryPermission = async (
   handle: FileSystemDirectoryHandle,
   mode: "read" | "readwrite" = "readwrite",
 ): Promise<PermissionState> => {
-  const permHandle = handle as unknown as PermissionCapableHandle
-  if (typeof permHandle.requestPermission === "function") {
-    return await permHandle.requestPermission({ mode })
+  if (typeof handle.requestPermission === "function") {
+    return await handle.requestPermission({ mode })
   }
   return "granted"
 }

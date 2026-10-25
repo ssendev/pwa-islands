@@ -720,6 +720,14 @@ export const InspectFileForEditor = Command.define("InspectFileForEditor", {
     ),
 })
 
+export const RevokeActivePreviewUrl = Command.define("RevokeActivePreviewUrl", {
+  messages: [Message.CompletedRevokeActivePreviewUrl],
+  execute: Effect.sync(() => {
+    revokeActivePreviewUrl()
+    return Message.CompletedRevokeActivePreviewUrl()
+  }),
+})
+
 export const FocusModalNameInput = Command.define("FocusModalNameInput", {
   messages: [Message.CompletedFocusModalNameInput],
   execute: Dom.focus("#modal-file-name").pipe(
