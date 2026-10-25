@@ -39,7 +39,8 @@ import {
   SaveModalChanges,
   WritePendingImportFiles,
 } from "./modal"
-import { AppRoute, type FileEntry } from "./route"
+import type { FileEntry } from "./files"
+import { AppRoute } from "./route"
 import { OPFS_APP_FOLDER } from "./storage"
 
 const modalMsg = (m: Modal.Message) => Message.GotModalMessage({ message: m })

@@ -1,6 +1,5 @@
 import { Array, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
-import { type FileEntry, FileInspection, type StorageType } from "./route"
 import {
   OPFS_APP_FOLDER,
   checkTextBytes,
@@ -14,6 +13,34 @@ import {
   storeFileInfoVisible,
   storeStorageType,
 } from "./storage"
+
+// STORAGE & FILE ENTRY TYPES
+
+export const StorageType = Schema.Literals(["fsa", "opfs"])
+export type StorageType = typeof StorageType.Type
+
+export const FileEntryKind = Schema.Literals(["file", "directory"])
+export type FileEntryKind = typeof FileEntryKind.Type
+
+export const FileEntry = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  kind: FileEntryKind,
+  maybeSize: Schema.Option(Schema.Number),
+  maybeLastModified: Schema.Option(Schema.Number),
+})
+export type FileEntry = typeof FileEntry.Type
+
+export const FileInspection = defineTaggedUnion({
+  EditableText: {
+    size: Schema.Number,
+    text: Schema.String,
+  },
+  Binary: {
+    size: Schema.Number,
+  },
+})
+export type FileInspection = typeof FileInspection.Type
 
 // CAPABILITIES
 

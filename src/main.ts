@@ -12,7 +12,9 @@ import { Url, toString as urlToString } from "foldkit/url"
 import rootIconUrl from "./assets/pwa-islands.svg"
 import {
   FileSystemHandleStorage,
+  FileEntry,
   PREVIEWABLE_IMAGE_EXTENSIONS,
+  StorageType,
   clearSavedDirectoryHandle,
   getActiveStorage,
   getDeferredInstallPrompt,
@@ -38,13 +40,10 @@ import {
 } from "./files"
 import * as Help from "./help"
 import * as Modal from "./modal"
-import { mapHtmlBuilder } from "./modal"
+import { AlertBanner, mapHtmlBuilder } from "./modal"
 import {
-  AlertBanner,
   AppRoute,
-  FileEntry,
   HelpTopic,
-  StorageType,
   buildEditUrl,
   buildFolderUrl,
   buildHelpUrl,

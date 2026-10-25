@@ -9,6 +9,8 @@ import { modifyFields } from "foldkit/struct"
 import {
   BinaryEdit,
   EditorFileMode,
+  FileEntry,
+  FileEntryKind,
   PreviewContent,
   arrayBufferToBase64,
   base64ToUint8Array,
@@ -20,11 +22,20 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
-import { AlertBanner, FileEntry, FileEntryKind, buildFolderUrl } from "./route"
+import { buildFolderUrl } from "./route"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
 
 // MODEL
+
+export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
+export type AlertVariant = typeof AlertVariant.Type
+
+export const AlertBanner = Schema.Struct({
+  message: Schema.String,
+  variant: AlertVariant,
+})
+export type AlertBanner = typeof AlertBanner.Type
 
 export const PendingImportFile = Schema.Struct({
   name: Schema.String,

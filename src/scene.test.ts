@@ -27,7 +27,7 @@ import {
 } from "./main"
 import * as Modal from "./modal"
 import { BinaryEdit, EditorFileMode, ModalState, PreviewContent } from "./modal"
-import type { FileEntry } from "./route"
+import type { FileEntry } from "./files"
 
 const sampleEntries: ReadonlyArray<FileEntry> = [
   {

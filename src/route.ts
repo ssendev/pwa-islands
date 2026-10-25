@@ -1,50 +1,15 @@
 import { Array, Option, Schema, pipe } from "effect"
 import { defineRouteUnion } from "foldkit/route"
-import { defineTaggedUnion } from "foldkit/schema"
 import type { Url } from "foldkit/url"
+import type { FileEntry } from "./files"
 
 // SCHEMAS & TYPES
-
-export const StorageType = Schema.Literals(["fsa", "opfs"])
-export type StorageType = typeof StorageType.Type
-
-export const FileEntryKind = Schema.Literals(["file", "directory"])
-export type FileEntryKind = typeof FileEntryKind.Type
-
-export const FileEntry = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  kind: FileEntryKind,
-  maybeSize: Schema.Option(Schema.Number),
-  maybeLastModified: Schema.Option(Schema.Number),
-})
-export type FileEntry = typeof FileEntry.Type
-
-export const FileInspection = defineTaggedUnion({
-  EditableText: {
-    size: Schema.Number,
-    text: Schema.String,
-  },
-  Binary: {
-    size: Schema.Number,
-  },
-})
-export type FileInspection = typeof FileInspection.Type
 
 export const HelpTopic = Schema.Literals(["api", "fs"])
 export type HelpTopic = typeof HelpTopic.Type
 
 export const NewTarget = Schema.Literals(["file", "folder"])
 export type NewTarget = typeof NewTarget.Type
-
-export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
-export type AlertVariant = typeof AlertVariant.Type
-
-export const AlertBanner = Schema.Struct({
-  message: Schema.String,
-  variant: AlertVariant,
-})
-export type AlertBanner = typeof AlertBanner.Type
 
 export const AppRoute = defineRouteUnion({
   Folder: {
