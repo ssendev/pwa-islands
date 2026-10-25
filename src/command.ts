@@ -15,6 +15,7 @@ import {
   getPendingImportFiles,
   getSavedDirectoryHandle,
   getSavedFileInfoVisible,
+  getSavedFsaHandle,
   getSavedStorageType,
   loadEditorFileModeForEntry,
   queryDirectoryPermission,
@@ -26,6 +27,7 @@ import {
   setDeferredInstallPrompt,
   setPendingHandle,
   setPendingImportFiles,
+  setSavedFsaHandle,
   showDirectoryPicker,
 } from "./files"
 import { Message } from "./message"
@@ -35,7 +37,9 @@ import {
   CopyDtsState,
   type FileEntry,
   ModalState,
+  OPFS_APP_FOLDER,
   ResolvedImportItem,
+  SavedBackend,
   encodeSubPath,
 } from "./model"
 
@@ -207,13 +211,16 @@ const resolveRouteDeepLink = async (
 const activateStorageBackend = async (
   handle: FileSystemDirectoryHandle,
   type: "fsa" | "opfs",
-  isFallback: boolean,
   route: AppRoute,
+  otherBackend: SavedBackend,
 ): Promise<typeof Message.SucceededInitializeStorage.Type> => {
   await saveDirectoryHandle(handle, type)
   const storage = new FileSystemHandleStorage(handle, type)
   setActiveStorage(storage)
-  setPendingHandle(null)
+  if (type === "fsa") {
+    setSavedFsaHandle(handle)
+    setPendingHandle(null)
+  }
 
   const resolved = await resolveRouteDeepLink(storage, route)
 
@@ -221,8 +228,8 @@ const activateStorageBackend = async (
     storageType: type,
     rootName: storage.name,
     subPath: resolved.subPath,
-    isFallback,
     entries: resolved.entries,
+    otherBackend,
     maybeModalState: resolved.maybeModalState,
     maybeAlertBanner: resolved.maybeAlertBanner,
   })
@@ -273,37 +280,66 @@ export const InitializeStorage = Command.define("InitializeStorage", {
       try: async () => {
         const savedType = await getSavedStorageType()
 
+        const opfsSavedBackend: SavedBackend = args.hasOPFS
+          ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
+          : SavedBackend.Unsupported()
+
+        const determineFsaSavedBackend = async (): Promise<SavedBackend> => {
+          if (!args.hasDirectoryPicker) return SavedBackend.Unsupported()
+          const savedHandle = await getSavedDirectoryHandle()
+          if (!savedHandle) return SavedBackend.NoFolderSelected()
+          setSavedFsaHandle(savedHandle)
+          const perm = await queryDirectoryPermission(savedHandle, "readwrite")
+          if (perm === "granted") {
+            return SavedBackend.Granted({ rootName: savedHandle.name || "Gespeicherter Ordner" })
+          }
+          setPendingHandle(savedHandle)
+          return SavedBackend.PermissionRequired({
+            folderName: savedHandle.name || "Gespeicherter Ordner",
+          })
+        }
+
         if (savedType === "opfs" && args.hasOPFS) {
+          const fsaSavedBackend = await determineFsaSavedBackend()
           const opfsRoot = await getOPFSRootDirectory()
-          return await activateStorageBackend(
-            opfsRoot,
-            "opfs",
-            !args.hasDirectoryPicker,
-            args.route,
-          )
+          return await activateStorageBackend(opfsRoot, "opfs", args.route, fsaSavedBackend)
         }
 
         if (args.hasDirectoryPicker) {
           const savedHandle = await getSavedDirectoryHandle()
           if (savedHandle) {
+            setSavedFsaHandle(savedHandle)
             const perm = await queryDirectoryPermission(savedHandle, "readwrite")
             if (perm === "granted") {
-              return await activateStorageBackend(savedHandle, "fsa", false, args.route)
+              return await activateStorageBackend(savedHandle, "fsa", args.route, opfsSavedBackend)
             }
             setPendingHandle(savedHandle)
             return Message.DetectedPermissionRequired({
+              storageType: "fsa",
               folderName: savedHandle.name || "Gespeicherter Ordner",
+              otherBackend: opfsSavedBackend,
             })
           }
-          return Message.DetectedNoFolderSelected()
+          return Message.DetectedNoFolderSelected({
+            storageType: "fsa",
+            otherBackend: opfsSavedBackend,
+          })
         }
 
         if (args.hasOPFS) {
           const opfsRoot = await getOPFSRootDirectory()
-          return await activateStorageBackend(opfsRoot, "opfs", true, args.route)
+          return await activateStorageBackend(
+            opfsRoot,
+            "opfs",
+            args.route,
+            SavedBackend.Unsupported(),
+          )
         }
 
-        return Message.DetectedNoFolderSelected()
+        return Message.DetectedNoFolderSelected({
+          storageType: "fsa",
+          otherBackend: SavedBackend.Unsupported(),
+        })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(
@@ -319,6 +355,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
 
 export const PickLocalDirectory = Command.define("PickLocalDirectory", {
   args: {
+    otherBackend: SavedBackend,
     route: AppRoute,
   },
   messages: [
@@ -331,7 +368,7 @@ export const PickLocalDirectory = Command.define("PickLocalDirectory", {
       try: async () => {
         try {
           const handle = await showDirectoryPicker({ mode: "readwrite" })
-          return await activateStorageBackend(handle, "fsa", false, args.route)
+          return await activateStorageBackend(handle, "fsa", args.route, args.otherBackend)
         } catch (error) {
           if (error instanceof DOMException && error.name === "AbortError") {
             return Message.CancelledFolderSelection()
@@ -353,6 +390,7 @@ export const PickLocalDirectory = Command.define("PickLocalDirectory", {
 
 export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission", {
   args: {
+    otherBackend: SavedBackend,
     route: AppRoute,
   },
   messages: [
@@ -363,13 +401,17 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const pending = getPendingHandle()
+        const pending =
+          getPendingHandle() ?? getSavedFsaHandle() ?? (await getSavedDirectoryHandle())
         if (!pending) {
-          return Message.DetectedNoFolderSelected()
+          return Message.DetectedNoFolderSelected({
+            storageType: "fsa",
+            otherBackend: args.otherBackend,
+          })
         }
         const state = await requestDirectoryPermission(pending, "readwrite")
         if (state === "granted") {
-          return await activateStorageBackend(pending, "fsa", false, args.route)
+          return await activateStorageBackend(pending, "fsa", args.route, args.otherBackend)
         }
         return Message.FailedGrantDirectoryPermission({
           message:
@@ -390,7 +432,7 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
 
 export const ActivateOpfsBackend = Command.define("ActivateOpfsBackend", {
   args: {
-    isFallback: Schema.Boolean,
+    otherBackend: SavedBackend,
     route: AppRoute,
   },
   messages: [Message.SucceededInitializeStorage, Message.FailedActivateOpfsBackend],
@@ -398,7 +440,7 @@ export const ActivateOpfsBackend = Command.define("ActivateOpfsBackend", {
     Effect.tryPromise({
       try: async () => {
         const opfsRoot = await getOPFSRootDirectory()
-        return await activateStorageBackend(opfsRoot, "opfs", args.isFallback, args.route)
+        return await activateStorageBackend(opfsRoot, "opfs", args.route, args.otherBackend)
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(
@@ -406,6 +448,50 @@ export const ActivateOpfsBackend = Command.define("ActivateOpfsBackend", {
         Effect.succeed(
           Message.FailedActivateOpfsBackend({
             message: `Interner Speicher (OPFS) konnte nicht geöffnet werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
+  args: {
+    otherBackend: SavedBackend,
+    route: AppRoute,
+  },
+  messages: [
+    Message.SucceededInitializeStorage,
+    Message.DetectedPermissionRequired,
+    Message.DetectedNoFolderSelected,
+    Message.FailedPickLocalDirectory,
+  ],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const handle = getSavedFsaHandle() ?? (await getSavedDirectoryHandle())
+        if (!handle) {
+          return Message.DetectedNoFolderSelected({
+            storageType: "fsa",
+            otherBackend: args.otherBackend,
+          })
+        }
+        const perm = await queryDirectoryPermission(handle, "readwrite")
+        if (perm === "granted") {
+          return await activateStorageBackend(handle, "fsa", args.route, args.otherBackend)
+        }
+        setPendingHandle(handle)
+        return Message.DetectedPermissionRequired({
+          storageType: "fsa",
+          folderName: handle.name || "Gespeicherter Ordner",
+          otherBackend: args.otherBackend,
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedPickLocalDirectory({
+            message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
           }),
         ),
       ),
@@ -430,17 +516,20 @@ export const DisconnectStorage = Command.define("DisconnectStorage", {
         const active = getActiveStorage()
         if (active) {
           await active.disconnect()
-        } else {
-          await clearSavedDirectoryHandle()
         }
+        await clearSavedDirectoryHandle()
         setActiveStorage(null)
         setPendingHandle(null)
+        setSavedFsaHandle(null)
 
-        if (!args.hasDirectoryPicker && args.hasOPFS) {
-          const opfsRoot = await getOPFSRootDirectory()
-          return await activateStorageBackend(opfsRoot, "opfs", true, args.route)
-        }
-        return Message.DetectedNoFolderSelected()
+        const opfsSavedBackend: SavedBackend = args.hasOPFS
+          ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
+          : SavedBackend.Unsupported()
+
+        return Message.DetectedNoFolderSelected({
+          storageType: "fsa",
+          otherBackend: opfsSavedBackend,
+        })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(

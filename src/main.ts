@@ -4,6 +4,7 @@ import { modifyFields } from "foldkit/struct"
 import type * as Update from "foldkit/update"
 import { toString as urlToString, type Url } from "foldkit/url"
 import {
+  ActivateFsaBackend,
   ActivateOpfsBackend,
   CopyApiDtsToClipboard,
   DeleteModalEntry,
@@ -42,9 +43,11 @@ import {
   InstallPrompt,
   Model,
   ModalState,
+  OPFS_APP_FOLDER,
   type PendingImportFile,
   PreviewContent,
   type ResolvedImportItem,
+  SavedBackend,
   StorageState,
   buildEditUrl,
   buildFolderUrl,
@@ -138,6 +141,59 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
 
 // UPDATE
 
+const getOtherBackend = (storageState: StorageState): SavedBackend =>
+  StorageState.match(storageState, {
+    Initializing: () => SavedBackend.NoFolderSelected(),
+    Unsupported: () => SavedBackend.Unsupported(),
+    NoFolderSelected: (s) => s.otherBackend,
+    PermissionRequired: (s) => s.otherBackend,
+    Ready: (s) => s.otherBackend,
+  })
+
+const handleUseFsa = (model: Model): Update.Return<Model, Message> => {
+  const opfsSavedBackend: SavedBackend = model.hasOPFS
+    ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
+    : SavedBackend.Unsupported()
+  const other = getOtherBackend(model.storageState)
+
+  return SavedBackend.match(other, {
+    Unsupported: () => ({
+      model: modifyFields(model, { isSettingsOpen: () => false }),
+    }),
+    NoFolderSelected: () => ({
+      model: modifyFields(model, { isSettingsOpen: () => false }),
+      commands: [
+        PickLocalDirectory({
+          otherBackend: opfsSavedBackend,
+          route: AppRoute.Folder({ subPath: [] }),
+        }),
+      ],
+    }),
+    PermissionRequired: ({ folderName }) => ({
+      model: modifyFields(model, {
+        storageState: () =>
+          StorageState.PermissionRequired({
+            storageType: "fsa",
+            folderName,
+            otherBackend: opfsSavedBackend,
+          }),
+        isSettingsOpen: () => false,
+      }),
+      commands: [PushUrl({ url: buildFolderUrl([]) })],
+    }),
+    Granted: () => ({
+      model: modifyFields(model, { isSettingsOpen: () => false }),
+      commands: [
+        ActivateFsaBackend({
+          otherBackend: opfsSavedBackend,
+          route: AppRoute.Folder({ subPath: [] }),
+        }),
+        PushUrl({ url: buildFolderUrl([]) }),
+      ],
+    }),
+  })
+}
+
 const whenReady = (
   model: Model,
   fn: (
@@ -153,8 +209,8 @@ export const update = (model: Model, message: Message) =>
       storageType,
       rootName,
       subPath,
-      isFallback,
       entries,
+      otherBackend,
       maybeModalState,
       maybeAlertBanner,
     }) => {
@@ -175,8 +231,8 @@ export const update = (model: Model, message: Message) =>
               storageType,
               rootName,
               subPath,
-              isFallback,
               entriesState: EntriesState.Loaded({ entries }),
+              otherBackend,
             }),
           isSettingsOpen: () => false,
           modalState: () => nextModalState,
@@ -186,16 +242,17 @@ export const update = (model: Model, message: Message) =>
       }
     },
 
-    DetectedPermissionRequired: ({ folderName }) => ({
+    DetectedPermissionRequired: ({ storageType, folderName, otherBackend }) => ({
       model: modifyFields(model, {
-        storageState: () => StorageState.PermissionRequired({ folderName }),
+        storageState: () =>
+          StorageState.PermissionRequired({ storageType, folderName, otherBackend }),
         isSettingsOpen: () => false,
       }),
     }),
 
-    DetectedNoFolderSelected: () => ({
+    DetectedNoFolderSelected: ({ storageType, otherBackend }) => ({
       model: modifyFields(model, {
-        storageState: () => StorageState.NoFolderSelected(),
+        storageState: () => StorageState.NoFolderSelected({ storageType, otherBackend }),
         isSettingsOpen: () => false,
         modalState: () =>
           model.modalState._tag === "Help" ? model.modalState : ModalState.Closed(),
@@ -205,7 +262,14 @@ export const update = (model: Model, message: Message) =>
 
     FailedInitializeStorage: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
-        storageState: () => StorageState.NoFolderSelected(),
+        storageState: () =>
+          StorageState.NoFolderSelected({
+            storageType: model.hasDirectoryPicker ? "fsa" : "opfs",
+            otherBackend:
+              model.hasOPFS && model.hasDirectoryPicker
+                ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
+                : SavedBackend.Unsupported(),
+          }),
         maybeAlertBanner: () =>
           Option.some({
             message: errorMessage,
@@ -514,36 +578,79 @@ export const update = (model: Model, message: Message) =>
       }
     },
 
-    ClickedSelectFolder: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-      }),
-      commands: [PickLocalDirectory({ route: AppRoute.Folder({ subPath: [] }) })],
-    }),
-
-    ClickedChangeFolder: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-      }),
-      commands: [PickLocalDirectory({ route: AppRoute.Folder({ subPath: [] }) })],
-    }),
-
-    ClickedGrantPermission: () => ({
-      model,
-      commands: [GrantDirectoryPermission({ route: AppRoute.Folder({ subPath: [] }) })],
-    }),
-
-    ClickedUseOpfs: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-      }),
-      commands: [
-        ActivateOpfsBackend({
-          isFallback: !model.hasDirectoryPicker,
-          route: AppRoute.Folder({ subPath: [] }),
+    ClickedSelectFolder: () => {
+      if (model.storageState._tag === "Ready" && model.storageState.storageType === "opfs") {
+        return handleUseFsa(model)
+      }
+      const otherBackend = getOtherBackend(model.storageState)
+      return {
+        model: modifyFields(model, {
+          isSettingsOpen: () => false,
         }),
-      ],
-    }),
+        commands: [
+          PickLocalDirectory({
+            otherBackend,
+            route: AppRoute.Folder({ subPath: [] }),
+          }),
+        ],
+      }
+    },
+
+    ClickedChangeFolder: () => {
+      const otherBackend = getOtherBackend(model.storageState)
+      return {
+        model: modifyFields(model, {
+          isSettingsOpen: () => false,
+        }),
+        commands: [
+          PickLocalDirectory({
+            otherBackend,
+            route: AppRoute.Folder({ subPath: [] }),
+          }),
+        ],
+      }
+    },
+
+    ClickedGrantPermission: () => {
+      const otherBackend = getOtherBackend(model.storageState)
+      return {
+        model,
+        commands: [
+          GrantDirectoryPermission({
+            otherBackend,
+            route: AppRoute.Folder({ subPath: [] }),
+          }),
+        ],
+      }
+    },
+
+    ClickedUseOpfs: () => {
+      const savedFsa = StorageState.match(model.storageState, {
+        Initializing: () => SavedBackend.NoFolderSelected(),
+        Unsupported: () => SavedBackend.Unsupported(),
+        NoFolderSelected: () => SavedBackend.NoFolderSelected(),
+        PermissionRequired: ({ folderName }) => SavedBackend.PermissionRequired({ folderName }),
+        Ready: (ready) =>
+          ready.storageType === "fsa"
+            ? SavedBackend.Granted({ rootName: ready.rootName })
+            : ready.otherBackend,
+      })
+
+      return {
+        model: modifyFields(model, {
+          isSettingsOpen: () => false,
+        }),
+        commands: [
+          ActivateOpfsBackend({
+            otherBackend: savedFsa,
+            route: AppRoute.Folder({ subPath: [] }),
+          }),
+          PushUrl({ url: buildFolderUrl([]) }),
+        ],
+      }
+    },
+
+    ClickedUseFsa: () => handleUseFsa(model),
 
     ClickedDisconnectFolder: () => ({
       model: modifyFields(model, {

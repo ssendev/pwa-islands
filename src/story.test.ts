@@ -3,10 +3,14 @@ import { Command, given, message, model, story } from "foldkit/story"
 import { fromString } from "foldkit/url"
 import { describe, expect, it } from "vitest"
 import {
+  ActivateFsaBackend,
+  ActivateOpfsBackend,
   CopyApiDtsToClipboard,
   DeleteModalEntry,
+  DisconnectStorage,
   FocusModalNameInput,
   NavigateToSubfolder,
+  PickLocalDirectory,
   PushUrl,
   ReplaceUrl,
   SaveFileInfoPreference,
@@ -16,6 +20,7 @@ import {
 } from "./command"
 import { Message, init, update } from "./main"
 import {
+  AppRoute,
   CopyDtsState,
   EditorFileMode,
   EntriesState,
@@ -23,6 +28,8 @@ import {
   InstallPrompt,
   type Model,
   ModalState,
+  OPFS_APP_FOLDER,
+  SavedBackend,
   StorageState,
 } from "./model"
 
@@ -49,8 +56,8 @@ const readyModel: Model = {
     storageType: "fsa",
     rootName: "Meine Islands",
     subPath: [],
-    isFallback: false,
     entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+    otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
   }),
   showFileInfo: true,
   isSettingsOpen: false,
@@ -124,8 +131,8 @@ describe("PWA Islands Story Tests", () => {
             storageType: "fsa",
             rootName: "TestOrdner",
             subPath: [],
-            isFallback: false,
             entries: sampleEntries,
+            otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
             maybeModalState: Option.none(),
             maybeAlertBanner: Option.none(),
           }),
@@ -137,8 +144,8 @@ describe("PWA Islands Story Tests", () => {
               storageType: "fsa",
               rootName: "TestOrdner",
               subPath: [],
-              isFallback: false,
               entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+              otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
             }),
           )
         }),
@@ -177,8 +184,8 @@ describe("PWA Islands Story Tests", () => {
               storageType: "fsa",
               rootName: "Meine Islands",
               subPath: ["projekte"],
-              isFallback: false,
               entriesState: EntriesState.Loaded({ entries: subEntries }),
+              otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
             }),
           )
         }),
@@ -543,6 +550,216 @@ describe("PWA Islands Story Tests", () => {
           expect(m.storageState).toEqual(readyModel.storageState)
         }),
       )
+    })
+
+    describe("storage backend switching", () => {
+      it("switches from FSA to OPFS remembering FSA state in otherBackend", () => {
+        const opfsEntries: ReadonlyArray<FileEntry> = [
+          {
+            name: "opfs-app.html",
+            kind: "file",
+            maybeSize: Option.some(256),
+            maybeLastModified: Option.none(),
+          },
+        ]
+
+        story(
+          update,
+          given(readyModel),
+          message(Message.ClickedUseOpfs()),
+          Command.expectExact(
+            ActivateOpfsBackend({
+              otherBackend: SavedBackend.Granted({ rootName: "Meine Islands" }),
+              route: AppRoute.Folder({ subPath: [] }),
+            }),
+            PushUrl({ url: "/?pwaislands" }),
+          ),
+          Command.resolve(
+            ActivateOpfsBackend,
+            Message.SucceededInitializeStorage({
+              storageType: "opfs",
+              rootName: OPFS_APP_FOLDER,
+              subPath: [],
+              entries: opfsEntries,
+              otherBackend: SavedBackend.Granted({ rootName: "Meine Islands" }),
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.none(),
+            }),
+          ),
+          Command.resolve(PushUrl, Message.CompletedPushUrl()),
+          model((m) => {
+            expect(m.storageState).toEqual(
+              StorageState.Ready({
+                storageType: "opfs",
+                rootName: OPFS_APP_FOLDER,
+                subPath: [],
+                entriesState: EntriesState.Loaded({ entries: opfsEntries }),
+                otherBackend: SavedBackend.Granted({ rootName: "Meine Islands" }),
+              }),
+            )
+          }),
+        )
+      })
+
+      it("switches from OPFS back to FSA directly without file picker when otherBackend is Granted", () => {
+        const opfsModel: Model = {
+          ...readyModel,
+          storageState: StorageState.Ready({
+            storageType: "opfs",
+            rootName: OPFS_APP_FOLDER,
+            subPath: [],
+            entriesState: EntriesState.Loaded({ entries: [] }),
+            otherBackend: SavedBackend.Granted({ rootName: "Meine Islands" }),
+          }),
+        }
+
+        story(
+          update,
+          given(opfsModel),
+          message(Message.ClickedUseFsa()),
+          Command.expectExact(
+            ActivateFsaBackend({
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              route: AppRoute.Folder({ subPath: [] }),
+            }),
+            PushUrl({ url: "/?pwaislands" }),
+          ),
+          Command.resolve(
+            ActivateFsaBackend,
+            Message.SucceededInitializeStorage({
+              storageType: "fsa",
+              rootName: "Meine Islands",
+              subPath: [],
+              entries: sampleEntries,
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.none(),
+            }),
+          ),
+          Command.resolve(PushUrl, Message.CompletedPushUrl()),
+          model((m) => {
+            expect(m.storageState).toEqual(
+              StorageState.Ready({
+                storageType: "fsa",
+                rootName: "Meine Islands",
+                subPath: [],
+                entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+                otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              }),
+            )
+          }),
+        )
+      })
+
+      it("switches from OPFS to FSA in PermissionRequired when otherBackend requires permission", () => {
+        const opfsModel: Model = {
+          ...readyModel,
+          storageState: StorageState.Ready({
+            storageType: "opfs",
+            rootName: OPFS_APP_FOLDER,
+            subPath: [],
+            entriesState: EntriesState.Loaded({ entries: [] }),
+            otherBackend: SavedBackend.PermissionRequired({ folderName: "Gespeicherter Ordner" }),
+          }),
+        }
+
+        story(
+          update,
+          given(opfsModel),
+          message(Message.ClickedUseFsa()),
+          Command.expectExact(PushUrl({ url: "/?pwaislands" })),
+          Command.resolve(PushUrl, Message.CompletedPushUrl()),
+          model((m) => {
+            expect(m.storageState).toEqual(
+              StorageState.PermissionRequired({
+                storageType: "fsa",
+                folderName: "Gespeicherter Ordner",
+                otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              }),
+            )
+          }),
+        )
+      })
+
+      it("prompts directory picker when switching to FSA and otherBackend is NoFolderSelected", () => {
+        const opfsModel: Model = {
+          ...readyModel,
+          storageState: StorageState.Ready({
+            storageType: "opfs",
+            rootName: OPFS_APP_FOLDER,
+            subPath: [],
+            entriesState: EntriesState.Loaded({ entries: [] }),
+            otherBackend: SavedBackend.NoFolderSelected(),
+          }),
+        }
+
+        story(
+          update,
+          given(opfsModel),
+          message(Message.ClickedUseFsa()),
+          Command.expectExact(
+            PickLocalDirectory({
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              route: AppRoute.Folder({ subPath: [] }),
+            }),
+          ),
+          Command.resolve(
+            PickLocalDirectory,
+            Message.SucceededInitializeStorage({
+              storageType: "fsa",
+              rootName: "Neuer Ordner",
+              subPath: [],
+              entries: sampleEntries,
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.none(),
+            }),
+          ),
+          model((m) => {
+            expect(m.storageState).toEqual(
+              StorageState.Ready({
+                storageType: "fsa",
+                rootName: "Neuer Ordner",
+                subPath: [],
+                entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+                otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              }),
+            )
+          }),
+        )
+      })
+
+      it("disconnects FSA and sets NoFolderSelected while remembering OPFS Granted", () => {
+        story(
+          update,
+          given(readyModel),
+          message(Message.ClickedDisconnectFolder()),
+          Command.expectExact(
+            DisconnectStorage({
+              hasDirectoryPicker: true,
+              hasOPFS: true,
+              route: AppRoute.Folder({ subPath: [] }),
+            }),
+            PushUrl({ url: "/?pwaislands" }),
+          ),
+          Command.resolve(
+            DisconnectStorage,
+            Message.DetectedNoFolderSelected({
+              storageType: "fsa",
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+            }),
+          ),
+          Command.resolve(PushUrl, Message.CompletedPushUrl()),
+          model((m) => {
+            expect(m.storageState).toEqual(
+              StorageState.NoFolderSelected({
+                storageType: "fsa",
+                otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              }),
+            )
+          }),
+        )
+      })
     })
   })
 })

@@ -3,6 +3,7 @@ import { defineRouteUnion } from "foldkit/route"
 import { defineTaggedUnion } from "foldkit/schema"
 import type { Url } from "foldkit/url"
 import { OPFS_APP_FOLDER } from "./storage"
+export { OPFS_APP_FOLDER } from "./storage"
 
 // MODEL
 
@@ -31,19 +32,41 @@ export const EntriesState = defineTaggedUnion({
 })
 export type EntriesState = typeof EntriesState.Type
 
-export const StorageState = defineTaggedUnion({
-  Initializing: {},
+// 1. State of the INACTIVE backend (in background memory, no subPath/entries needed)
+export const SavedBackend = defineTaggedUnion({
   Unsupported: {},
   NoFolderSelected: {},
   PermissionRequired: {
     folderName: Schema.String,
   },
+  Granted: {
+    rootName: Schema.String,
+  },
+})
+export type SavedBackend = typeof SavedBackend.Type
+
+// 2. Main Storage State
+export const StorageState = defineTaggedUnion({
+  Initializing: {},
+  Unsupported: {},
+
+  NoFolderSelected: {
+    storageType: StorageType,
+    otherBackend: SavedBackend, // Remembers the other backend's state!
+  },
+
+  PermissionRequired: {
+    storageType: StorageType,
+    folderName: Schema.String,
+    otherBackend: SavedBackend,
+  },
+
   Ready: {
     storageType: StorageType,
     rootName: Schema.String,
     subPath: Schema.Array(Schema.String),
-    isFallback: Schema.Boolean,
     entriesState: EntriesState,
+    otherBackend: SavedBackend,
   },
 })
 export type StorageState = typeof StorageState.Type

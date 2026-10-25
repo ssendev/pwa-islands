@@ -10,6 +10,7 @@ import {
   ImportCollisionAction,
   ModalState,
   PendingImportFile,
+  SavedBackend,
   StorageType,
 } from "./model"
 
@@ -21,15 +22,20 @@ export const Message = defineMessageUnion({
     storageType: StorageType,
     rootName: Schema.String,
     subPath: Schema.Array(Schema.String),
-    isFallback: Schema.Boolean,
     entries: Schema.Array(FileEntry),
+    otherBackend: SavedBackend,
     maybeModalState: Schema.Option(ModalState),
     maybeAlertBanner: Schema.Option(AlertBanner),
   },
   DetectedPermissionRequired: {
+    storageType: StorageType,
     folderName: Schema.String,
+    otherBackend: SavedBackend,
   },
-  DetectedNoFolderSelected: {},
+  DetectedNoFolderSelected: {
+    storageType: StorageType,
+    otherBackend: SavedBackend,
+  },
   FailedInitializeStorage: {
     message: Schema.String,
   },
@@ -74,6 +80,7 @@ export const Message = defineMessageUnion({
   ClickedChangeFolder: {},
   ClickedGrantPermission: {},
   ClickedUseOpfs: {},
+  ClickedUseFsa: {},
   ClickedDisconnectFolder: {},
   CancelledFolderSelection: {},
   FailedPickLocalDirectory: {

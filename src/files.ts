@@ -9,7 +9,6 @@ import {
 import {
   OPFS_APP_FOLDER,
   clearStoredDirectoryHandle,
-  clearStoredStorageType,
   getOPFSDirectoryHandle,
   getStoredDirectoryHandle,
   getStoredFileInfoVisible,
@@ -104,15 +103,15 @@ export const saveDirectoryHandle = async (
 ): Promise<void> => {
   if (type === "fsa") {
     await storeDirectoryHandle(handle)
-  } else {
-    await clearStoredDirectoryHandle()
+    runtimeBridge.savedFsaHandle = handle
   }
   await storeStorageType(type)
 }
 
 export const clearSavedDirectoryHandle = async (): Promise<void> => {
+  runtimeBridge.savedFsaHandle = null
+  runtimeBridge.pendingHandle = null
   await clearStoredDirectoryHandle()
-  await clearStoredStorageType()
 }
 
 export const getSavedDirectoryHandle = getStoredDirectoryHandle
@@ -431,15 +430,24 @@ export class FileSystemHandleStorage {
 const runtimeBridge: {
   activeStorage: FileSystemHandleStorage | null
   pendingHandle: FileSystemDirectoryHandle | null
+  savedFsaHandle: FileSystemDirectoryHandle | null
   activePreviewObjectUrl: string | null
   deferredInstallPrompt: BeforeInstallPromptEvent | null
   pendingImportFiles: ReadonlyArray<globalThis.File>
 } = {
   activeStorage: null,
   pendingHandle: null,
+  savedFsaHandle: null,
   activePreviewObjectUrl: null,
   deferredInstallPrompt: null,
   pendingImportFiles: [],
+}
+
+export const getSavedFsaHandle = (): FileSystemDirectoryHandle | null =>
+  runtimeBridge.savedFsaHandle
+
+export const setSavedFsaHandle = (handle: FileSystemDirectoryHandle | null): void => {
+  runtimeBridge.savedFsaHandle = handle
 }
 
 export const getPendingImportFiles = (): ReadonlyArray<globalThis.File> =>

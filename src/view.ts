@@ -162,21 +162,28 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
 
 const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
   const isReady = model.storageState._tag === "Ready"
-  const currentStorageType =
-    model.storageState._tag === "Ready"
-      ? Option.some(model.storageState.storageType)
-      : Option.none()
+  const currentStorageType = StorageState.match(model.storageState, {
+    Initializing: () => Option.none(),
+    Unsupported: () => Option.none(),
+    NoFolderSelected: ({ storageType }) => Option.some(storageType),
+    PermissionRequired: ({ storageType }) => Option.some(storageType),
+    Ready: ({ storageType }) => Option.some(storageType),
+  })
   const isFsaReady = model.storageState._tag === "Ready" && model.storageState.storageType === "fsa"
+  const isFsaNoFolder =
+    model.storageState._tag === "NoFolderSelected" && model.storageState.storageType === "fsa"
+  const isFsaPermissionRequired =
+    model.storageState._tag === "PermissionRequired" && model.storageState.storageType === "fsa"
   const canSwitchToOpfs =
     model.hasOPFS &&
     Option.match(currentStorageType, {
-      onNone: () => true,
+      onNone: () => false,
       onSome: (type) => type !== "opfs",
     })
   const canSwitchToFsa =
     model.hasDirectoryPicker &&
     Option.match(currentStorageType, {
-      onNone: () => true,
+      onNone: () => false,
       onSome: (type) => type !== "fsa",
     })
 
@@ -248,12 +255,25 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Id("btn-select-folder"),
                   h.Class("settings-menu-item"),
                   h.Role("menuitem"),
-                  h.OnClick(Message.ClickedSelectFolder()),
+                  h.OnClick(Message.ClickedUseFsa()),
                 ],
                 ["📁 Zu lokalem Ordner wechseln"],
               )
             : h.empty,
-          isFsaReady
+          isFsaNoFolder
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-change-folder"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.Title("Ordner wählen"),
+                  h.OnClick(Message.ClickedSelectFolder()),
+                ],
+                ["📂 Ordner wählen"],
+              )
+            : h.empty,
+          isFsaReady || isFsaPermissionRequired
             ? h.button(
                 [
                   h.Type("button"),

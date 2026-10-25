@@ -12,8 +12,10 @@ import {
 } from "foldkit/scene"
 import { describe, it } from "vitest"
 import {
+  ActivateOpfsBackend,
   FocusModalNameInput,
   LoadModalBase64,
+  PickLocalDirectory,
   PushUrl,
   ReplaceUrl,
   SaveModalChanges,
@@ -28,6 +30,7 @@ import {
   type Model,
   ModalState,
   PreviewContent,
+  SavedBackend,
   StorageState,
 } from "./model"
 
@@ -54,8 +57,8 @@ const readyModel: Model = {
     storageType: "fsa",
     rootName: "Meine Islands",
     subPath: [],
-    isFallback: false,
     entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+    otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
   }),
   showFileInfo: true,
   isSettingsOpen: false,
@@ -170,6 +173,70 @@ describe("PWA Islands Scene Tests", () => {
       click(selector("#modal-btn-delete")),
       sceneExpect(selector(".modal-title")).toHaveText("Eintrag löschen"),
       sceneExpect(text(/wirklich unwiderruflich löschen\?/)).toExist(),
+    )
+  })
+
+  it("toggles settings menu and switches to OPFS", () => {
+    scene(
+      { update, view },
+      given(readyModel),
+      click(selector("#btn-settings")),
+      sceneExpect(selector("#btn-use-opfs")).toExist(),
+      sceneExpect(selector("#btn-select-folder")).toBeAbsent(),
+      click(selector("#btn-use-opfs")),
+      Command.resolveAll(
+        [
+          ActivateOpfsBackend,
+          Message.SucceededInitializeStorage({
+            storageType: "opfs",
+            rootName: "PWA Islands",
+            subPath: [],
+            entries: [],
+            otherBackend: SavedBackend.Granted({ rootName: "Meine Islands" }),
+            maybeModalState: Option.none(),
+            maybeAlertBanner: Option.none(),
+          }),
+        ],
+        [PushUrl, Message.CompletedPushUrl()],
+      ),
+      click(selector("#btn-settings")),
+      sceneExpect(selector("#btn-select-folder")).toExist(),
+      sceneExpect(selector("#btn-use-opfs")).toBeAbsent(),
+    )
+  })
+
+  it("shows 'Ordner wählen' in settings menu when FSA has no folder selected", () => {
+    const fsaNoFolderModel: Model = {
+      ...readyModel,
+      storageState: StorageState.NoFolderSelected({
+        storageType: "fsa",
+        otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(fsaNoFolderModel),
+      click(selector("#btn-settings")),
+      sceneExpect(selector("#btn-change-folder")).toExist(),
+      sceneExpect(selector("#btn-change-folder")).toContainText("Ordner wählen"),
+      sceneExpect(selector("#btn-use-opfs")).toExist(),
+      sceneExpect(selector("#btn-select-folder")).toBeAbsent(),
+      click(selector("#btn-change-folder")),
+      Command.resolveAll([
+        PickLocalDirectory,
+        Message.SucceededInitializeStorage({
+          storageType: "fsa",
+          rootName: "Meine Islands",
+          subPath: [],
+          entries: sampleEntries,
+          otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
+          maybeModalState: Option.none(),
+          maybeAlertBanner: Option.none(),
+        }),
+      ]),
+      sceneExpect(selector("#folder-name-display")).toContainText("PWA Islands"),
+      sceneExpect(text("index.html")).toExist(),
     )
   })
 })

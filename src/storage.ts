@@ -377,6 +377,16 @@ export function splitPath(path: string): ReadonlyArray<string> {
  */
 export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | null> {
   try {
+    const storedType = await getStoredStorageType()
+    if (storedType === "opfs") {
+      try {
+        return await getOPFSDirectoryHandle()
+      } catch (err) {
+        console.warn("findActiveStorage OPFS Fehler:", err)
+        return null
+      }
+    }
+
     const storedHandle = await getStoredDirectoryHandle()
     if (storedHandle) {
       let perm: PermissionState = "granted"
@@ -389,16 +399,15 @@ export async function findActiveStorage(): Promise<FileSystemDirectoryHandle | n
       }
       if (perm === "granted") return storedHandle
     }
+
+    if (!storedType) {
+      return await getOPFSDirectoryHandle()
+    }
   } catch (err) {
-    console.warn("findActiveStorage FSA Fehler:", err)
+    console.warn("findActiveStorage Fehler:", err)
   }
 
-  try {
-    return await getOPFSDirectoryHandle()
-  } catch (err) {
-    console.warn("findActiveStorage OPFS Fehler:", err)
-    return null
-  }
+  return null
 }
 
 /**
