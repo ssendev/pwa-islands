@@ -510,7 +510,7 @@ export const loadEditorFileModeForEntry = async (
         const objectUrl = URL.createObjectURL(file)
         setActivePreviewUrl(objectUrl)
         return previewKind === "image"
-          ? PreviewContent.Image({ objectUrl, name: entryName })
+          ? PreviewContent.Image({ objectUrl })
           : PreviewContent.Pdf({ objectUrl })
       } catch {
         return PreviewContent.None()

@@ -109,7 +109,7 @@ describe("PWA Islands Scene Tests", () => {
         originalName: "bild.png",
         name: "bild.png",
         fileMode: EditorFileMode.Binary({
-          preview: PreviewContent.Image({ objectUrl: "blob:preview-url", name: "bild.png" }),
+          preview: PreviewContent.Image({ objectUrl: "blob:preview-url" }),
           edit: BinaryEdit.Disabled(),
         }),
         maybeValidationError: Option.none(),

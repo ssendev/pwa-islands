@@ -486,6 +486,100 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
+    it("steps through multiple import conflicts and shows remaining queue count", () => {
+      const modelWithFiles = {
+        ...readyModel,
+        storageState: StorageState.Ready({
+          storageType: "opfs" as const,
+          rootName: "App-Speicher",
+          subPath: [],
+          entriesState: EntriesState.Loaded({
+            entries: [
+              {
+                name: "file1.html",
+                kind: "file" as const,
+                maybeSize: Option.some(100),
+                maybeLastModified: Option.some(1000),
+              },
+              {
+                name: "file2.html",
+                kind: "file" as const,
+                maybeSize: Option.some(100),
+                maybeLastModified: Option.some(1000),
+              },
+              {
+                name: "file3.html",
+                kind: "file" as const,
+                maybeSize: Option.some(100),
+                maybeLastModified: Option.some(1000),
+              },
+            ],
+          }),
+          otherBackend: SavedBackend.Granted({ rootName: "Meine Islands" }),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithFiles),
+        message(
+          Message.SelectedImportFiles({
+            files: [
+              { name: "file1.html", size: 100, lastModified: 1000 },
+              { name: "file2.html", size: 100, lastModified: 1000 },
+              { name: "file3.html", size: 100, lastModified: 1000 },
+            ],
+          }),
+        ),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.modalState._tag).toBe("ImportConflict")
+          if (m.modalState._tag === "ImportConflict") {
+            expect(m.modalState.current.name).toBe("file1.html")
+            expect(m.modalState.queue).toHaveLength(2)
+          }
+        }),
+        message(Message.SelectedImportConflictAction({ action: "skip" })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.modalState._tag).toBe("ImportConflict")
+          if (m.modalState._tag === "ImportConflict") {
+            expect(m.modalState.current.name).toBe("file2.html")
+            expect(m.modalState.queue).toHaveLength(1)
+          }
+        }),
+        message(Message.ToggledImportConflictApplyToAll({ applyToAll: true })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.modalState._tag).toBe("ImportConflict")
+          if (m.modalState._tag === "ImportConflict") {
+            expect(m.modalState.applyToAll).toBe(true)
+          }
+        }),
+        message(Message.SelectedImportConflictAction({ action: "replace" })),
+        Command.expectExact(
+          WritePendingImportFiles({
+            items: [
+              { sourceName: "file1.html", targetName: "file1.html", action: "skip" },
+              { sourceName: "file2.html", targetName: "file2.html", action: "replace" },
+              { sourceName: "file3.html", targetName: "file3.html", action: "replace" },
+            ],
+            subPath: [],
+          }),
+        ),
+        Command.resolve(
+          WritePendingImportFiles,
+          Message.CompletedImportFiles({
+            entries: sampleEntries,
+            maybeAlertBanner: Option.none(),
+          }),
+        ),
+        model((m) => {
+          expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+    })
+
     it("opens CreateFile modal and updates URL to ?pwaislands=new when ClickedNewFile", () => {
       story(
         update,

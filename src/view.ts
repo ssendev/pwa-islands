@@ -1668,10 +1668,6 @@ const viewImportConflictModal = (
             [h.Class("modal-body")],
             [
               h.p([], [`Die Datei „${current.name}“ existiert bereits in diesem Ordner.`]),
-              h.p(
-                [h.Class("text-muted")],
-                [`Vorschlag bei Behalten beider Dateien: „${suggestedName}“`],
-              ),
               queueLength > 0
                 ? h.div(
                     [h.Class("form-check mt-3")],
@@ -1701,19 +1697,7 @@ const viewImportConflictModal = (
           h.footer(
             [h.Class("modal-footer")],
             [
-              h.div(
-                [h.Class("modal-footer-left")],
-                [
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Class("btn btn-secondary"),
-                      h.OnClick(Message.CancelledImportConflict()),
-                    ],
-                    ["Abbrechen"],
-                  ),
-                ],
-              ),
+              h.div([h.Class("modal-footer-left")], []),
               h.div(
                 [h.Class("modal-footer-right")],
                 [
@@ -1729,9 +1713,10 @@ const viewImportConflictModal = (
                     [
                       h.Type("button"),
                       h.Class("btn btn-secondary"),
+                      h.Title(suggestedName),
                       h.OnClick(Message.SelectedImportConflictAction({ action: "rename" })),
                     ],
-                    ["Beide behalten"],
+                    ["Umbenennen"],
                   ),
                   h.button(
                     [

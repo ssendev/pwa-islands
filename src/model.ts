@@ -84,7 +84,6 @@ export const PreviewContent = defineTaggedUnion({
   None: {},
   Image: {
     objectUrl: Schema.String,
-    name: Schema.String,
   },
   Pdf: {
     objectUrl: Schema.String,
