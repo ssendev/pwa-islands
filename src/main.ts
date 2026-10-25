@@ -24,7 +24,6 @@ import {
   getSavedFileInfoVisible,
   getSavedFsaHandle,
   getSavedStorageType,
-  loadEditorFileModeForEntry,
   queryDirectoryPermission,
   requestDirectoryPermission,
   requireActiveStorage,
@@ -389,144 +388,39 @@ const resolveRouteDeepLink = async (
   readonly maybeModalState: Option.Option<Modal.ModalState>
   readonly maybeAlertBanner: Option.Option<AlertBanner>
 }> => {
-  return await AppRoute.match(route, {
-    Help: async ({ subPath, maybeTopic }) => {
-      const { resolvedSubPath, entries } = await listEntriesOrRoot(storage, subPath)
-      return {
-        subPath: resolvedSubPath,
-        entries,
-        maybeModalState: Option.some(
-          Modal.ModalState.Help({
-            help: Help.init(Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api"))),
-          }),
-        ),
-        maybeAlertBanner: Option.none(),
-      }
-    },
-
-    Folder: async ({ subPath }) => {
-      try {
-        const entries = await storage.listEntries(subPath)
-        return {
-          subPath,
-          entries,
-          maybeModalState: Option.none(),
-          maybeAlertBanner: Option.none(),
-        }
-      } catch {
-        const entries = await storage.listEntries([])
-        return {
-          subPath: [],
-          entries,
-          maybeModalState: Option.none(),
-          maybeAlertBanner: Option.some<AlertBanner>({
-            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
-            variant: "warning",
-          }),
-        }
-      }
-    },
-
-    New: async ({ subPath, target }) => {
-      const { resolvedSubPath, entries, didFallback } = await listEntriesOrRoot(storage, subPath)
-      const maybeAlertBanner = didFallback
-        ? Option.some<AlertBanner>({
-            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
-            variant: "warning",
-          })
-        : Option.none<AlertBanner>()
-      return {
-        subPath: resolvedSubPath,
-        entries,
-        maybeModalState: Option.some(
-          Modal.ModalState.Editor({
-            editor:
-              target === "folder"
-                ? Editor.Model.CreateFolder({
-                    name: "Neuer Ordner",
-                    maybeValidationError: Option.none(),
-                  })
-                : Editor.Model.CreateFile({
-                    name: "Neu.html",
-                    content: "",
-                    maybeValidationError: Option.none(),
-                  }),
-          }),
-        ),
-        maybeAlertBanner,
-      }
-    },
-
-    Edit: async ({ subPath, name }) => {
-      const { entries, didFallback } = await listEntriesOrRoot(storage, subPath)
-      if (didFallback) {
-        return {
-          subPath: [],
-          entries,
-          maybeModalState: Option.none(),
-          maybeAlertBanner: Option.some<AlertBanner>({
-            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
-            variant: "warning",
-          }),
-        }
-      }
-
-      return await Option.match(
-        pipe(
-          entries,
-          Array.findFirst((entry) => entry.name === name),
-        ),
-        {
-          onNone: async () => {
-            return {
-              subPath,
-              entries,
-              maybeModalState: Option.none(),
-              maybeAlertBanner: Option.some<AlertBanner>({
-                message: `Eintrag "${name}" wurde in diesem Ordner nicht gefunden.`,
-                variant: "warning",
-              }),
-            }
-          },
-          onSome: async (targetEntry) => {
-            if (targetEntry.kind === "directory") {
-              return {
-                subPath,
-                entries,
-                maybeModalState: Option.some(
-                  Modal.ModalState.Editor({
-                    editor: Editor.Model.EditFolder({
-                      originalName: targetEntry.name,
-                      name: targetEntry.name,
-                      maybeValidationError: Option.none(),
-                    }),
-                  }),
-                ),
-                maybeAlertBanner: Option.none(),
-              }
-            }
-
-            const fileMode = await loadEditorFileModeForEntry(storage, subPath, targetEntry.name)
-            return {
-              subPath,
-              entries,
-              maybeModalState: Option.some(
-                Modal.ModalState.Editor({
-                  editor: Editor.Model.EditFile({
-                    originalName: targetEntry.name,
-                    name: targetEntry.name,
-                    fileMode,
-                    maybeValidationError: Option.none(),
-                  }),
-                }),
-              ),
-              maybeAlertBanner: Option.none(),
-            }
-          },
-        },
-      )
-    },
+  const targetSubPath = AppRoute.match(route, {
+    Help: ({ subPath }) => subPath,
+    Folder: ({ subPath }) => subPath,
+    New: ({ subPath }) => subPath,
+    Edit: ({ subPath }) => subPath,
   })
+
+  const { resolvedSubPath, entries, didFallback } = await listEntriesOrRoot(storage, targetSubPath)
+
+  if (didFallback) {
+    return {
+      subPath: [],
+      entries,
+      maybeModalState: Option.none(),
+      maybeAlertBanner: Option.some<AlertBanner>({
+        message: `Pfad "/${targetSubPath.join("/")}" wurde nicht gefunden.`,
+        variant: "warning",
+      }),
+    }
+  }
+
+  const { maybeModalState, maybeAlertBanner } = await Modal.resolveModalForRoute(
+    storage,
+    route,
+    entries,
+  )
+
+  return {
+    subPath: resolvedSubPath,
+    entries,
+    maybeModalState,
+    maybeAlertBanner,
+  }
 }
 
 const activateStorageBackend = async (
@@ -1395,7 +1289,7 @@ export const update = (
       const route = parseUrlToRoute(url)
       return AppRoute.match(route, {
         Folder: ({ subPath }) => {
-          const nextModalState = Modal.ModalState.Closed()
+          const nextModalState = Modal.close()
           return Match.value(model.storageState).pipe(
             Match.tag("Ready", (readyState) => {
               const isSamePath = isSameSubPath(readyState.subPath, subPath)
@@ -1855,58 +1749,29 @@ export const update = (
       }
     },
 
-    PressedEscape: () =>
-      Modal.ModalState.match(model.modalState, {
-        Closed: () => {
-          if (model.isSettingsOpen) {
-            return {
-              model: modifyFields(model, {
-                isSettingsOpen: () => false,
-              }),
-            }
-          }
-          return { model }
-        },
-        Editor: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
+    PressedEscape: () => {
+      if (!Modal.isOpen(model.modalState)) {
+        if (model.isSettingsOpen) {
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
           }
-        },
-        ImportConflict: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
-            }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
-          }
-        },
-        Help: () => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Closed(),
-            }),
-            commands: [
-              ReplaceUrl({ url: buildFolderUrl(subPath) }),
-              toModalCommand(Modal.RevokeActivePreviewUrl()),
-            ],
-          }
-        },
-      }),
+        }
+        return { model }
+      }
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model: modifyFields(model, {
+          isSettingsOpen: () => false,
+          modalState: Modal.close,
+        }),
+        commands: [
+          ReplaceUrl({ url: buildFolderUrl(subPath) }),
+          toModalCommand(Modal.RevokeActivePreviewUrl()),
+        ],
+      }
+    },
 
     // PWA Install Prompt
     CapturedInstallPrompt: () => ({
@@ -2052,14 +1917,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
     },
     {
       modelToDependencies: (model) => ({
-        isActive:
-          model.isSettingsOpen ||
-          Modal.ModalState.match(model.modalState, {
-            Closed: () => false,
-            Editor: () => true,
-            ImportConflict: () => true,
-            Help: () => true,
-          }),
+        isActive: model.isSettingsOpen || Modal.isOpen(model.modalState),
       }),
       dependenciesToStream: ({ isActive }) =>
         Dom.streamFromKeyBindings<Message>({

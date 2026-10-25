@@ -21,7 +21,8 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
-import { buildFolderUrl } from "./route"
+import { AppRoute, HelpTopic, buildFolderUrl } from "./route"
+import type { FileSystemHandleStorage } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
 
@@ -70,6 +71,108 @@ export const ModalState = defineTaggedUnion({
   },
 })
 export type ModalState = typeof ModalState.Type
+
+export const isOpen = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: () => true,
+    ImportConflict: () => true,
+    Help: () => true,
+  })
+
+export const close = (): ModalState => ModalState.Closed()
+
+export const resolveModalForRoute = async (
+  storage: FileSystemHandleStorage,
+  route: AppRoute,
+  entries: ReadonlyArray<FileEntry>,
+): Promise<{
+  readonly maybeModalState: Option.Option<ModalState>
+  readonly maybeAlertBanner: Option.Option<AlertBanner>
+}> => {
+  return await AppRoute.match(route, {
+    Help: ({ maybeTopic }) =>
+      Promise.resolve({
+        maybeModalState: Option.some(
+          ModalState.Help({
+            help: Help.init(Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api"))),
+          }),
+        ),
+        maybeAlertBanner: Option.none(),
+      }),
+
+    Folder: () =>
+      Promise.resolve({
+        maybeModalState: Option.none(),
+        maybeAlertBanner: Option.none(),
+      }),
+
+    New: ({ target }) =>
+      Promise.resolve({
+        maybeModalState: Option.some(
+          ModalState.Editor({
+            editor:
+              target === "folder"
+                ? Editor.Model.CreateFolder({
+                    name: "Neuer Ordner",
+                    maybeValidationError: Option.none(),
+                  })
+                : Editor.Model.CreateFile({
+                    name: "Neu.html",
+                    content: "",
+                    maybeValidationError: Option.none(),
+                  }),
+          }),
+        ),
+        maybeAlertBanner: Option.none(),
+      }),
+
+    Edit: async ({ subPath, name }) => {
+      const maybeEntry = Array.findFirst(entries, (entry) => entry.name === name)
+      return await Option.match(maybeEntry, {
+        onNone: () =>
+          Promise.resolve({
+            maybeModalState: Option.none(),
+            maybeAlertBanner: Option.some<AlertBanner>({
+              message: `Eintrag "${name}" wurde in diesem Ordner nicht gefunden.`,
+              variant: "warning",
+            }),
+          }),
+        onSome: async (targetEntry) => {
+          if (targetEntry.kind === "directory") {
+            return {
+              maybeModalState: Option.some(
+                ModalState.Editor({
+                  editor: Editor.Model.EditFolder({
+                    originalName: targetEntry.name,
+                    name: targetEntry.name,
+                    maybeValidationError: Option.none(),
+                  }),
+                }),
+              ),
+              maybeAlertBanner: Option.none(),
+            }
+          }
+
+          const fileMode = await loadEditorFileModeForEntry(storage, subPath, targetEntry.name)
+          return {
+            maybeModalState: Option.some(
+              ModalState.Editor({
+                editor: Editor.Model.EditFile({
+                  originalName: targetEntry.name,
+                  name: targetEntry.name,
+                  fileMode,
+                  maybeValidationError: Option.none(),
+                }),
+              }),
+            ),
+            maybeAlertBanner: Option.none(),
+          }
+        },
+      })
+    },
+  })
+}
 
 // MESSAGE
 
