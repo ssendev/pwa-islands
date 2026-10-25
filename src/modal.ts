@@ -21,7 +21,7 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
-import { AppRoute, HelpTopic, buildFolderUrl } from "./route"
+import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
 import type { FileSystemHandleStorage } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
@@ -82,6 +82,107 @@ export const isOpen = (state: ModalState): boolean =>
 
 export const close = (): ModalState => ModalState.Closed()
 
+const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
+  api: "PWA Islands bauen",
+  fs: "Speicher: FS API und OPFS",
+}
+
+export const formatDocumentTitle = (state: ModalState, folderTitle: string): string =>
+  ModalState.match(state, {
+    Closed: () => folderTitle,
+    Editor: ({ editor }) =>
+      Editor.Model.match(editor, {
+        CreateFile: () => `Neue Datei — ${folderTitle}`,
+        CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
+        EditFolder: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
+        EditFile: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
+        ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
+        ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
+      }),
+    ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
+    Help: ({ help }) =>
+      Option.match(help.maybeOpenTopic, {
+        onNone: () => `Hilfe — ${folderTitle}`,
+        onSome: (topic) => `${HELP_TOPIC_TITLES[topic]} — Hilfe — ${folderTitle}`,
+      }),
+  })
+
+export const openCreate = (target: NewTarget | "file" | "folder"): ModalState =>
+  ModalState.Editor({
+    editor:
+      target === "folder"
+        ? Editor.Model.CreateFolder({
+            name: "Neuer Ordner",
+            maybeValidationError: Option.none(),
+          })
+        : Editor.Model.CreateFile({
+            name: "Neu.html",
+            content: "",
+            maybeValidationError: Option.none(),
+          }),
+  })
+
+export const openEditFolder = (name: string): ModalState =>
+  ModalState.Editor({
+    editor: Editor.Model.EditFolder({
+      originalName: name,
+      name,
+      maybeValidationError: Option.none(),
+    }),
+  })
+
+export const isEditingEntry = (state: ModalState, name: string): boolean =>
+  Match.value(state).pipe(
+    Match.tag("Editor", ({ editor }) =>
+      Editor.Model.match(editor, {
+        EditFolder: (folder) => folder.originalName === name,
+        EditFile: (file) => file.originalName === name,
+        CreateFile: () => false,
+        CreateFolder: () => false,
+        ConfirmDelete: () => false,
+        ConfirmOverwrite: () => false,
+      }),
+    ),
+    Match.orElse(() => false),
+  )
+
+export const openHelp = (
+  maybeTopic: Option.Option<HelpTopic>,
+  currentState: ModalState = ModalState.Closed(),
+): ModalState => {
+  const maybeExistingHelp = Match.value(currentState).pipe(
+    Match.tag("Help", (helpState) => Option.some(helpState.help)),
+    Match.orElse(() => Option.none()),
+  )
+
+  const topicToUse = Option.match(maybeTopic, {
+    onNone: () =>
+      Option.match(maybeExistingHelp, {
+        onNone: () => Option.some<HelpTopic>("api"),
+        onSome: (existing) => existing.maybeOpenTopic,
+      }),
+    onSome: (topic) => Option.some(topic),
+  })
+
+  const nextHelp: Help.Model = Option.match(maybeExistingHelp, {
+    onNone: () => Help.init(topicToUse),
+    onSome: (existing) =>
+      modifyFields(existing, {
+        maybeOpenTopic: () => topicToUse,
+      }),
+  })
+
+  return ModalState.Help({ help: nextHelp })
+}
+
+export const initFromRoute = (route: AppRoute): Option.Option<ModalState> =>
+  AppRoute.match(route, {
+    Folder: () => Option.none(),
+    New: ({ target }) => Option.some(openCreate(target)),
+    Edit: () => Option.none(),
+    Help: ({ maybeTopic }) => Option.some(openHelp(maybeTopic)),
+  })
+
 export const resolveModalForRoute = async (
   storage: FileSystemHandleStorage,
   route: AppRoute,
@@ -94,11 +195,7 @@ export const resolveModalForRoute = async (
   return await AppRoute.match(route, {
     Help: ({ maybeTopic }) =>
       Promise.resolve({
-        maybeModalState: Option.some(
-          ModalState.Help({
-            help: Help.init(Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api"))),
-          }),
-        ),
+        maybeModalState: Option.some(openHelp(maybeTopic)),
         maybeAlertBanner: Option.none(),
       }),
 
@@ -115,21 +212,7 @@ export const resolveModalForRoute = async (
 
     New: ({ subPath, target }) =>
       Promise.resolve({
-        maybeModalState: Option.some(
-          ModalState.Editor({
-            editor:
-              target === "folder"
-                ? Editor.Model.CreateFolder({
-                    name: "Neuer Ordner",
-                    maybeValidationError: Option.none(),
-                  })
-                : Editor.Model.CreateFile({
-                    name: "Neu.html",
-                    content: "",
-                    maybeValidationError: Option.none(),
-                  }),
-          }),
-        ),
+        maybeModalState: Option.some(openCreate(target)),
         maybeAlertBanner: didFallback
           ? Option.some<AlertBanner>({
               message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
@@ -162,15 +245,7 @@ export const resolveModalForRoute = async (
         onSome: async (targetEntry) => {
           if (targetEntry.kind === "directory") {
             return {
-              maybeModalState: Option.some(
-                ModalState.Editor({
-                  editor: Editor.Model.EditFolder({
-                    originalName: targetEntry.name,
-                    name: targetEntry.name,
-                    maybeValidationError: Option.none(),
-                  }),
-                }),
-              ),
+              maybeModalState: Option.some(openEditFolder(targetEntry.name)),
               maybeAlertBanner: Option.none(),
             }
           }

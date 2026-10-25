@@ -37,8 +37,6 @@ import {
   setSavedFsaHandle,
   showDirectoryPicker,
 } from "./files"
-import * as Editor from "./editor"
-import * as Help from "./help"
 import * as Modal from "./modal"
 import { AlertBanner } from "./modal"
 import {
@@ -180,34 +178,12 @@ type ReadyStorageState = Extract<StorageState, { readonly _tag: "Ready" }>
 
 const APP_TITLE = OPFS_APP_FOLDER
 
-const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
-  api: "PWA Islands bauen",
-  fs: "Speicher: FS API und OPFS",
-}
-
 export const computeDocumentTitle = (model: Model): string => {
   const subPath = currentSubPathFromStorageState(model.storageState)
   const folderParts = [...Array.reverse(subPath), APP_TITLE]
   const folderTitle = Array.join(folderParts, " — ")
 
-  return Modal.ModalState.match(model.modalState, {
-    Closed: () => folderTitle,
-    Editor: ({ editor }) =>
-      Editor.Model.match(editor, {
-        CreateFile: () => `Neue Datei — ${folderTitle}`,
-        CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
-        EditFolder: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
-        EditFile: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
-        ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
-        ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
-      }),
-    ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
-    Help: ({ help }) =>
-      Option.match(help.maybeOpenTopic, {
-        onNone: () => `Hilfe — ${folderTitle}`,
-        onSome: (topic) => `${HELP_TOPIC_TITLES[topic]} — Hilfe — ${folderTitle}`,
-      }),
-  })
+  return Modal.formatDocumentTitle(model.modalState, folderTitle)
 }
 
 // MESSAGE
@@ -899,32 +875,7 @@ export const init = (
 } => {
   const isSupported = flags.hasDirectoryPicker || flags.hasOPFS
   const initialRoute = parseUrlToRoute(url)
-  const maybeInitialModal: Option.Option<Modal.ModalState> = AppRoute.match(initialRoute, {
-    Folder: () => Option.none(),
-    New: ({ target }) =>
-      Option.some(
-        Modal.ModalState.Editor({
-          editor:
-            target === "folder"
-              ? Editor.Model.CreateFolder({
-                  name: "Neuer Ordner",
-                  maybeValidationError: Option.none(),
-                })
-              : Editor.Model.CreateFile({
-                  name: "Neu.html",
-                  content: "",
-                  maybeValidationError: Option.none(),
-                }),
-        }),
-      ),
-    Edit: () => Option.none(),
-    Help: ({ maybeTopic }) =>
-      Option.some(
-        Modal.ModalState.Help({
-          help: Help.init(Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api"))),
-        }),
-      ),
-  })
+  const maybeInitialModal: Option.Option<Modal.ModalState> = Modal.initFromRoute(initialRoute)
 
   if (!isSupported) {
     return {
@@ -936,10 +887,7 @@ export const init = (
         showFileInfo: true,
         isSettingsOpen: false,
         installPrompt: InstallPrompt.Unavailable(),
-        modalState: Option.match(maybeInitialModal, {
-          onNone: () => Modal.ModalState.Closed(),
-          onSome: (modalState) => modalState,
-        }),
+        modalState: Option.getOrElse(maybeInitialModal, Modal.close),
         maybeAlertBanner: Option.some({
           message:
             "Ihr Browser unterstützt weder die File System Access API noch das Origin Private File System (OPFS).",
@@ -958,10 +906,7 @@ export const init = (
       showFileInfo: true,
       isSettingsOpen: false,
       installPrompt: InstallPrompt.Unavailable(),
-      modalState: Option.match(maybeInitialModal, {
-        onNone: () => Modal.ModalState.Closed(),
-        onSome: (modalState) => modalState,
-      }),
+      modalState: Option.getOrElse(maybeInitialModal, Modal.close),
       maybeAlertBanner: Option.none(),
     },
     commands: [
@@ -1312,19 +1257,7 @@ export const update = (
         },
 
         New: ({ subPath, target }) => {
-          const newModalState = Modal.ModalState.Editor({
-            editor:
-              target === "folder"
-                ? Editor.Model.CreateFolder({
-                    name: "Neuer Ordner",
-                    maybeValidationError: Option.none(),
-                  })
-                : Editor.Model.CreateFile({
-                    name: "Neu.html",
-                    content: "",
-                    maybeValidationError: Option.none(),
-                  }),
-          })
+          const newModalState = Modal.openCreate(target)
 
           return whenReady(model, (readyState) => {
             const isSamePath = isSameSubPath(readyState.subPath, subPath)
@@ -1355,20 +1288,7 @@ export const update = (
         },
 
         Edit: ({ subPath, name }) => {
-          const isAlreadyEditing = Match.value(model.modalState).pipe(
-            Match.tag("Editor", ({ editor }) =>
-              Editor.Model.match(editor, {
-                EditFolder: (folder) => folder.originalName === name,
-                EditFile: (file) => file.originalName === name,
-                CreateFile: () => false,
-                CreateFolder: () => false,
-                ConfirmDelete: () => false,
-                ConfirmOverwrite: () => false,
-              }),
-            ),
-            Match.orElse(() => false),
-          )
-          if (isAlreadyEditing) {
+          if (Modal.isEditingEntry(model.modalState, name)) {
             return { model }
           }
 
@@ -1387,14 +1307,7 @@ export const update = (
               return {
                 model: modifyFields(model, {
                   isSettingsOpen: () => false,
-                  modalState: () =>
-                    Modal.ModalState.Editor({
-                      editor: Editor.Model.EditFolder({
-                        originalName: name,
-                        name,
-                        maybeValidationError: Option.none(),
-                      }),
-                    }),
+                  modalState: () => Modal.openEditFolder(name),
                 }),
                 commands: [toModalCommand(Modal.FocusModalNameInput())],
               }
@@ -1409,36 +1322,12 @@ export const update = (
           })
         },
 
-        Help: ({ maybeTopic }) => {
-          const maybeExistingHelp = Match.value(model.modalState).pipe(
-            Match.tag("Help", (helpState) => Option.some(helpState.help)),
-            Match.orElse(() => Option.none()),
-          )
-
-          const topicToUse = Option.match(maybeTopic, {
-            onNone: () =>
-              Option.match(maybeExistingHelp, {
-                onNone: () => Option.some<HelpTopic>("api"),
-                onSome: (existing) => existing.maybeOpenTopic,
-              }),
-            onSome: (topic) => Option.some(topic),
-          })
-
-          const nextHelp: Help.Model = Option.match(maybeExistingHelp, {
-            onNone: () => Help.init(topicToUse),
-            onSome: (existing) =>
-              modifyFields(existing, {
-                maybeOpenTopic: () => topicToUse,
-              }),
-          })
-
-          return {
-            model: modifyFields(model, {
-              isSettingsOpen: () => false,
-              modalState: () => Modal.ModalState.Help({ help: nextHelp }),
-            }),
-          }
-        },
+        Help: ({ maybeTopic }) => ({
+          model: modifyFields(model, {
+            isSettingsOpen: () => false,
+            modalState: () => Modal.openHelp(maybeTopic, model.modalState),
+          }),
+        }),
       })
     },
 
@@ -1648,14 +1537,7 @@ export const update = (
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
-          modalState: () =>
-            Modal.ModalState.Editor({
-              editor: Editor.Model.CreateFile({
-                name: "Neu.html",
-                content: "",
-                maybeValidationError: Option.none(),
-              }),
-            }),
+          modalState: () => Modal.openCreate("file"),
         }),
         commands: [
           PushUrl({ url: buildNewUrl(subPath, "file") }),
@@ -1668,13 +1550,7 @@ export const update = (
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
-          modalState: () =>
-            Modal.ModalState.Editor({
-              editor: Editor.Model.CreateFolder({
-                name: "Neuer Ordner",
-                maybeValidationError: Option.none(),
-              }),
-            }),
+          modalState: () => Modal.openCreate("folder"),
         }),
         commands: [
           PushUrl({ url: buildNewUrl(subPath, "folder") }),
@@ -1693,14 +1569,7 @@ export const update = (
       if (entry.kind === "directory") {
         return {
           model: modifyFields(model, {
-            modalState: () =>
-              Modal.ModalState.Editor({
-                editor: Editor.Model.EditFolder({
-                  originalName: entry.name,
-                  name: entry.name,
-                  maybeValidationError: Option.none(),
-                }),
-              }),
+            modalState: () => Modal.openEditFolder(entry.name),
           }),
           commands: [
             PushUrl({ url: buildEditUrl(subPath, entry.name) }),
@@ -1725,10 +1594,7 @@ export const update = (
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
-          modalState: () =>
-            Modal.ModalState.Help({
-              help: Help.init(Option.some(activeTopic)),
-            }),
+          modalState: () => Modal.openHelp(Option.some(activeTopic)),
         }),
         commands: [
           PushUrl({
@@ -2685,8 +2551,8 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
           h.div(
             [h.Class("files-page")],
             [
-              viewAlertContainer(model, h),
               viewToolbar(model, h),
+              viewAlertContainer(model, h),
               viewContentSection(model, h),
               viewModalContainer(model, h),
             ],
