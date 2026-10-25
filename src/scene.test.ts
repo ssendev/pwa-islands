@@ -13,26 +13,21 @@ import {
 import { describe, it } from "vitest"
 import {
   ActivateOpfsBackend,
-  FocusModalNameInput,
-  LoadModalBase64,
+  EntriesState,
+  InstallPrompt,
+  Message,
+  type Model,
   PickLocalDirectory,
   PushUrl,
   ReplaceUrl,
-  SaveModalChanges,
-} from "./command"
-import { Message, update, view } from "./main"
-import {
-  BinaryEdit,
-  EditorFileMode,
-  EntriesState,
-  type FileEntry,
-  InstallPrompt,
-  type Model,
-  ModalState,
-  PreviewContent,
   SavedBackend,
   StorageState,
-} from "./route"
+  update,
+  view,
+} from "./main"
+import * as Modal from "./modal"
+import { BinaryEdit, EditorFileMode, ModalState, PreviewContent } from "./modal"
+import type { FileEntry } from "./route"
 
 const sampleEntries: ReadonlyArray<FileEntry> = [
   {
@@ -87,14 +82,17 @@ describe("PWA Islands Scene Tests", () => {
       click(selector("#btn-new-file")),
       Command.resolveAll(
         [PushUrl, Message.CompletedPushUrl()],
-        [FocusModalNameInput, Message.CompletedFocusModalNameInput()],
+        [Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()],
       ),
       sceneExpect(selector(".modal-title")).toHaveText("Neue Datei erstellen"),
       type(selector("#modal-file-name"), "hallo.html"),
       type(selector("#modal-file-content"), "<h1>Hallo Welt</h1>"),
       click(selector("#modal-btn-save")),
       Command.resolveAll(
-        [SaveModalChanges, Message.SucceededSaveModalChanges({ entries: updatedEntries })],
+        [
+          Modal.SaveModalChanges,
+          Modal.Message.SucceededSaveModalChanges({ entries: updatedEntries }),
+        ],
         [ReplaceUrl, Message.CompletedReplaceUrl()],
       ),
       sceneExpect(selector(".modal-overlay")).toBeAbsent(),
@@ -122,10 +120,10 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-file-preview")).toExist(),
       sceneExpect(selector("#modal-base64-editor")).toBeAbsent(),
       change(selector("#modal-use-base64"), "true"),
-      Command.expectExact(LoadModalBase64({ entryName: "bild.png", subPath: [] })),
+      Command.expectExact(Modal.LoadModalBase64({ entryName: "bild.png", subPath: [] })),
       Command.resolve(
-        LoadModalBase64,
-        Message.SucceededLoadModalBase64({ base64Content: "iVBORw0KGgo=" }),
+        Modal.LoadModalBase64,
+        Modal.Message.SucceededLoadModalBase64({ base64Content: "iVBORw0KGgo=" }),
       ),
       sceneExpect(selector("#modal-base64-editor")).toExist(),
       sceneExpect(selector("#modal-file-preview")).toBeAbsent(),

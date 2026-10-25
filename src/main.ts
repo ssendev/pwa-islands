@@ -1,82 +1,989 @@
-import { Array, Match, Option, pipe } from "effect"
+import { Array, Effect, Match, Option, Schema, Stream, pipe } from "effect"
+import * as Command from "foldkit/command"
+import * as Dom from "foldkit/dom"
+import type * as Html from "foldkit/html"
+import { defineMessageUnion } from "foldkit/message"
+import * as Navigation from "foldkit/navigation"
 import { UrlRequest } from "foldkit/navigation"
+import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
-import type * as Update from "foldkit/update"
-import { toString as urlToString, type Url } from "foldkit/url"
+import * as Subscription from "foldkit/subscription"
+import { Url, toString as urlToString } from "foldkit/url"
+import rootIconUrl from "./assets/pwa-islands.svg"
 import {
-  ActivateFsaBackend,
-  ActivateOpfsBackend,
-  CopyApiDtsToClipboard,
-  DeleteModalEntry,
-  DisconnectStorage,
-  FocusModalNameInput,
-  GrantDirectoryPermission,
-  InitializeStorage,
-  InspectFileForEditor,
-  LoadFileInfoPreference,
-  LoadModalBase64,
-  LoadUrl,
-  NavigateToSubfolder,
-  OpenFileInBrowser,
-  PickLocalDirectory,
-  PushUrl,
-  RefreshEntries,
-  ReplaceUrl,
-  RevokeActivePreviewUrl,
-  SaveFileInfoPreference,
-  SaveStorageTypePreference,
-  SaveModalChanges,
-  ScrollHelpTopicIntoView,
-  SelectImportFiles,
-  TriggerInstallAppPrompt,
-  WaitBeforeResetCopyDts,
-  WritePendingImportFiles,
-} from "./command"
-import { base64ToUint8Array, findFreeFileName } from "./files"
-import { Message } from "./message"
+  FileSystemHandleStorage,
+  PREVIEWABLE_IMAGE_EXTENSIONS,
+  clearSavedDirectoryHandle,
+  getActiveStorage,
+  getDeferredInstallPrompt,
+  getOPFSRootDirectory,
+  getPendingHandle,
+  getSavedDirectoryHandle,
+  getSavedFileInfoVisible,
+  getSavedFsaHandle,
+  getSavedStorageType,
+  loadEditorFileModeForEntry,
+  queryDirectoryPermission,
+  requestDirectoryPermission,
+  requireActiveStorage,
+  revokeActivePreviewUrl,
+  saveDirectoryHandle,
+  saveFileInfoVisible,
+  saveStorageType,
+  setActiveStorage,
+  setDeferredInstallPrompt,
+  setPendingHandle,
+  setSavedFsaHandle,
+  showDirectoryPicker,
+} from "./files"
+import * as Help from "./help"
+import * as Modal from "./modal"
+import { mapHtmlBuilder } from "./modal"
 import {
+  AlertBanner,
   AppRoute,
-  BinaryEdit,
-  CopyDtsState,
-  EditorFileMode,
-  EntriesState,
-  type FileEntry,
-  Flags,
-  type HelpTopic,
-  InstallPrompt,
-  Model,
-  ModalState,
-  OPFS_APP_FOLDER,
-  OverwriteSource,
-  type PendingImportFile,
-  type ResolvedImportItem,
-  SavedBackend,
-  StorageState,
+  FileEntry,
+  HelpTopic,
+  StorageType,
   buildEditUrl,
   buildFolderUrl,
   buildHelpUrl,
   buildNewUrl,
-  currentSubPathFromStorageState,
+  encodeSubPath,
+  formatDate,
+  formatSize,
+  formatSummaryText,
   parseUrlToRoute,
 } from "./route"
-import { subscriptions } from "./subscription"
-import { view } from "./view"
+import { OPFS_APP_FOLDER } from "./storage"
+
+// MODEL
+
+export const EntriesState = defineTaggedUnion({
+  Loading: {},
+  Loaded: {
+    entries: Schema.Array(FileEntry),
+  },
+  Error: {
+    message: Schema.String,
+  },
+})
+export type EntriesState = typeof EntriesState.Type
+
+export const SavedBackend = defineTaggedUnion({
+  Unsupported: {},
+  NoFolderSelected: {},
+  PermissionRequired: {
+    folderName: Schema.String,
+  },
+  Granted: {
+    rootName: Schema.String,
+  },
+})
+export type SavedBackend = typeof SavedBackend.Type
+
+export const StorageState = defineTaggedUnion({
+  Initializing: {},
+  Unsupported: {},
+
+  NoFolderSelected: {
+    storageType: StorageType,
+    otherBackend: SavedBackend,
+  },
+
+  PermissionRequired: {
+    storageType: StorageType,
+    folderName: Schema.String,
+    otherBackend: SavedBackend,
+  },
+
+  Ready: {
+    storageType: StorageType,
+    rootName: Schema.String,
+    subPath: Schema.Array(Schema.String),
+    entriesState: EntriesState,
+    otherBackend: SavedBackend,
+  },
+})
+export type StorageState = typeof StorageState.Type
+
+export const currentSubPathFromStorageState = (storageState: StorageState): ReadonlyArray<string> =>
+  StorageState.match(storageState, {
+    Initializing: () => [],
+    Unsupported: () => [],
+    NoFolderSelected: () => [],
+    PermissionRequired: () => [],
+    Ready: ({ subPath }) => subPath,
+  })
+
+export const InstallPrompt = defineTaggedUnion({
+  Unavailable: {},
+  Available: {},
+  Prompting: {},
+})
+export type InstallPrompt = typeof InstallPrompt.Type
+
+export const Flags = Schema.Struct({
+  hasDirectoryPicker: Schema.Boolean,
+  hasOPFS: Schema.Boolean,
+  origin: Schema.String,
+})
+export type Flags = typeof Flags.Type
+
+export const Model = Schema.Struct({
+  hasDirectoryPicker: Schema.Boolean,
+  hasOPFS: Schema.Boolean,
+  origin: Schema.String,
+  storageState: StorageState,
+  showFileInfo: Schema.Boolean,
+  isSettingsOpen: Schema.Boolean,
+  installPrompt: InstallPrompt,
+  modalState: Modal.ModalState,
+  maybeAlertBanner: Schema.Option(AlertBanner),
+})
+export type Model = typeof Model.Type
+
+type ReadyStorageState = Extract<StorageState, { readonly _tag: "Ready" }>
+
+const APP_TITLE = OPFS_APP_FOLDER
+
+const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
+  api: "PWA Islands bauen",
+  fs: "Speicher: FS API und OPFS",
+}
+
+export const computeDocumentTitle = (model: Model): string => {
+  const subPath = currentSubPathFromStorageState(model.storageState)
+  const folderParts = [...Array.reverse(subPath), APP_TITLE]
+  const folderTitle = Array.join(folderParts, " — ")
+
+  return Modal.ModalState.match(model.modalState, {
+    Closed: () => folderTitle,
+    CreateFile: () => `Neue Datei — ${folderTitle}`,
+    CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
+    EditFolder: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
+    EditFile: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
+    ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
+    ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
+    ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
+    Help: ({ help }) =>
+      Option.match(help.maybeOpenTopic, {
+        onNone: () => `Hilfe — ${folderTitle}`,
+        onSome: (topic) => `${HELP_TOPIC_TITLES[topic]} — Hilfe — ${folderTitle}`,
+      }),
+  })
+}
+
+// MESSAGE
+
+const StorageActivatedFields = {
+  storageType: StorageType,
+  rootName: Schema.String,
+  subPath: Schema.Array(Schema.String),
+  entries: Schema.Array(FileEntry),
+  otherBackend: SavedBackend,
+  maybeModalState: Schema.Option(Modal.ModalState),
+  maybeAlertBanner: Schema.Option(AlertBanner),
+}
+
+const PermissionRequiredFields = {
+  storageType: StorageType,
+  folderName: Schema.String,
+  otherBackend: SavedBackend,
+}
+
+const NoFolderSelectedFields = {
+  storageType: StorageType,
+  otherBackend: SavedBackend,
+}
+
+export const Message = defineMessageUnion({
+  // Initialization & Storage Backend Lifecycle
+  SucceededInitializeStorage: StorageActivatedFields,
+  CompletedInitializeStoragePermissionRequired: PermissionRequiredFields,
+  CompletedInitializeStorageNoFolderSelected: NoFolderSelectedFields,
+  FailedInitializeStorage: {
+    message: Schema.String,
+  },
+  CompletedLoadFileInfoPreference: {
+    visible: Schema.Boolean,
+  },
+  CompletedSaveFileInfoPreference: {},
+  CompletedSaveStorageTypePreference: {},
+
+  // Directory Listing & Navigation
+  SucceededRefreshEntries: {
+    subPath: Schema.Array(Schema.String),
+    entries: Schema.Array(FileEntry),
+  },
+  FailedRefreshEntries: {
+    message: Schema.String,
+  },
+  SucceededNavigateToSubfolder: {
+    subPath: Schema.Array(Schema.String),
+    entries: Schema.Array(FileEntry),
+  },
+  ClickedRetryList: {},
+  ClickedBreadcrumbRoot: {},
+  ClickedBreadcrumbSegment: {
+    index: Schema.Number,
+  },
+  ClickedEntryRow: {
+    entry: FileEntry,
+  },
+  CompletedOpenFileInBrowser: {},
+  RequestedUrl: {
+    request: UrlRequest,
+  },
+  ChangedUrl: {
+    url: Url,
+  },
+  CompletedPushUrl: {},
+  CompletedReplaceUrl: {},
+  CompletedLoadUrl: {},
+  FailedNavigateToSubfolder: {
+    message: Schema.String,
+  },
+
+  // Settings & Storage Actions
+  ClickedToggleSettings: {},
+  ClickedOutsideSettingsMenu: {},
+  ClickedToggleFileInfo: {},
+  ClickedSelectFolder: {},
+  ClickedChangeFolder: {},
+  ClickedGrantPermission: {},
+  ClickedUseOpfs: {},
+  ClickedUseFsa: {},
+  ClickedDisconnectFolder: {},
+  SucceededPickLocalDirectory: StorageActivatedFields,
+  CancelledPickLocalDirectory: {},
+  FailedPickLocalDirectory: {
+    message: Schema.String,
+  },
+  SucceededGrantDirectoryPermission: StorageActivatedFields,
+  CompletedGrantDirectoryPermissionNoFolderSelected: NoFolderSelectedFields,
+  FailedGrantDirectoryPermission: {
+    message: Schema.String,
+  },
+  SucceededActivateOpfsBackend: StorageActivatedFields,
+  FailedActivateOpfsBackend: {
+    message: Schema.String,
+  },
+  SucceededActivateFsaBackend: StorageActivatedFields,
+  CompletedActivateFsaBackendPermissionRequired: PermissionRequiredFields,
+  CompletedActivateFsaBackendNoFolderSelected: NoFolderSelectedFields,
+  FailedActivateFsaBackend: {
+    message: Schema.String,
+  },
+  SucceededDisconnectStorage: NoFolderSelectedFields,
+  FailedDisconnectStorage: {
+    message: Schema.String,
+  },
+
+  // Toolbar Triggers
+  ClickedNewFile: {},
+  ClickedNewFolder: {},
+  ClickedImportFiles: {},
+  ClickedEditEntry: {
+    entry: FileEntry,
+  },
+  ClickedOpenHelp: {},
+  PressedEscape: {},
+
+  // PWA Install Prompt
+  CapturedInstallPrompt: {},
+  InstalledApp: {},
+  ClickedInstallApp: {},
+  CompletedTriggerInstallAppPrompt: {
+    didAccept: Schema.Boolean,
+  },
+
+  // Submodel Wrapper
+  GotModalMessage: {
+    message: Modal.Message,
+  },
+})
+export type Message = typeof Message.Type
+
+type HtmlBuilder = Html.HtmlBuilder<Message>
+
+// COMMAND
+
+export const toModalCommand = (cmd: Command.Command<Modal.Message>): Command.Command<Message> =>
+  Command.mapMessage(cmd, (msg) => Message.GotModalMessage({ message: msg }))
+
+const findCachedHandle = async ({
+  includePending,
+}: {
+  readonly includePending: boolean
+}): Promise<Option.Option<FileSystemDirectoryHandle>> => {
+  const maybeCached = Option.orElse(
+    includePending ? getPendingHandle() : Option.none(),
+    getSavedFsaHandle,
+  )
+  return Option.isSome(maybeCached) ? maybeCached : await getSavedDirectoryHandle()
+}
+
+const listEntriesOrRoot = async (
+  storage: FileSystemHandleStorage,
+  subPath: ReadonlyArray<string>,
+): Promise<{
+  readonly resolvedSubPath: ReadonlyArray<string>
+  readonly entries: ReadonlyArray<FileEntry>
+  readonly didFallback: boolean
+}> => {
+  try {
+    return {
+      resolvedSubPath: subPath,
+      entries: await storage.listEntries(subPath),
+      didFallback: false,
+    }
+  } catch {
+    return { resolvedSubPath: [], entries: await storage.listEntries([]), didFallback: true }
+  }
+}
+
+const resolveRouteDeepLink = async (
+  storage: FileSystemHandleStorage,
+  route: AppRoute,
+): Promise<{
+  readonly subPath: ReadonlyArray<string>
+  readonly entries: ReadonlyArray<FileEntry>
+  readonly maybeModalState: Option.Option<Modal.ModalState>
+  readonly maybeAlertBanner: Option.Option<AlertBanner>
+}> => {
+  return await AppRoute.match(route, {
+    Help: async ({ subPath, maybeTopic }) => {
+      const { resolvedSubPath, entries } = await listEntriesOrRoot(storage, subPath)
+      return {
+        subPath: resolvedSubPath,
+        entries,
+        maybeModalState: Option.some(
+          Modal.ModalState.Help({
+            help: Help.init(Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api"))),
+          }),
+        ),
+        maybeAlertBanner: Option.none(),
+      }
+    },
+
+    Folder: async ({ subPath }) => {
+      try {
+        const entries = await storage.listEntries(subPath)
+        return {
+          subPath,
+          entries,
+          maybeModalState: Option.none(),
+          maybeAlertBanner: Option.none(),
+        }
+      } catch {
+        const entries = await storage.listEntries([])
+        return {
+          subPath: [],
+          entries,
+          maybeModalState: Option.none(),
+          maybeAlertBanner: Option.some<AlertBanner>({
+            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            variant: "warning",
+          }),
+        }
+      }
+    },
+
+    New: async ({ subPath, target }) => {
+      const { resolvedSubPath, entries, didFallback } = await listEntriesOrRoot(storage, subPath)
+      const maybeAlertBanner = didFallback
+        ? Option.some<AlertBanner>({
+            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            variant: "warning",
+          })
+        : Option.none<AlertBanner>()
+      return {
+        subPath: resolvedSubPath,
+        entries,
+        maybeModalState: Option.some(
+          target === "folder"
+            ? Modal.ModalState.CreateFolder({
+                name: "Neuer Ordner",
+                maybeValidationError: Option.none(),
+              })
+            : Modal.ModalState.CreateFile({
+                name: "Neu.html",
+                content: "",
+                maybeValidationError: Option.none(),
+              }),
+        ),
+        maybeAlertBanner,
+      }
+    },
+
+    Edit: async ({ subPath, name }) => {
+      const { entries, didFallback } = await listEntriesOrRoot(storage, subPath)
+      if (didFallback) {
+        return {
+          subPath: [],
+          entries,
+          maybeModalState: Option.none(),
+          maybeAlertBanner: Option.some<AlertBanner>({
+            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            variant: "warning",
+          }),
+        }
+      }
+
+      return await Option.match(
+        pipe(
+          entries,
+          Array.findFirst((entry) => entry.name === name),
+        ),
+        {
+          onNone: async () => {
+            return {
+              subPath,
+              entries,
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.some<AlertBanner>({
+                message: `Eintrag "${name}" wurde in diesem Ordner nicht gefunden.`,
+                variant: "warning",
+              }),
+            }
+          },
+          onSome: async (targetEntry) => {
+            if (targetEntry.kind === "directory") {
+              return {
+                subPath,
+                entries,
+                maybeModalState: Option.some(
+                  Modal.ModalState.EditFolder({
+                    originalName: targetEntry.name,
+                    name: targetEntry.name,
+                    maybeValidationError: Option.none(),
+                  }),
+                ),
+                maybeAlertBanner: Option.none(),
+              }
+            }
+
+            const fileMode = await loadEditorFileModeForEntry(storage, subPath, targetEntry.name)
+            return {
+              subPath,
+              entries,
+              maybeModalState: Option.some(
+                Modal.ModalState.EditFile({
+                  originalName: targetEntry.name,
+                  name: targetEntry.name,
+                  fileMode,
+                  maybeValidationError: Option.none(),
+                }),
+              ),
+              maybeAlertBanner: Option.none(),
+            }
+          },
+        },
+      )
+    },
+  })
+}
+
+const activateStorageBackend = async (
+  handle: FileSystemDirectoryHandle,
+  type: "fsa" | "opfs",
+  route: AppRoute,
+  otherBackend: SavedBackend,
+): Promise<Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">> => {
+  await saveDirectoryHandle(handle, type)
+  const storage = new FileSystemHandleStorage(handle, type)
+  setActiveStorage(Option.some(storage))
+  if (type === "fsa") {
+    setSavedFsaHandle(Option.some(handle))
+    setPendingHandle(Option.none())
+  }
+
+  const resolved = await resolveRouteDeepLink(storage, route)
+
+  return {
+    storageType: type,
+    rootName: storage.name,
+    subPath: resolved.subPath,
+    entries: resolved.entries,
+    otherBackend,
+    maybeModalState: resolved.maybeModalState,
+    maybeAlertBanner: resolved.maybeAlertBanner,
+  }
+}
+
+export const LoadFileInfoPreference = Command.define("LoadFileInfoPreference", {
+  messages: [Message.CompletedLoadFileInfoPreference],
+  execute: Effect.tryPromise({
+    try: () => getSavedFileInfoVisible(),
+    catch: () => new Error("Failed to load preference"),
+  }).pipe(
+    Effect.map((visible) => Message.CompletedLoadFileInfoPreference({ visible })),
+    Effect.catch(() => Effect.succeed(Message.CompletedLoadFileInfoPreference({ visible: true }))),
+  ),
+})
+
+export const SaveFileInfoPreference = Command.define("SaveFileInfoPreference", {
+  args: {
+    visible: Schema.Boolean,
+  },
+  messages: [Message.CompletedSaveFileInfoPreference],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () => saveFileInfoVisible(args.visible),
+      catch: () => new Error("Failed to save preference"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveFileInfoPreference()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveFileInfoPreference())),
+    ),
+})
+
+export const InitializeStorage = Command.define("InitializeStorage", {
+  args: {
+    hasDirectoryPicker: Schema.Boolean,
+    hasOPFS: Schema.Boolean,
+    route: AppRoute,
+  },
+  messages: [
+    Message.SucceededInitializeStorage,
+    Message.CompletedInitializeStoragePermissionRequired,
+    Message.CompletedInitializeStorageNoFolderSelected,
+    Message.FailedInitializeStorage,
+  ],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const maybeSavedType = await getSavedStorageType()
+
+        const opfsSavedBackend: SavedBackend = args.hasOPFS
+          ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
+          : SavedBackend.Unsupported()
+
+        const determineFsaSavedBackend = async (): Promise<SavedBackend> => {
+          if (!args.hasDirectoryPicker) {
+            return SavedBackend.Unsupported()
+          }
+          return await Option.match(await getSavedDirectoryHandle(), {
+            onNone: async () => SavedBackend.NoFolderSelected(),
+            onSome: async (savedHandle): Promise<SavedBackend> => {
+              setSavedFsaHandle(Option.some(savedHandle))
+              const perm = await queryDirectoryPermission(savedHandle, "readwrite")
+              if (perm === "granted") {
+                return SavedBackend.Granted({
+                  rootName: savedHandle.name || "Gespeicherter Ordner",
+                })
+              }
+              setPendingHandle(Option.some(savedHandle))
+              return SavedBackend.PermissionRequired({
+                folderName: savedHandle.name || "Gespeicherter Ordner",
+              })
+            },
+          })
+        }
+
+        if (Option.exists(maybeSavedType, (savedType) => savedType === "opfs") && args.hasOPFS) {
+          const fsaSavedBackend = await determineFsaSavedBackend()
+          const opfsRoot = await getOPFSRootDirectory()
+          return Message.SucceededInitializeStorage(
+            await activateStorageBackend(opfsRoot, "opfs", args.route, fsaSavedBackend),
+          )
+        }
+
+        if (args.hasDirectoryPicker) {
+          return await Option.match(await getSavedDirectoryHandle(), {
+            onNone: async () =>
+              Message.CompletedInitializeStorageNoFolderSelected({
+                storageType: "fsa",
+                otherBackend: opfsSavedBackend,
+              }),
+            onSome: async (savedHandle) => {
+              setSavedFsaHandle(Option.some(savedHandle))
+              const perm = await queryDirectoryPermission(savedHandle, "readwrite")
+              if (perm === "granted") {
+                return Message.SucceededInitializeStorage(
+                  await activateStorageBackend(savedHandle, "fsa", args.route, opfsSavedBackend),
+                )
+              }
+              setPendingHandle(Option.some(savedHandle))
+              return Message.CompletedInitializeStoragePermissionRequired({
+                storageType: "fsa",
+                folderName: savedHandle.name || "Gespeicherter Ordner",
+                otherBackend: opfsSavedBackend,
+              })
+            },
+          })
+        }
+
+        if (args.hasOPFS) {
+          const opfsRoot = await getOPFSRootDirectory()
+          return Message.SucceededInitializeStorage(
+            await activateStorageBackend(opfsRoot, "opfs", args.route, SavedBackend.Unsupported()),
+          )
+        }
+
+        return Message.CompletedInitializeStorageNoFolderSelected({
+          storageType: "fsa",
+          otherBackend: SavedBackend.Unsupported(),
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedInitializeStorage({
+            message: error.message || "Unbekannter Fehler beim Initialisieren des Speichers",
+          }),
+        ),
+      ),
+    ),
+})
+
+export const SaveStorageTypePreference = Command.define("SaveStorageTypePreference", {
+  args: {
+    storageType: Schema.Literals(["fsa", "opfs"]),
+  },
+  messages: [Message.CompletedSaveStorageTypePreference],
+  execute: ({ storageType }) =>
+    Effect.tryPromise(() => saveStorageType(storageType)).pipe(
+      Effect.map(() => Message.CompletedSaveStorageTypePreference()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveStorageTypePreference())),
+    ),
+})
+
+export const PickLocalDirectory = Command.define("PickLocalDirectory", {
+  args: {
+    otherBackend: SavedBackend,
+    route: AppRoute,
+  },
+  messages: [
+    Message.SucceededPickLocalDirectory,
+    Message.CancelledPickLocalDirectory,
+    Message.FailedPickLocalDirectory,
+  ],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        try {
+          const handle = await showDirectoryPicker({ mode: "readwrite" })
+          return Message.SucceededPickLocalDirectory(
+            await activateStorageBackend(handle, "fsa", args.route, args.otherBackend),
+          )
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return Message.CancelledPickLocalDirectory()
+          }
+          throw error
+        }
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedPickLocalDirectory({
+            message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission", {
+  args: {
+    otherBackend: SavedBackend,
+    route: AppRoute,
+  },
+  messages: [
+    Message.SucceededGrantDirectoryPermission,
+    Message.CompletedGrantDirectoryPermissionNoFolderSelected,
+    Message.FailedGrantDirectoryPermission,
+  ],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        return await Option.match(await findCachedHandle({ includePending: true }), {
+          onNone: async () => {
+            return Message.CompletedGrantDirectoryPermissionNoFolderSelected({
+              storageType: "fsa",
+              otherBackend: args.otherBackend,
+            })
+          },
+          onSome: async (pending) => {
+            const state = await requestDirectoryPermission(pending, "readwrite")
+            if (state === "granted") {
+              return Message.SucceededGrantDirectoryPermission(
+                await activateStorageBackend(pending, "fsa", args.route, args.otherBackend),
+              )
+            }
+            return Message.FailedGrantDirectoryPermission({
+              message:
+                "Zugriff auf den Ordner wurde verweigert. Bitte wählen Sie den Ordner erneut aus.",
+            })
+          },
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedGrantDirectoryPermission({
+            message: `Fehler bei der Berechtigungsanfrage: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const ActivateOpfsBackend = Command.define("ActivateOpfsBackend", {
+  args: {
+    otherBackend: SavedBackend,
+    route: AppRoute,
+  },
+  messages: [Message.SucceededActivateOpfsBackend, Message.FailedActivateOpfsBackend],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const opfsRoot = await getOPFSRootDirectory()
+        return Message.SucceededActivateOpfsBackend(
+          await activateStorageBackend(opfsRoot, "opfs", args.route, args.otherBackend),
+        )
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedActivateOpfsBackend({
+            message: `Interner Speicher (OPFS) konnte nicht geöffnet werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
+  args: {
+    otherBackend: SavedBackend,
+    route: AppRoute,
+  },
+  messages: [
+    Message.SucceededActivateFsaBackend,
+    Message.CompletedActivateFsaBackendPermissionRequired,
+    Message.CompletedActivateFsaBackendNoFolderSelected,
+    Message.FailedActivateFsaBackend,
+  ],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        return await Option.match(await findCachedHandle({ includePending: false }), {
+          onNone: async () => {
+            return Message.CompletedActivateFsaBackendNoFolderSelected({
+              storageType: "fsa",
+              otherBackend: args.otherBackend,
+            })
+          },
+          onSome: async (handle) => {
+            const perm = await queryDirectoryPermission(handle, "readwrite")
+            if (perm === "granted") {
+              return Message.SucceededActivateFsaBackend(
+                await activateStorageBackend(handle, "fsa", args.route, args.otherBackend),
+              )
+            }
+            setPendingHandle(Option.some(handle))
+            return Message.CompletedActivateFsaBackendPermissionRequired({
+              storageType: "fsa",
+              folderName: handle.name || "Gespeicherter Ordner",
+              otherBackend: args.otherBackend,
+            })
+          },
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedActivateFsaBackend({
+            message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const DisconnectStorage = Command.define("DisconnectStorage", {
+  args: {
+    hasDirectoryPicker: Schema.Boolean,
+    hasOPFS: Schema.Boolean,
+    route: AppRoute,
+  },
+  messages: [Message.SucceededDisconnectStorage, Message.FailedDisconnectStorage],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        revokeActivePreviewUrl()
+        await Option.match(getActiveStorage(), {
+          onNone: () => Promise.resolve(),
+          onSome: (active) => active.disconnect(),
+        })
+        await clearSavedDirectoryHandle()
+        setActiveStorage(Option.none())
+        setPendingHandle(Option.none())
+        setSavedFsaHandle(Option.none())
+
+        const opfsSavedBackend: SavedBackend = args.hasOPFS
+          ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
+          : SavedBackend.Unsupported()
+
+        return Message.SucceededDisconnectStorage({
+          storageType: "fsa",
+          otherBackend: opfsSavedBackend,
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedDisconnectStorage({
+            message: `Fehler beim Trennen: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const RefreshEntries = Command.define("RefreshEntries", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+  },
+  messages: [Message.SucceededRefreshEntries, Message.FailedRefreshEntries],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const storage = requireActiveStorage()
+        const entries = await storage.listEntries(args.subPath)
+        return Message.SucceededRefreshEntries({
+          subPath: args.subPath,
+          entries,
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedRefreshEntries({
+            message: error.message,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const NavigateToSubfolder = Command.define("NavigateToSubfolder", {
+  args: {
+    targetSubPath: Schema.Array(Schema.String),
+  },
+  messages: [Message.SucceededNavigateToSubfolder, Message.FailedNavigateToSubfolder],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const storage = requireActiveStorage()
+        const entries = await storage.listEntries(args.targetSubPath)
+        return Message.SucceededNavigateToSubfolder({
+          subPath: args.targetSubPath,
+          entries,
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedNavigateToSubfolder({
+            message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const OpenFileInBrowser = Command.define("OpenFileInBrowser", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+  },
+  messages: [Message.CompletedOpenFileInBrowser],
+  execute: (args) => {
+    const encodedPath = encodeSubPath([...args.subPath, args.fileName])
+    return Navigation.load(`/${encodedPath}`).pipe(Effect.as(Message.CompletedOpenFileInBrowser()))
+  },
+})
+
+export const PushUrl = Command.define("PushUrl", {
+  args: {
+    url: Schema.String,
+  },
+  messages: [Message.CompletedPushUrl],
+  execute: (args) => Navigation.pushUrl(args.url).pipe(Effect.as(Message.CompletedPushUrl())),
+})
+
+export const ReplaceUrl = Command.define("ReplaceUrl", {
+  args: {
+    url: Schema.String,
+  },
+  messages: [Message.CompletedReplaceUrl],
+  execute: (args) => Navigation.replaceUrl(args.url).pipe(Effect.as(Message.CompletedReplaceUrl())),
+})
+
+export const LoadUrl = Command.define("LoadUrl", {
+  args: {
+    url: Schema.String,
+  },
+  messages: [Message.CompletedLoadUrl],
+  execute: (args) => Navigation.load(args.url).pipe(Effect.as(Message.CompletedLoadUrl())),
+})
+
+export const TriggerInstallAppPrompt = Command.define("TriggerInstallAppPrompt", {
+  messages: [Message.CompletedTriggerInstallAppPrompt],
+  execute: Effect.tryPromise({
+    try: async () => {
+      return await Option.match(getDeferredInstallPrompt(), {
+        onNone: async () => Message.CompletedTriggerInstallAppPrompt({ didAccept: false }),
+        onSome: async (promptEvent) => {
+          setDeferredInstallPrompt(Option.none())
+          await promptEvent.prompt()
+          const choice = await promptEvent.userChoice
+          return Message.CompletedTriggerInstallAppPrompt({
+            didAccept: choice.outcome === "accepted",
+          })
+        },
+      })
+    },
+    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+  }).pipe(
+    Effect.catch(() =>
+      Effect.succeed(Message.CompletedTriggerInstallAppPrompt({ didAccept: false })),
+    ),
+  ),
+})
 
 // INIT
 
-export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
+export const init = (
+  flags: Flags,
+  url: Url,
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} => {
   const isSupported = flags.hasDirectoryPicker || flags.hasOPFS
   const initialRoute = parseUrlToRoute(url)
-  const maybeInitialModal: Option.Option<ModalState> = AppRoute.match(initialRoute, {
+  const maybeInitialModal: Option.Option<Modal.ModalState> = AppRoute.match(initialRoute, {
     Folder: () => Option.none(),
     New: ({ target }) =>
       Option.some(
         target === "folder"
-          ? ModalState.CreateFolder({
+          ? Modal.ModalState.CreateFolder({
               name: "Neuer Ordner",
               maybeValidationError: Option.none(),
             })
-          : ModalState.CreateFile({
+          : Modal.ModalState.CreateFile({
               name: "Neu.html",
               content: "",
               maybeValidationError: Option.none(),
@@ -85,9 +992,8 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
     Edit: () => Option.none(),
     Help: ({ maybeTopic }) =>
       Option.some(
-        ModalState.Help({
-          maybeOpenTopic: Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api")),
-          copyDtsState: CopyDtsState.Idle(),
+        Modal.ModalState.Help({
+          help: Help.init(Option.orElse(maybeTopic, () => Option.some<HelpTopic>("api"))),
         }),
       ),
   })
@@ -103,13 +1009,13 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
         isSettingsOpen: false,
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.match(maybeInitialModal, {
-          onNone: () => ModalState.Closed(),
+          onNone: () => Modal.ModalState.Closed(),
           onSome: (modalState) => modalState,
         }),
         maybeAlertBanner: Option.some({
           message:
-            "Browser wird nicht unterstützt: Weder die File System Access API noch OPFS sind in diesem Browser verfügbar. Bitte verwenden Sie einen aktuellen Browser (z. B. Chrome, Edge, Firefox oder Safari).",
-          variant: "danger",
+            "Ihr Browser unterstützt weder die File System Access API noch das Origin Private File System (OPFS).",
+          variant: "warning",
         }),
       },
     }
@@ -125,23 +1031,133 @@ export const init = (flags: Flags, url: Url): Update.Return<Model, Message> => {
       isSettingsOpen: false,
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.match(maybeInitialModal, {
-        onNone: () => ModalState.Closed(),
+        onNone: () => Modal.ModalState.Closed(),
         onSome: (modalState) => modalState,
       }),
       maybeAlertBanner: Option.none(),
     },
     commands: [
-      LoadFileInfoPreference(),
       InitializeStorage({
         hasDirectoryPicker: flags.hasDirectoryPicker,
         hasOPFS: flags.hasOPFS,
         route: initialRoute,
       }),
+      LoadFileInfoPreference(),
     ],
   }
 }
 
 // UPDATE
+
+const handleStorageActivated = (
+  model: Model,
+  payload: {
+    readonly storageType: "fsa" | "opfs"
+    readonly rootName: string
+    readonly subPath: ReadonlyArray<string>
+    readonly entries: ReadonlyArray<FileEntry>
+    readonly otherBackend: SavedBackend
+    readonly maybeModalState: Option.Option<Modal.ModalState>
+    readonly maybeAlertBanner: Option.Option<AlertBanner>
+  },
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} => {
+  const readyStorage = StorageState.Ready({
+    storageType: payload.storageType,
+    rootName: payload.rootName,
+    subPath: payload.subPath,
+    entriesState: EntriesState.Loaded({ entries: payload.entries }),
+    otherBackend: payload.otherBackend,
+  })
+
+  return {
+    model: modifyFields(model, {
+      storageState: () => readyStorage,
+      modalState: () =>
+        Option.match(payload.maybeModalState, {
+          onNone: () => model.modalState,
+          onSome: (modal) => modal,
+        }),
+      maybeAlertBanner: () =>
+        Option.match(payload.maybeAlertBanner, {
+          onNone: () => model.maybeAlertBanner,
+          onSome: (alert) => Option.some(alert),
+        }),
+    }),
+  }
+}
+
+const handlePermissionRequired = (
+  model: Model,
+  payload: {
+    readonly storageType: "fsa" | "opfs"
+    readonly folderName: string
+    readonly otherBackend: SavedBackend
+  },
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} => ({
+  model: modifyFields(model, {
+    storageState: () =>
+      StorageState.PermissionRequired({
+        storageType: payload.storageType,
+        folderName: payload.folderName,
+        otherBackend: payload.otherBackend,
+      }),
+  }),
+})
+
+const handleNoFolderSelected = (
+  model: Model,
+  payload: {
+    readonly storageType: "fsa" | "opfs"
+    readonly otherBackend: SavedBackend
+  },
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} => ({
+  model: modifyFields(model, {
+    storageState: () =>
+      StorageState.NoFolderSelected({
+        storageType: payload.storageType,
+        otherBackend: payload.otherBackend,
+      }),
+  }),
+})
+
+const whenReady = (
+  model: Model,
+  fn: (readyState: ReadyStorageState) => {
+    readonly model: Model
+    readonly commands?: ReadonlyArray<Command.Command<Message>>
+  },
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} =>
+  Match.value(model.storageState).pipe(
+    Match.tag("Ready", (readyState) => {
+      const res = fn(readyState)
+      return { model: res.model, commands: res.commands ?? [] }
+    }),
+    Match.orElse(() => ({ model })),
+  )
+
+const isReadyStorage = (storageState: StorageState): boolean =>
+  StorageState.match(storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: () => false,
+    Ready: () => true,
+  })
+
+const isSameSubPath = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
+  Array.length(a) === Array.length(b) && Array.every(a, (segment, index) => segment === b[index])
 
 const getOtherBackend = (storageState: StorageState): SavedBackend =>
   StorageState.match(storageState, {
@@ -152,7 +1168,12 @@ const getOtherBackend = (storageState: StorageState): SavedBackend =>
     Ready: (s) => s.otherBackend,
   })
 
-const handleUseFsa = (model: Model): Update.Return<Model, Message> => {
+const handleUseFsa = (
+  model: Model,
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} => {
   const opfsSavedBackend: SavedBackend = model.hasOPFS
     ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
     : SavedBackend.Unsupported()
@@ -199,180 +1220,21 @@ const handleUseFsa = (model: Model): Update.Return<Model, Message> => {
   })
 }
 
-const isSameSubPath = Array.makeEquivalence<string>((a, b) => a === b)
-
-const isReadyStorage = (storageState: StorageState): boolean =>
-  Match.value(storageState).pipe(
-    Match.tag("Ready", () => true),
-    Match.orElse(() => false),
-  )
-
-const whenReady = (
+export const update = (
   model: Model,
-  fn: (
-    readyState: Parameters<Parameters<typeof StorageState.match>[1]["Ready"]>[0],
-  ) => Update.Return<Model, Message>,
-): Update.Return<Model, Message> =>
-  Match.value(model.storageState).pipe(
-    Match.tag("Ready", fn),
-    Match.orElse(() => ({ model })),
-  )
-
-const handleEntriesListed = (
-  model: Model,
-  { subPath, entries }: Omit<typeof Message.SucceededRefreshEntries.Type, "_tag">,
-): Update.Return<Model, Message> =>
-  whenReady(model, (readyState) => ({
-    model: modifyFields(model, {
-      storageState: () =>
-        modifyFields(readyState, {
-          subPath: () => subPath,
-          entriesState: () => EntriesState.Loaded({ entries }),
-        }),
-      maybeAlertBanner: () => Option.none(),
-    }),
-  }))
-
-const handleStorageActivated = (
-  model: Model,
-  {
-    storageType,
-    rootName,
-    subPath,
-    entries,
-    otherBackend,
-    maybeModalState,
-    maybeAlertBanner,
-  }: Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">,
-): Update.Return<Model, Message> => {
-  const nextModalState = Option.match(maybeModalState, {
-    onNone: () =>
-      Match.value(model.modalState).pipe(
-        Match.tag("Help", () => model.modalState),
-        Match.orElse(() => ModalState.Closed()),
-      ),
-    onSome: (modalState) => modalState,
-  })
-
-  const shouldFocusModal = ModalState.match(nextModalState, {
-    Closed: () => false,
-    CreateFile: () => true,
-    CreateFolder: () => true,
-    EditFolder: () => true,
-    EditFile: () => true,
-    ConfirmDelete: () => false,
-    ConfirmOverwrite: () => false,
-    ImportConflict: () => false,
-    Help: () => false,
-  })
-
-  return {
-    model: modifyFields(model, {
-      storageState: () =>
-        StorageState.Ready({
-          storageType,
-          rootName,
-          subPath,
-          entriesState: EntriesState.Loaded({ entries }),
-          otherBackend,
-        }),
-      isSettingsOpen: () => false,
-      modalState: () => nextModalState,
-      maybeAlertBanner: () => maybeAlertBanner,
-    }),
-    ...(shouldFocusModal && { commands: [FocusModalNameInput()] }),
-  }
-}
-
-const handlePermissionRequired = (
-  model: Model,
-  {
-    storageType,
-    folderName,
-    otherBackend,
-  }: Omit<typeof Message.CompletedInitializeStoragePermissionRequired.Type, "_tag">,
-): Update.Return<Model, Message> => ({
-  model: modifyFields(model, {
-    storageState: () => StorageState.PermissionRequired({ storageType, folderName, otherBackend }),
-    isSettingsOpen: () => false,
-  }),
-})
-
-const handleNoFolderSelected = (
-  model: Model,
-  {
-    storageType,
-    otherBackend,
-  }: Omit<typeof Message.CompletedInitializeStorageNoFolderSelected.Type, "_tag">,
-): Update.Return<Model, Message> => ({
-  model: modifyFields(model, {
-    storageState: () => StorageState.NoFolderSelected({ storageType, otherBackend }),
-    isSettingsOpen: () => false,
-    modalState: () =>
-      Match.value(model.modalState).pipe(
-        Match.tag("Help", () => model.modalState),
-        Match.orElse(() => ModalState.Closed()),
-      ),
-    maybeAlertBanner: () => Option.none(),
-  }),
-})
-
-type HelpModalState = Parameters<Parameters<typeof ModalState.match>[1]["Help"]>[0]
-type EditFileModalState = Parameters<Parameters<typeof ModalState.match>[1]["EditFile"]>[0]
-type BinaryFileMode = Parameters<Parameters<typeof EditorFileMode.match>[1]["Binary"]>[0]
-
-const whenHelp = (
-  model: Model,
-  fn: (helpState: HelpModalState) => Update.Return<Model, Message>,
-): Update.Return<Model, Message> =>
-  Match.value(model.modalState).pipe(
-    Match.tag("Help", fn),
-    Match.orElse(() => ({ model })),
-  )
-
-const whenBinaryEditor = (
-  model: Model,
-  fn: (editState: EditFileModalState, binaryMode: BinaryFileMode) => Update.Return<Model, Message>,
-): Update.Return<Model, Message> =>
-  Match.value(model.modalState).pipe(
-    Match.tag("EditFile", (editState) =>
-      Match.value(editState.fileMode).pipe(
-        Match.tag("Binary", (binaryMode) => fn(editState, binaryMode)),
-        Match.orElse(() => ({ model })),
-      ),
-    ),
-    Match.orElse(() => ({ model })),
-  )
-
-export const update = (model: Model, message: Message) =>
-  Message.match<Update.Return<Model, Message>>(message, {
+  message: Message,
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} =>
+  Message.match(message, {
     // Initialization & Storage Backend Lifecycle
     SucceededInitializeStorage: (payload) => handleStorageActivated(model, payload),
     CompletedInitializeStoragePermissionRequired: (payload) =>
       handlePermissionRequired(model, payload),
     CompletedInitializeStorageNoFolderSelected: (payload) => handleNoFolderSelected(model, payload),
-    SucceededPickLocalDirectory: (payload) => handleStorageActivated(model, payload),
-    SucceededGrantDirectoryPermission: (payload) => handleStorageActivated(model, payload),
-    CompletedGrantDirectoryPermissionNoFolderSelected: (payload) =>
-      handleNoFolderSelected(model, payload),
-    SucceededActivateOpfsBackend: (payload) => handleStorageActivated(model, payload),
-    SucceededActivateFsaBackend: (payload) => handleStorageActivated(model, payload),
-    CompletedActivateFsaBackendPermissionRequired: (payload) =>
-      handlePermissionRequired(model, payload),
-    CompletedActivateFsaBackendNoFolderSelected: (payload) =>
-      handleNoFolderSelected(model, payload),
-    SucceededDisconnectStorage: (payload) => handleNoFolderSelected(model, payload),
-
     FailedInitializeStorage: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
-        storageState: () =>
-          StorageState.NoFolderSelected({
-            storageType: model.hasDirectoryPicker ? "fsa" : "opfs",
-            otherBackend:
-              model.hasOPFS && model.hasDirectoryPicker
-                ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
-                : SavedBackend.Unsupported(),
-          }),
         maybeAlertBanner: () =>
           Option.some({
             message: errorMessage,
@@ -380,19 +1242,25 @@ export const update = (model: Model, message: Message) =>
           }),
       }),
     }),
-
     CompletedLoadFileInfoPreference: ({ visible }) => ({
       model: modifyFields(model, {
         showFileInfo: () => visible,
       }),
     }),
-
     CompletedSaveFileInfoPreference: () => ({ model }),
     CompletedSaveStorageTypePreference: () => ({ model }),
 
     // Directory Listing & Navigation
-    SucceededRefreshEntries: (payload) => handleEntriesListed(model, payload),
-    SucceededNavigateToSubfolder: (payload) => handleEntriesListed(model, payload),
+    SucceededRefreshEntries: ({ subPath, entries }) =>
+      whenReady(model, (readyState) => ({
+        model: modifyFields(model, {
+          storageState: () =>
+            modifyFields(readyState, {
+              subPath: () => subPath,
+              entriesState: () => EntriesState.Loaded({ entries }),
+            }),
+        }),
+      })),
 
     FailedRefreshEntries: ({ message: errorMessage }) =>
       whenReady(model, (readyState) => ({
@@ -404,51 +1272,65 @@ export const update = (model: Model, message: Message) =>
         }),
       })),
 
-    ClickedRetryList: () =>
+    SucceededNavigateToSubfolder: ({ subPath, entries }) =>
       whenReady(model, (readyState) => ({
         model: modifyFields(model, {
           storageState: () =>
             modifyFields(readyState, {
-              entriesState: () => EntriesState.Loading(),
+              subPath: () => subPath,
+              entriesState: () => EntriesState.Loaded({ entries }),
             }),
         }),
-        commands: [RefreshEntries({ subPath: readyState.subPath })],
       })),
 
-    ClickedBreadcrumbRoot: () =>
-      whenReady(model, () => ({
+    FailedNavigateToSubfolder: ({ message: errorMessage }) => ({
+      model: modifyFields(model, {
+        maybeAlertBanner: () =>
+          Option.some({
+            message: errorMessage,
+            variant: "danger",
+          }),
+      }),
+    }),
+
+    ClickedRetryList: () => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model,
+        commands: [RefreshEntries({ subPath })],
+      }
+    },
+
+    ClickedBreadcrumbRoot: () => {
+      return {
         model,
         commands: [PushUrl({ url: buildFolderUrl([]) })],
-      })),
+      }
+    },
 
-    ClickedBreadcrumbSegment: ({ index }) =>
-      whenReady(model, (readyState) => {
-        const targetSubPath = Array.take(readyState.subPath, index + 1)
+    ClickedBreadcrumbSegment: ({ index }) => {
+      const currentSubPath = currentSubPathFromStorageState(model.storageState)
+      const targetSubPath = Array.take(currentSubPath, index + 1)
+      return {
+        model,
+        commands: [PushUrl({ url: buildFolderUrl(targetSubPath) })],
+      }
+    },
+
+    ClickedEntryRow: ({ entry }) => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      if (entry.kind === "directory") {
+        const targetSubPath = [...subPath, entry.name]
         return {
           model,
           commands: [PushUrl({ url: buildFolderUrl(targetSubPath) })],
         }
-      }),
-
-    ClickedEntryRow: ({ entry }) =>
-      whenReady(model, (readyState) => {
-        const { subPath } = readyState
-        if (entry.kind === "directory") {
-          return {
-            model,
-            commands: [PushUrl({ url: buildFolderUrl([...subPath, entry.name]) })],
-          }
-        }
-        return {
-          model,
-          commands: [
-            OpenFileInBrowser({
-              subPath,
-              fileName: entry.name,
-            }),
-          ],
-        }
-      }),
+      }
+      return {
+        model,
+        commands: [OpenFileInBrowser({ subPath, fileName: entry.name })],
+      }
+    },
 
     CompletedOpenFileInBrowser: () => ({ model }),
 
@@ -470,56 +1352,8 @@ export const update = (model: Model, message: Message) =>
         Folder: ({ subPath }) => {
           const nextModalState = Match.value(model.modalState).pipe(
             Match.tag("Closed", () => model.modalState),
-            Match.orElse(() => ModalState.Closed()),
+            Match.orElse(() => Modal.ModalState.Closed()),
           )
-          return Match.value(model.storageState).pipe(
-            Match.tag("Ready", (readyState) => {
-              const isSamePath = isSameSubPath(readyState.subPath, subPath)
-              if (isSamePath) {
-                return {
-                  model: modifyFields(model, {
-                    modalState: () => nextModalState,
-                  }),
-                }
-              }
-              return {
-                model: modifyFields(model, {
-                  modalState: () => nextModalState,
-                }),
-                commands: [NavigateToSubfolder({ targetSubPath: subPath })],
-              }
-            }),
-            Match.orElse(() => ({
-              model: modifyFields(model, {
-                modalState: () => nextModalState,
-              }),
-            })),
-          )
-        },
-
-        New: ({ subPath, target }) => {
-          const isAlreadyNew = Match.value(model.modalState).pipe(
-            Match.tag("CreateFolder", () => target === "folder"),
-            Match.tag("CreateFile", () => target === "file"),
-            Match.orElse(() => false),
-          )
-
-          const targetModalState =
-            target === "folder"
-              ? ModalState.CreateFolder({
-                  name: "Neuer Ordner",
-                  maybeValidationError: Option.none(),
-                })
-              : ModalState.CreateFile({
-                  name: "Neu.html",
-                  content: "",
-                  maybeValidationError: Option.none(),
-                })
-
-          if (isAlreadyNew) {
-            return { model }
-          }
-
           return Match.value(model.storageState).pipe(
             Match.tag("Ready", (readyState) => {
               const isSamePath = isSameSubPath(readyState.subPath, subPath)
@@ -527,36 +1361,78 @@ export const update = (model: Model, message: Message) =>
                 return {
                   model: modifyFields(model, {
                     isSettingsOpen: () => false,
-                    modalState: () => targetModalState,
+                    modalState: () => nextModalState,
                   }),
-                  commands: [FocusModalNameInput()],
                 }
               }
-
               return {
                 model: modifyFields(model, {
                   isSettingsOpen: () => false,
-                  modalState: () => targetModalState,
+                  modalState: () => nextModalState,
+                  storageState: () =>
+                    modifyFields(readyState, {
+                      entriesState: () => EntriesState.Loading(),
+                    }),
                 }),
-                commands: [NavigateToSubfolder({ targetSubPath: subPath }), FocusModalNameInput()],
+                commands: [NavigateToSubfolder({ targetSubPath: subPath })],
               }
             }),
             Match.orElse(() => ({
               model: modifyFields(model, {
                 isSettingsOpen: () => false,
-                modalState: () => targetModalState,
+                modalState: () => nextModalState,
               }),
             })),
           )
         },
 
+        New: ({ subPath, target }) => {
+          const newModalState =
+            target === "folder"
+              ? Modal.ModalState.CreateFolder({
+                  name: "Neuer Ordner",
+                  maybeValidationError: Option.none(),
+                })
+              : Modal.ModalState.CreateFile({
+                  name: "Neu.html",
+                  content: "",
+                  maybeValidationError: Option.none(),
+                })
+
+          return whenReady(model, (readyState) => {
+            const isSamePath = isSameSubPath(readyState.subPath, subPath)
+            if (isSamePath) {
+              return {
+                model: modifyFields(model, {
+                  isSettingsOpen: () => false,
+                  modalState: () => newModalState,
+                }),
+                commands: [toModalCommand(Modal.FocusModalNameInput())],
+              }
+            }
+            return {
+              model: modifyFields(model, {
+                isSettingsOpen: () => false,
+                modalState: () => newModalState,
+                storageState: () =>
+                  modifyFields(readyState, {
+                    entriesState: () => EntriesState.Loading(),
+                  }),
+              }),
+              commands: [
+                NavigateToSubfolder({ targetSubPath: subPath }),
+                toModalCommand(Modal.FocusModalNameInput()),
+              ],
+            }
+          })
+        },
+
         Edit: ({ subPath, name }) => {
           const isAlreadyEditing = Match.value(model.modalState).pipe(
-            Match.tag("EditFile", (editFile) => editFile.originalName === name),
-            Match.tag("EditFolder", (editFolder) => editFolder.originalName === name),
+            Match.tag("EditFolder", (folder) => folder.originalName === name),
+            Match.tag("EditFile", (file) => file.originalName === name),
             Match.orElse(() => false),
           )
-
           if (isAlreadyEditing) {
             return { model }
           }
@@ -577,13 +1453,13 @@ export const update = (model: Model, message: Message) =>
                 model: modifyFields(model, {
                   isSettingsOpen: () => false,
                   modalState: () =>
-                    ModalState.EditFolder({
+                    Modal.ModalState.EditFolder({
                       originalName: name,
                       name,
                       maybeValidationError: Option.none(),
                     }),
                 }),
-                commands: [FocusModalNameInput()],
+                commands: [toModalCommand(Modal.FocusModalNameInput())],
               }
             }
 
@@ -591,35 +1467,38 @@ export const update = (model: Model, message: Message) =>
               model: modifyFields(model, {
                 isSettingsOpen: () => false,
               }),
-              commands: [InspectFileForEditor({ entryName: name, subPath })],
+              commands: [toModalCommand(Modal.InspectFileForEditor({ entryName: name, subPath }))],
             }
           })
         },
 
         Help: ({ maybeTopic }) => {
           const maybeExistingHelp = Match.value(model.modalState).pipe(
-            Match.tag("Help", (helpState) => Option.some(helpState)),
+            Match.tag("Help", (helpState) => Option.some(helpState.help)),
             Match.orElse(() => Option.none()),
           )
+
+          const topicToUse = Option.match(maybeTopic, {
+            onNone: () =>
+              Option.match(maybeExistingHelp, {
+                onNone: () => Option.some<HelpTopic>("api"),
+                onSome: (existing) => existing.maybeOpenTopic,
+              }),
+            onSome: (topic) => Option.some(topic),
+          })
+
+          const nextHelp: Help.Model = Option.match(maybeExistingHelp, {
+            onNone: () => Help.init(topicToUse),
+            onSome: (existing) =>
+              modifyFields(existing, {
+                maybeOpenTopic: () => topicToUse,
+              }),
+          })
 
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () =>
-                ModalState.Help({
-                  maybeOpenTopic: Option.match(maybeTopic, {
-                    onNone: () =>
-                      Option.match(maybeExistingHelp, {
-                        onNone: () => Option.some<HelpTopic>("api"),
-                        onSome: (existing) => existing.maybeOpenTopic,
-                      }),
-                    onSome: (topic) => Option.some(topic),
-                  }),
-                  copyDtsState: Option.match(maybeExistingHelp, {
-                    onNone: () => CopyDtsState.Idle(),
-                    onSome: (existing) => existing.copyDtsState,
-                  }),
-                }),
+              modalState: () => Modal.ModalState.Help({ help: nextHelp }),
             }),
           }
         },
@@ -629,14 +1508,11 @@ export const update = (model: Model, message: Message) =>
     CompletedPushUrl: () => ({ model }),
     CompletedReplaceUrl: () => ({ model }),
     CompletedLoadUrl: () => ({ model }),
-    CompletedFocusModalNameInput: () => ({ model }),
-    CompletedScrollHelpTopicIntoView: () => ({ model }),
-    CompletedRevokeActivePreviewUrl: () => ({ model }),
 
     // Settings & Storage Actions
     ClickedToggleSettings: () => ({
       model: modifyFields(model, {
-        isSettingsOpen: () => !model.isSettingsOpen,
+        isSettingsOpen: (isOpen) => !isOpen,
       }),
     }),
 
@@ -647,25 +1523,21 @@ export const update = (model: Model, message: Message) =>
     }),
 
     ClickedToggleFileInfo: () => {
-      const nextShowFileInfo = !model.showFileInfo
+      const nextVisible = !model.showFileInfo
       return {
         model: modifyFields(model, {
-          showFileInfo: () => nextShowFileInfo,
-          isSettingsOpen: () => false,
+          showFileInfo: () => nextVisible,
         }),
-        commands: [SaveFileInfoPreference({ visible: nextShowFileInfo })],
+        commands: [SaveFileInfoPreference({ visible: nextVisible })],
       }
     },
 
     ClickedSelectFolder: () => {
-      const isOpfsReady = Match.value(model.storageState).pipe(
-        Match.tag("Ready", ({ storageType }) => storageType === "opfs"),
-        Match.orElse(() => false),
-      )
-      if (isOpfsReady) {
+      if (model.storageState._tag === "Ready" && model.storageState.storageType === "opfs") {
         return handleUseFsa(model)
       }
       const otherBackend = getOtherBackend(model.storageState)
+      const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -673,14 +1545,21 @@ export const update = (model: Model, message: Message) =>
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route: AppRoute.Folder({ subPath: [] }),
+            route: AppRoute.Folder({ subPath }),
           }),
         ],
       }
     },
 
     ClickedChangeFolder: () => {
-      const otherBackend = getOtherBackend(model.storageState)
+      const otherBackend = StorageState.match(model.storageState, {
+        Ready: ({ otherBackend }) => otherBackend,
+        NoFolderSelected: ({ otherBackend }) => otherBackend,
+        PermissionRequired: ({ otherBackend }) => otherBackend,
+        Initializing: () => SavedBackend.Unsupported(),
+        Unsupported: () => SavedBackend.Unsupported(),
+      })
+      const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -688,35 +1567,44 @@ export const update = (model: Model, message: Message) =>
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route: AppRoute.Folder({ subPath: [] }),
+            route: AppRoute.Folder({ subPath }),
           }),
         ],
       }
     },
 
     ClickedGrantPermission: () => {
-      const otherBackend = getOtherBackend(model.storageState)
+      const otherBackend = StorageState.match(model.storageState, {
+        PermissionRequired: ({ otherBackend }) => otherBackend,
+        Ready: ({ otherBackend }) => otherBackend,
+        NoFolderSelected: ({ otherBackend }) => otherBackend,
+        Initializing: () => SavedBackend.Unsupported(),
+        Unsupported: () => SavedBackend.Unsupported(),
+      })
+      const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model,
         commands: [
           GrantDirectoryPermission({
             otherBackend,
-            route: AppRoute.Folder({ subPath: [] }),
+            route: AppRoute.Folder({ subPath }),
           }),
         ],
       }
     },
 
     ClickedUseOpfs: () => {
-      const savedFsa = StorageState.match(model.storageState, {
-        Initializing: () => SavedBackend.NoFolderSelected(),
+      const otherBackend = StorageState.match(model.storageState, {
+        Ready: ({ storageType, rootName }) =>
+          storageType === "fsa" ? SavedBackend.Granted({ rootName }) : SavedBackend.Unsupported(),
+        NoFolderSelected: ({ storageType }) =>
+          storageType === "fsa" ? SavedBackend.NoFolderSelected() : SavedBackend.Unsupported(),
+        PermissionRequired: ({ storageType, folderName }) =>
+          storageType === "fsa"
+            ? SavedBackend.PermissionRequired({ folderName })
+            : SavedBackend.Unsupported(),
+        Initializing: () => SavedBackend.Unsupported(),
         Unsupported: () => SavedBackend.Unsupported(),
-        NoFolderSelected: () => SavedBackend.NoFolderSelected(),
-        PermissionRequired: ({ folderName }) => SavedBackend.PermissionRequired({ folderName }),
-        Ready: (ready) =>
-          ready.storageType === "fsa"
-            ? SavedBackend.Granted({ rootName: ready.rootName })
-            : ready.otherBackend,
       })
 
       return {
@@ -725,7 +1613,7 @@ export const update = (model: Model, message: Message) =>
         }),
         commands: [
           ActivateOpfsBackend({
-            otherBackend: savedFsa,
+            otherBackend,
             route: AppRoute.Folder({ subPath: [] }),
           }),
           PushUrl({ url: buildFolderUrl([]) }),
@@ -735,22 +1623,24 @@ export const update = (model: Model, message: Message) =>
 
     ClickedUseFsa: () => handleUseFsa(model),
 
-    ClickedDisconnectFolder: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-      }),
-      commands: [
-        DisconnectStorage({
-          hasDirectoryPicker: model.hasDirectoryPicker,
-          hasOPFS: model.hasOPFS,
-          route: AppRoute.Folder({ subPath: [] }),
+    ClickedDisconnectFolder: () => {
+      return {
+        model: modifyFields(model, {
+          isSettingsOpen: () => false,
         }),
-        PushUrl({ url: buildFolderUrl([]) }),
-      ],
-    }),
+        commands: [
+          DisconnectStorage({
+            hasDirectoryPicker: model.hasDirectoryPicker,
+            hasOPFS: model.hasOPFS,
+            route: AppRoute.Folder({ subPath: [] }),
+          }),
+          PushUrl({ url: buildFolderUrl([]) }),
+        ],
+      }
+    },
 
+    SucceededPickLocalDirectory: (payload) => handleStorageActivated(model, payload),
     CancelledPickLocalDirectory: () => ({ model }),
-
     FailedPickLocalDirectory: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
         maybeAlertBanner: () =>
@@ -761,17 +1651,10 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
 
+    SucceededGrantDirectoryPermission: (payload) => handleStorageActivated(model, payload),
+    CompletedGrantDirectoryPermissionNoFolderSelected: (payload) =>
+      handleNoFolderSelected(model, payload),
     FailedGrantDirectoryPermission: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "warning",
-          }),
-      }),
-    }),
-
-    FailedActivateFsaBackend: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
         maybeAlertBanner: () =>
           Option.some({
@@ -781,6 +1664,7 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
 
+    SucceededActivateOpfsBackend: (payload) => handleStorageActivated(model, payload),
     FailedActivateOpfsBackend: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
         maybeAlertBanner: () =>
@@ -791,6 +1675,22 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
 
+    SucceededActivateFsaBackend: (payload) => handleStorageActivated(model, payload),
+    CompletedActivateFsaBackendPermissionRequired: (payload) =>
+      handlePermissionRequired(model, payload),
+    CompletedActivateFsaBackendNoFolderSelected: (payload) =>
+      handleNoFolderSelected(model, payload),
+    FailedActivateFsaBackend: ({ message: errorMessage }) => ({
+      model: modifyFields(model, {
+        maybeAlertBanner: () =>
+          Option.some({
+            message: errorMessage,
+            variant: "danger",
+          }),
+      }),
+    }),
+
+    SucceededDisconnectStorage: (payload) => handleNoFolderSelected(model, payload),
     FailedDisconnectStorage: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
         maybeAlertBanner: () =>
@@ -801,30 +1701,22 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
 
-    FailedNavigateToSubfolder: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
-      }),
-    }),
-
-    // Toolbar & File/Folder Creation
+    // Toolbar & Triggers
     ClickedNewFile: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
-          isSettingsOpen: () => false,
           modalState: () =>
-            ModalState.CreateFile({
+            Modal.ModalState.CreateFile({
               name: "Neu.html",
               content: "",
               maybeValidationError: Option.none(),
             }),
         }),
-        commands: [PushUrl({ url: buildNewUrl(subPath, "file") }), FocusModalNameInput()],
+        commands: [
+          PushUrl({ url: buildNewUrl(subPath, "file") }),
+          toModalCommand(Modal.FocusModalNameInput()),
+        ],
       }
     },
 
@@ -832,764 +1724,74 @@ export const update = (model: Model, message: Message) =>
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
-          isSettingsOpen: () => false,
           modalState: () =>
-            ModalState.CreateFolder({
+            Modal.ModalState.CreateFolder({
               name: "Neuer Ordner",
               maybeValidationError: Option.none(),
             }),
         }),
-        commands: [PushUrl({ url: buildNewUrl(subPath, "folder") }), FocusModalNameInput()],
+        commands: [
+          PushUrl({ url: buildNewUrl(subPath, "folder") }),
+          toModalCommand(Modal.FocusModalNameInput()),
+        ],
       }
     },
 
     ClickedImportFiles: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-      }),
-      commands: [SelectImportFiles()],
+      model,
+      commands: [toModalCommand(Modal.SelectImportFiles())],
     }),
 
-    CompletedSelectImportFiles: ({ files }) => {
-      if (Array.isReadonlyArrayEmpty(files)) {
-        return { model }
-      }
-
-      const existingEntries = StorageState.match(model.storageState, {
-        Ready: ({ entriesState }) =>
-          EntriesState.match(entriesState, {
-            Loaded: ({ entries }) => entries,
-            Loading: () => [],
-            Error: () => [],
-          }),
-        Initializing: () => [],
-        Unsupported: () => [],
-        NoFolderSelected: () => [],
-        PermissionRequired: () => [],
-      })
-
-      const existingByName = new Map<string, FileEntry>(existingEntries.map((e) => [e.name, e]))
-      const reservedNames = new Set<string>(existingByName.keys())
-
-      const { collisions, resolved } = pipe(
-        files,
-        Array.reduce(
-          {
-            collisions: [] as ReadonlyArray<PendingImportFile>,
-            resolved: [] as ReadonlyArray<ResolvedImportItem>,
-          },
-          (acc, file) => {
-            const rawName = file.name.trim()
-            if (!rawName) {
-              return acc
-            }
-
-            if (existingByName.has(rawName)) {
-              return {
-                ...acc,
-                collisions: [...acc.collisions, file],
-              }
-            }
-            reservedNames.add(rawName)
-            return {
-              ...acc,
-              resolved: [
-                ...acc.resolved,
-                {
-                  sourceName: file.name,
-                  targetName: file.name,
-                  action: "replace" as const,
-                },
-              ],
-            }
-          },
-        ),
-      )
-
-      const subPath = currentSubPathFromStorageState(model.storageState)
-
-      return Array.match(collisions, {
-        onEmpty: () => ({
-          model,
-          commands: [WritePendingImportFiles({ items: resolved, subPath })],
-        }),
-        onNonEmpty: ([firstCollision, ...remainingCollisions]) => {
-          const suggestedName = findFreeFileName(firstCollision.name, reservedNames)
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                ModalState.ImportConflict({
-                  current: firstCollision,
-                  suggestedName,
-                  queue: remainingCollisions,
-                  resolved,
-                  applyToAll: false,
-                }),
-            }),
-          }
-        },
-      })
-    },
-
-    ToggledImportConflictApplyToAll: ({ applyToAll }) =>
-      Match.value(model.modalState).pipe(
-        Match.tag("ImportConflict", (conflictState) => ({
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(conflictState, {
-                applyToAll: () => applyToAll,
-              }),
-          }),
-        })),
-        Match.orElse(() => ({ model })),
-      ),
-
-    SelectedImportConflictAction: ({ action }) =>
-      Match.value(model.modalState).pipe(
-        Match.tag("ImportConflict", (conflictState) => {
-          const { current, suggestedName, queue, resolved, applyToAll } = conflictState
-
-          const targetName = action === "rename" ? suggestedName : current.name
-          const updatedResolved: ReadonlyArray<ResolvedImportItem> = [
-            ...resolved,
-            {
-              sourceName: current.name,
-              targetName,
-              action,
-            },
-          ]
-
-          const existingEntries = StorageState.match(model.storageState, {
-            Ready: ({ entriesState }) =>
-              EntriesState.match(entriesState, {
-                Loaded: ({ entries }) => entries,
-                Loading: () => [],
-                Error: () => [],
-              }),
-            Initializing: () => [],
-            Unsupported: () => [],
-            NoFolderSelected: () => [],
-            PermissionRequired: () => [],
-          })
-          const reservedNames = new Set<string>([
-            ...existingEntries.map((e) => e.name),
-            ...updatedResolved.map((r) => r.targetName),
-          ])
-
-          const subPath = currentSubPathFromStorageState(model.storageState)
-
-          if (applyToAll) {
-            const batchResolved: ReadonlyArray<ResolvedImportItem> = [
-              ...updatedResolved,
-              ...queue.map((item) => {
-                const itemTarget =
-                  action === "rename" ? findFreeFileName(item.name, reservedNames) : item.name
-                reservedNames.add(itemTarget)
-                return {
-                  sourceName: item.name,
-                  targetName: itemTarget,
-                  action,
-                }
-              }),
-            ]
-
-            return {
-              model: modifyFields(model, {
-                modalState: () => ModalState.Closed(),
-              }),
-              commands: [WritePendingImportFiles({ items: batchResolved, subPath })],
-            }
-          }
-
-          return Array.match(queue, {
-            onEmpty: () => ({
-              model: modifyFields(model, {
-                modalState: () => ModalState.Closed(),
-              }),
-              commands: [WritePendingImportFiles({ items: updatedResolved, subPath })],
-            }),
-            onNonEmpty: ([nextCurrent, ...nextQueue]) => {
-              const nextSuggested = findFreeFileName(nextCurrent.name, reservedNames)
-              return {
-                model: modifyFields(model, {
-                  modalState: () =>
-                    ModalState.ImportConflict({
-                      current: nextCurrent,
-                      suggestedName: nextSuggested,
-                      queue: nextQueue,
-                      resolved: updatedResolved,
-                      applyToAll: false,
-                    }),
-                }),
-              }
-            },
-          })
-        }),
-        Match.orElse(() => ({ model })),
-      ),
-
-    CancelledImportConflict: () => ({
-      model: modifyFields(model, {
-        modalState: () => ModalState.Closed(),
-      }),
-      commands: [RevokeActivePreviewUrl()],
-    }),
-
-    CompletedWritePendingImportFiles: ({ entries, maybeAlertBanner }) =>
-      Match.value(model.storageState).pipe(
-        Match.tag("Ready", (readyState) => {
-          const nextEntries = Array.isReadonlyArrayEmpty(entries)
-            ? EntriesState.match(readyState.entriesState, {
-                Loading: () => entries,
-                Loaded: ({ entries: existing }) => existing,
-                Error: () => entries,
-              })
-            : entries
-
-          return {
-            model: modifyFields(model, {
-              storageState: () =>
-                modifyFields(readyState, {
-                  entriesState: () => EntriesState.Loaded({ entries: nextEntries }),
-                }),
-              maybeAlertBanner: () => Option.orElse(maybeAlertBanner, () => model.maybeAlertBanner),
-            }),
-          }
-        }),
-        Match.orElse(() => ({
-          model: modifyFields(model, {
-            maybeAlertBanner: () => Option.orElse(maybeAlertBanner, () => model.maybeAlertBanner),
-          }),
-        })),
-      ),
-
-    // Editor Modal
     ClickedEditEntry: ({ entry }) => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       if (entry.kind === "directory") {
         return {
           model: modifyFields(model, {
-            isSettingsOpen: () => false,
             modalState: () =>
-              ModalState.EditFolder({
+              Modal.ModalState.EditFolder({
                 originalName: entry.name,
                 name: entry.name,
                 maybeValidationError: Option.none(),
               }),
           }),
-          commands: [PushUrl({ url: buildEditUrl(subPath, entry.name) }), FocusModalNameInput()],
+          commands: [
+            PushUrl({ url: buildEditUrl(subPath, entry.name) }),
+            toModalCommand(Modal.FocusModalNameInput()),
+          ],
         }
       }
 
       return {
-        model: modifyFields(model, {
-          isSettingsOpen: () => false,
-        }),
+        model,
         commands: [
           PushUrl({ url: buildEditUrl(subPath, entry.name) }),
-          InspectFileForEditor({
-            entryName: entry.name,
-            subPath,
+          toModalCommand(Modal.InspectFileForEditor({ entryName: entry.name, subPath })),
+        ],
+      }
+    },
+
+    ClickedOpenHelp: () => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      const isFolderViewVisible = isReadyStorage(model.storageState)
+      const activeTopic: HelpTopic = isFolderViewVisible ? "api" : "fs"
+      return {
+        model: modifyFields(model, {
+          isSettingsOpen: () => false,
+          modalState: () =>
+            Modal.ModalState.Help({
+              help: Help.init(Option.some(activeTopic)),
+            }),
+        }),
+        commands: [
+          PushUrl({
+            url: buildHelpUrl(subPath, Option.some(activeTopic)),
           }),
         ],
       }
     },
 
-    SucceededInspectFileForEditor: ({ originalName, fileMode }) => ({
-      model: modifyFields(model, {
-        modalState: () =>
-          ModalState.EditFile({
-            originalName,
-            name: originalName,
-            fileMode,
-            maybeValidationError: Option.none(),
-          }),
-      }),
-      commands: [FocusModalNameInput()],
-    }),
-
-    FailedInspectFileForEditor: ({ message: errorMessage }) => {
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      return {
-        model: modifyFields(model, {
-          maybeAlertBanner: () =>
-            Option.some({
-              message: errorMessage,
-              variant: "danger",
-            }),
-        }),
-        commands: [RevokeActivePreviewUrl(), ReplaceUrl({ url: buildFolderUrl(subPath) })],
-      }
-    },
-
-    UpdatedModalName: ({ name }) => ({
-      model: modifyFields(model, {
-        modalState: () =>
-          ModalState.match(model.modalState, {
-            Closed: () => model.modalState,
-            CreateFile: (state) =>
-              modifyFields(state, {
-                name: () => name,
-                maybeValidationError: () => Option.none(),
-              }),
-            CreateFolder: (state) =>
-              modifyFields(state, {
-                name: () => name,
-                maybeValidationError: () => Option.none(),
-              }),
-            EditFolder: (state) =>
-              modifyFields(state, {
-                name: () => name,
-                maybeValidationError: () => Option.none(),
-              }),
-            EditFile: (state) =>
-              modifyFields(state, {
-                name: () => name,
-                maybeValidationError: () => Option.none(),
-              }),
-            ConfirmDelete: () => model.modalState,
-            ConfirmOverwrite: () => model.modalState,
-            ImportConflict: () => model.modalState,
-            Help: () => model.modalState,
-          }),
-      }),
-    }),
-
-    UpdatedModalTextContent: ({ content }) => ({
-      model: modifyFields(model, {
-        modalState: () =>
-          ModalState.match(model.modalState, {
-            Closed: () => model.modalState,
-            CreateFile: (state) =>
-              modifyFields(state, {
-                content: () => content,
-              }),
-            CreateFolder: () => model.modalState,
-            EditFolder: () => model.modalState,
-            EditFile: (state) =>
-              EditorFileMode.match(state.fileMode, {
-                Text: () =>
-                  modifyFields(state, {
-                    fileMode: () => EditorFileMode.Text({ content }),
-                  }),
-                Binary: () => state,
-              }),
-            ConfirmDelete: () => model.modalState,
-            ConfirmOverwrite: () => model.modalState,
-            ImportConflict: () => model.modalState,
-            Help: () => model.modalState,
-          }),
-      }),
-    }),
-
-    ToggledModalBase64: ({ isChecked }) => {
-      return whenBinaryEditor(model, (editState, binaryMode) => {
-        const isLocked = BinaryEdit.match(binaryMode.edit, {
-          Locked: () => true,
-          Disabled: () => false,
-          Loading: () => false,
-          Editing: () => false,
-        })
-        if (isLocked) {
-          return { model }
-        }
-
-        if (!isChecked) {
-          return {
-            model: modifyFields(model, {
-              modalState: () =>
-                modifyFields(editState, {
-                  fileMode: () =>
-                    modifyFields(binaryMode, {
-                      edit: () => BinaryEdit.Disabled(),
-                    }),
-                }),
-            }),
-          }
-        }
-
-        const subPath = currentSubPathFromStorageState(model.storageState)
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(editState, {
-                fileMode: () =>
-                  modifyFields(binaryMode, {
-                    edit: () => BinaryEdit.Loading(),
-                  }),
-              }),
-          }),
-          commands: [LoadModalBase64({ entryName: editState.originalName, subPath })],
-        }
-      })
-    },
-
-    SucceededLoadModalBase64: ({ base64Content }) => {
-      return whenBinaryEditor(model, (editState, binaryMode) => {
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(editState, {
-                fileMode: () =>
-                  modifyFields(binaryMode, {
-                    edit: () => BinaryEdit.Editing({ content: base64Content }),
-                  }),
-              }),
-          }),
-        }
-      })
-    },
-
-    FailedLoadModalBase64: ({ message: errorMessage }) => {
-      return whenBinaryEditor(model, (editState, binaryMode) => {
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(editState, {
-                fileMode: () =>
-                  modifyFields(binaryMode, {
-                    edit: () => BinaryEdit.Disabled(),
-                  }),
-              }),
-            maybeAlertBanner: () =>
-              Option.some({
-                message: errorMessage,
-                variant: "danger",
-              }),
-          }),
-        }
-      })
-    },
-
-    UpdatedModalBase64Content: ({ base64Content }) => {
-      return whenBinaryEditor(model, (editState, binaryMode) => {
-        const isEditing = BinaryEdit.match(binaryMode.edit, {
-          Locked: () => false,
-          Disabled: () => false,
-          Loading: () => false,
-          Editing: () => true,
-        })
-        if (!isEditing) {
-          return { model }
-        }
-
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(editState, {
-                fileMode: () =>
-                  modifyFields(binaryMode, {
-                    edit: () => BinaryEdit.Editing({ content: base64Content }),
-                  }),
-              }),
-          }),
-        }
-      })
-    },
-
-    ClickedSaveModal: () => {
-      const validateName = (rawName: string, isFolder: boolean): Option.Option<string> => {
-        const trimmed = rawName.trim()
-        if (!trimmed) {
-          return Option.some(
-            isFolder
-              ? "Bitte geben Sie einen Ordnernamen ein."
-              : "Bitte geben Sie einen Dateinamen ein.",
-          )
-        }
-        if (trimmed.includes("/") || trimmed.includes("\\")) {
-          return Option.some(
-            `Der ${isFolder ? "Ordnername" : "Dateiname"} darf keine Schrägstriche enthalten.`,
-          )
-        }
-        return Option.none()
-      }
-
-      const existingEntries = StorageState.match(model.storageState, {
-        Ready: ({ entriesState }) =>
-          EntriesState.match(entriesState, {
-            Loaded: ({ entries }) => entries,
-            Loading: () => [],
-            Error: () => [],
-          }),
-        Initializing: () => [],
-        Unsupported: () => [],
-        NoFolderSelected: () => [],
-        PermissionRequired: () => [],
-      })
-      const existingNames = new Set(existingEntries.map((e) => e.name))
-      const subPath = currentSubPathFromStorageState(model.storageState)
-
-      return Match.value(model.modalState).pipe(
-        Match.tag("CreateFolder", (createFolder) => {
-          const error = validateName(createFolder.name, true)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  modifyFields(createFolder, {
-                    maybeValidationError: () => error,
-                  }),
-              }),
-            }
-          }
-          const trimmed = createFolder.name.trim()
-          if (existingNames.has(trimmed)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  modifyFields(createFolder, {
-                    maybeValidationError: () =>
-                      Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                  }),
-              }),
-            }
-          }
-          return {
-            model,
-            commands: [SaveModalChanges({ modalState: createFolder, subPath })],
-          }
-        }),
-        Match.tag("EditFolder", (editFolder) => {
-          const error = validateName(editFolder.name, true)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  modifyFields(editFolder, {
-                    maybeValidationError: () => error,
-                  }),
-              }),
-            }
-          }
-          const trimmed = editFolder.name.trim()
-          if (trimmed !== editFolder.originalName && existingNames.has(trimmed)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  modifyFields(editFolder, {
-                    maybeValidationError: () =>
-                      Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                  }),
-              }),
-            }
-          }
-          return {
-            model,
-            commands: [SaveModalChanges({ modalState: editFolder, subPath })],
-          }
-        }),
-        Match.tag("CreateFile", (createFile) => {
-          const error = validateName(createFile.name, false)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  modifyFields(createFile, {
-                    maybeValidationError: () => error,
-                  }),
-              }),
-            }
-          }
-          const trimmed = createFile.name.trim()
-          if (existingNames.has(trimmed)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  ModalState.ConfirmOverwrite({
-                    targetName: trimmed,
-                    source: OverwriteSource.CreateFile({
-                      content: createFile.content,
-                    }),
-                  }),
-              }),
-            }
-          }
-          return {
-            model,
-            commands: [SaveModalChanges({ modalState: createFile, subPath })],
-          }
-        }),
-        Match.tag("EditFile", (editFile) => {
-          const error = validateName(editFile.name, false)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  modifyFields(editFile, {
-                    maybeValidationError: () => error,
-                  }),
-              }),
-            }
-          }
-
-          const trimmed = editFile.name.trim()
-
-          const maybeBase64Content = EditorFileMode.match(editFile.fileMode, {
-            Text: () => Option.none<string>(),
-            Binary: ({ edit }) =>
-              BinaryEdit.match(edit, {
-                Locked: () => Option.none<string>(),
-                Disabled: () => Option.none<string>(),
-                Loading: () => Option.none<string>(),
-                Editing: ({ content }) => Option.some(content),
-              }),
-          })
-
-          if (Option.isSome(maybeBase64Content)) {
-            try {
-              base64ToUint8Array(maybeBase64Content.value)
-            } catch {
-              return {
-                model: modifyFields(model, {
-                  modalState: () =>
-                    modifyFields(editFile, {
-                      maybeValidationError: () =>
-                        Option.some(
-                          "Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe.",
-                        ),
-                    }),
-                }),
-              }
-            }
-          }
-
-          if (trimmed !== editFile.originalName && existingNames.has(trimmed)) {
-            const isText = EditorFileMode.match(editFile.fileMode, {
-              Text: () => true,
-              Binary: () => false,
-            })
-            if (!isText && Option.isNone(maybeBase64Content)) {
-              return {
-                model: modifyFields(model, {
-                  modalState: () =>
-                    modifyFields(editFile, {
-                      maybeValidationError: () =>
-                        Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                    }),
-                }),
-              }
-            }
-            return {
-              model: modifyFields(model, {
-                modalState: () =>
-                  ModalState.ConfirmOverwrite({
-                    targetName: trimmed,
-                    source: OverwriteSource.EditFile({
-                      originalName: editFile.originalName,
-                      fileMode: editFile.fileMode,
-                    }),
-                  }),
-              }),
-            }
-          }
-
-          return {
-            model,
-            commands: [SaveModalChanges({ modalState: editFile, subPath })],
-          }
-        }),
-        Match.orElse((modalState) => ({
-          model,
-          commands: [SaveModalChanges({ modalState, subPath })],
-        })),
-      )
-    },
-
-    ClickedConfirmOverwrite: () => {
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      return {
-        model,
-        commands: [SaveModalChanges({ modalState: model.modalState, subPath })],
-      }
-    },
-
-    ClickedCancelOverwrite: () => {
-      return Match.value(model.modalState).pipe(
-        Match.tag("ConfirmOverwrite", ({ targetName, source }) =>
-          Match.value(source).pipe(
-            Match.tag("CreateFile", ({ content }) => ({
-              model: modifyFields(model, {
-                modalState: () =>
-                  ModalState.CreateFile({
-                    name: targetName,
-                    content,
-                    maybeValidationError: Option.none(),
-                  }),
-              }),
-            })),
-            Match.tag("EditFile", ({ originalName, fileMode }) => ({
-              model: modifyFields(model, {
-                modalState: () =>
-                  ModalState.EditFile({
-                    originalName,
-                    name: targetName,
-                    fileMode,
-                    maybeValidationError: Option.none(),
-                  }),
-              }),
-            })),
-            Match.exhaustive,
-          ),
-        ),
-        Match.orElse(() => ({ model })),
-      )
-    },
-
-    ClickedDeleteModalEntry: () =>
-      Match.value(model.modalState).pipe(
-        Match.tag("EditFolder", ({ originalName }) => ({
-          model: modifyFields(model, {
-            modalState: () =>
-              ModalState.ConfirmDelete({ entryName: originalName, entryKind: "directory" }),
-          }),
-        })),
-        Match.tag("EditFile", ({ originalName }) => ({
-          model: modifyFields(model, {
-            modalState: () =>
-              ModalState.ConfirmDelete({ entryName: originalName, entryKind: "file" }),
-          }),
-        })),
-        Match.orElse(() => ({ model })),
-      ),
-
-    ConfirmedDeleteModalEntry: () => {
-      return Match.value(model.modalState).pipe(
-        Match.tag("ConfirmDelete", ({ entryName, entryKind }) => {
-          const subPath = currentSubPathFromStorageState(model.storageState)
-          return {
-            model: modifyFields(model, {
-              modalState: () => ModalState.Closed(),
-            }),
-            commands: [DeleteModalEntry({ entryName, entryKind, subPath })],
-          }
-        }),
-        Match.orElse(() => ({ model })),
-      )
-    },
-
-    ClickedCancelDeleteModal: () => {
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      return {
-        model: modifyFields(model, {
-          modalState: () => ModalState.Closed(),
-        }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
-      }
-    },
-
-    ClickedCloseModal: () => {
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      return {
-        model: modifyFields(model, {
-          modalState: () => ModalState.Closed(),
-        }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
-      }
-    },
-
     PressedEscape: () =>
-      ModalState.match(model.modalState, {
+      Modal.ModalState.match(model.modalState, {
         Closed: () => {
           if (model.isSettingsOpen) {
             return {
@@ -1605,9 +1807,12 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
         CreateFolder: () => {
@@ -1615,9 +1820,12 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
         EditFolder: () => {
@@ -1625,9 +1833,12 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
         EditFile: () => {
@@ -1635,9 +1846,12 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
         ConfirmDelete: () => {
@@ -1645,9 +1859,12 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
         ConfirmOverwrite: () => {
@@ -1655,9 +1872,12 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
         ImportConflict: () => {
@@ -1665,9 +1885,12 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
         Help: () => {
@@ -1675,193 +1898,17 @@ export const update = (model: Model, message: Message) =>
           return {
             model: modifyFields(model, {
               isSettingsOpen: () => false,
-              modalState: () => ModalState.Closed(),
+              modalState: () => Modal.ModalState.Closed(),
             }),
-            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+            commands: [
+              ReplaceUrl({ url: buildFolderUrl(subPath) }),
+              toModalCommand(Modal.RevokeActivePreviewUrl()),
+            ],
           }
         },
       }),
 
-    SucceededSaveModalChanges: ({ entries }) =>
-      Match.value(model.storageState).pipe(
-        Match.tag("Ready", (readyState) => ({
-          model: modifyFields(model, {
-            storageState: () =>
-              modifyFields(readyState, {
-                entriesState: () => EntriesState.Loaded({ entries }),
-              }),
-            modalState: () => ModalState.Closed(),
-          }),
-          commands: [ReplaceUrl({ url: buildFolderUrl(readyState.subPath) })],
-        })),
-        Match.orElse(() => ({
-          model: modifyFields(model, {
-            modalState: () => ModalState.Closed(),
-          }),
-        })),
-      ),
-
-    SucceededDeleteModalEntry: ({ entries }) =>
-      Match.value(model.storageState).pipe(
-        Match.tag("Ready", (readyState) => ({
-          model: modifyFields(model, {
-            storageState: () =>
-              modifyFields(readyState, {
-                entriesState: () => EntriesState.Loaded({ entries }),
-              }),
-            modalState: () => ModalState.Closed(),
-          }),
-          commands: [ReplaceUrl({ url: buildFolderUrl(readyState.subPath) })],
-        })),
-        Match.orElse(() => ({
-          model: modifyFields(model, {
-            modalState: () => ModalState.Closed(),
-          }),
-        })),
-      ),
-
-    FailedSaveModalChanges: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
-      }),
-    }),
-
-    FailedDeleteModalEntry: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
-      }),
-    }),
-
-    // Help Modal
-    ClickedOpenHelp: () => {
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      const isFolderViewVisible = isReadyStorage(model.storageState)
-      const activeTopic: HelpTopic = isFolderViewVisible ? "api" : "fs"
-      return {
-        model: modifyFields(model, {
-          isSettingsOpen: () => false,
-          modalState: () =>
-            ModalState.Help({
-              maybeOpenTopic: Option.some(activeTopic),
-              copyDtsState: CopyDtsState.Idle(),
-            }),
-        }),
-        commands: [
-          PushUrl({
-            url: buildHelpUrl(subPath, Option.some(activeTopic)),
-          }),
-        ],
-      }
-    },
-
-    ToggledHelpTopic: ({ topic, isOpen }) => {
-      return whenHelp(model, (helpState) => {
-        const nextMaybeOpenTopic: Option.Option<HelpTopic> = isOpen
-          ? Option.some(topic)
-          : Option.exists(helpState.maybeOpenTopic, (t) => t === topic)
-            ? Option.none()
-            : helpState.maybeOpenTopic
-
-        const isUnchanged = Option.match(helpState.maybeOpenTopic, {
-          onNone: () => Option.isNone(nextMaybeOpenTopic),
-          onSome: (current) => Option.exists(nextMaybeOpenTopic, (next) => next === current),
-        })
-
-        if (isUnchanged) {
-          return { model }
-        }
-
-        const subPath = currentSubPathFromStorageState(model.storageState)
-        const replaceUrlCommand = ReplaceUrl({ url: buildHelpUrl(subPath, nextMaybeOpenTopic) })
-        const commands = isOpen
-          ? [replaceUrlCommand, ScrollHelpTopicIntoView({ topic })]
-          : [replaceUrlCommand]
-
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(helpState, {
-                maybeOpenTopic: () => nextMaybeOpenTopic,
-              }),
-          }),
-          commands,
-        }
-      })
-    },
-
-    ClickedCopyDts: () => {
-      return whenHelp(model, (helpState) => {
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(helpState, {
-                copyDtsState: () => CopyDtsState.Copying(),
-              }),
-          }),
-          commands: [CopyApiDtsToClipboard()],
-        }
-      })
-    },
-
-    SucceededCopyApiDtsToClipboard: () => {
-      return whenHelp(model, (helpState) => {
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(helpState, {
-                copyDtsState: () => CopyDtsState.Copied(),
-              }),
-          }),
-          commands: [WaitBeforeResetCopyDts()],
-        }
-      })
-    },
-
-    CompletedWaitBeforeResetCopyDts: () => {
-      return whenHelp(model, (helpState) => {
-        if (
-          !CopyDtsState.match(helpState.copyDtsState, {
-            Idle: () => false,
-            Copying: () => false,
-            Copied: () => true,
-            Error: () => false,
-          })
-        ) {
-          return { model }
-        }
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(helpState, {
-                copyDtsState: () => CopyDtsState.Idle(),
-              }),
-          }),
-        }
-      })
-    },
-
-    FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => {
-      return whenHelp(model, (helpState) => {
-        return {
-          model: modifyFields(model, {
-            modalState: () =>
-              modifyFields(helpState, {
-                copyDtsState: () => CopyDtsState.Error({ message: errorMessage }),
-              }),
-          }),
-        }
-      })
-    },
-
-    // PWA Install & Service Worker Toast
+    // PWA Install Prompt
     CapturedInstallPrompt: () => ({
       model: modifyFields(model, {
         installPrompt: () => InstallPrompt.Available(),
@@ -1874,19 +1921,936 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
 
-    ClickedInstallApp: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-        installPrompt: () => InstallPrompt.Prompting(),
+    ClickedInstallApp: () =>
+      InstallPrompt.match(model.installPrompt, {
+        Available: () => ({
+          model: modifyFields(model, {
+            installPrompt: () => InstallPrompt.Prompting(),
+          }),
+          commands: [TriggerInstallAppPrompt()],
+        }),
+        Unavailable: () => ({ model }),
+        Prompting: () => ({ model }),
       }),
-      commands: [TriggerInstallAppPrompt()],
-    }),
 
     CompletedTriggerInstallAppPrompt: ({ didAccept }) => ({
       model: modifyFields(model, {
         installPrompt: () => (didAccept ? InstallPrompt.Unavailable() : InstallPrompt.Available()),
       }),
     }),
+
+    // Submodel: Modal
+    GotModalMessage: ({ message: modalMessage }) => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      const existingEntries = StorageState.match(model.storageState, {
+        Ready: ({ entriesState }) =>
+          EntriesState.match(entriesState, {
+            Loaded: ({ entries }) => entries,
+            Loading: () => [],
+            Error: () => [],
+          }),
+        Initializing: () => [],
+        Unsupported: () => [],
+        NoFolderSelected: () => [],
+        PermissionRequired: () => [],
+      })
+
+      const modalResult = Modal.update(model.modalState, modalMessage, {
+        subPath,
+        existingEntries,
+      })
+
+      const mappedCommands = modalResult.commands
+        ? Command.mapMessages(modalResult.commands, (msg) =>
+            Message.GotModalMessage({ message: msg }),
+          )
+        : []
+
+      return Modal.OutMessage.match(modalResult.outMessage, {
+        None: () =>
+          mappedCommands.length > 0
+            ? {
+                model: modifyFields(model, {
+                  modalState: () => modalResult.model,
+                }),
+                commands: mappedCommands,
+              }
+            : {
+                model: modifyFields(model, {
+                  modalState: () => modalResult.model,
+                }),
+              },
+
+        ReplaceUrl: ({ url }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+          }),
+          commands: [...mappedCommands, ReplaceUrl({ url })],
+        }),
+
+        EntriesUpdated: ({ entries, maybeAlertBanner, replaceUrl: shouldReplaceUrl }) => {
+          const nextStorageState = Match.value(model.storageState).pipe(
+            Match.tag("Ready", (readyState) => {
+              const nextEntries = Array.isReadonlyArrayEmpty(entries)
+                ? EntriesState.match(readyState.entriesState, {
+                    Loading: () => entries,
+                    Loaded: ({ entries: existing }) => existing,
+                    Error: () => entries,
+                  })
+                : entries
+
+              return modifyFields(readyState, {
+                entriesState: () => EntriesState.Loaded({ entries: nextEntries }),
+              })
+            }),
+            Match.orElse(() => model.storageState),
+          )
+
+          const commands: Array<Command.Command<Message>> = [...mappedCommands]
+          if (shouldReplaceUrl) {
+            commands.push(ReplaceUrl({ url: buildFolderUrl(subPath) }))
+          }
+
+          return {
+            model: modifyFields(model, {
+              storageState: () => nextStorageState,
+              modalState: () => modalResult.model,
+              maybeAlertBanner: () =>
+                Option.match(maybeAlertBanner, {
+                  onNone: () => model.maybeAlertBanner,
+                  onSome: (banner) => Option.some(banner),
+                }),
+            }),
+            commands,
+          }
+        },
+
+        ShowAlert: ({ banner, replaceUrl: shouldReplaceUrl }) => {
+          const commands: Array<Command.Command<Message>> = [...mappedCommands]
+          if (shouldReplaceUrl) {
+            commands.push(ReplaceUrl({ url: buildFolderUrl(subPath) }))
+          }
+          return {
+            model: modifyFields(model, {
+              modalState: () => modalResult.model,
+              maybeAlertBanner: () => Option.some(banner),
+            }),
+            commands,
+          }
+        },
+      })
+    },
   })
 
-export { Flags, Message, Model, subscriptions, view }
+// SUBSCRIPTION
+
+const isBeforeInstallPromptEvent = (event: Event): event is BeforeInstallPromptEvent =>
+  "prompt" in event && typeof event.prompt === "function" && "userChoice" in event
+
+export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
+  escapeKey: entry(
+    {
+      isActive: Schema.Boolean,
+    },
+    {
+      modelToDependencies: (model) => ({
+        isActive:
+          model.isSettingsOpen ||
+          Modal.ModalState.match(model.modalState, {
+            Closed: () => false,
+            CreateFile: () => true,
+            CreateFolder: () => true,
+            EditFolder: () => true,
+            EditFile: () => true,
+            ConfirmDelete: () => true,
+            ConfirmOverwrite: () => true,
+            ImportConflict: () => true,
+            Help: () => true,
+          }),
+      }),
+      dependenciesToStream: ({ isActive }) =>
+        Dom.streamFromKeyBindings<Message>({
+          bindings: [
+            {
+              keys: "Escape",
+              isEnabled: isActive,
+              whileTyping: "Allow",
+              mapEvent: () => Message.PressedEscape(),
+            },
+          ],
+        }),
+    },
+  ),
+
+  outsideSettingsClick: entry(
+    {
+      isSettingsOpen: Schema.Boolean,
+    },
+    {
+      modelToDependencies: (model) => ({
+        isSettingsOpen: model.isSettingsOpen,
+      }),
+      dependenciesToStream: ({ isSettingsOpen }) =>
+        Stream.when(
+          Dom.streamFromEventFilterMap({
+            target: document,
+            type: "click",
+            filterMapEvent: (event) => {
+              const target = event.target
+              if (!(target instanceof Node)) {
+                return Option.none()
+              }
+              const settingsRoot = document.getElementById("settings-menu")
+              if (settingsRoot && !settingsRoot.contains(target)) {
+                return Option.some(Message.ClickedOutsideSettingsMenu())
+              }
+              return Option.none()
+            },
+          }),
+          Effect.sync(() => isSettingsOpen),
+        ),
+    },
+  ),
+
+  beforeInstallPrompt: Subscription.persistentEntry(
+    Dom.streamFromEventFilterMapPreventDefault({
+      target: window,
+      type: "beforeinstallprompt",
+      filterMapEvent: (event) => {
+        if (!isBeforeInstallPromptEvent(event)) {
+          return Option.none()
+        }
+        setDeferredInstallPrompt(Option.some(event))
+        return Option.some(Message.CapturedInstallPrompt())
+      },
+    }),
+  ),
+
+  appInstalled: Subscription.persistentEntry(
+    Dom.streamFromEvent({
+      target: window,
+      type: "appinstalled",
+      mapEvent: () => {
+        setDeferredInstallPrompt(Option.none())
+        return Message.InstalledApp()
+      },
+    }),
+  ),
+}))
+
+// VIEW
+
+const INSTALL_AVAILABLE = {
+  Available: () => true,
+  Unavailable: () => false,
+  Prompting: () => false,
+}
+
+const PDF_EXTENSIONS = new Set(["pdf"])
+
+const FILE_ICON_GROUPS: ReadonlyArray<{
+  readonly extensions: ReadonlySet<string>
+  readonly icon: string
+}> = [
+  { extensions: PREVIEWABLE_IMAGE_EXTENSIONS, icon: "🖼️" },
+  { extensions: PDF_EXTENSIONS, icon: "📕" },
+  {
+    extensions: new Set(["html", "htm", "xhtml"]),
+    icon: "🌐",
+  },
+  {
+    extensions: new Set(["js", "mjs", "cjs", "jsx", "ts", "tsx"]),
+    icon: "📜",
+  },
+  { extensions: new Set(["css"]), icon: "🎨" },
+  {
+    extensions: new Set(["json", "webmanifest", "yml", "yaml", "toml", "ini", "xml"]),
+    icon: "⚙️",
+  },
+  {
+    extensions: new Set(["md", "txt"]),
+    icon: "📝",
+  },
+  {
+    extensions: new Set(["csv"]),
+    icon: "📊",
+  },
+  {
+    extensions: new Set(["mp3", "wav", "ogg", "m4a", "flac", "aac"]),
+    icon: "🎵",
+  },
+  {
+    extensions: new Set(["mp4", "webm", "mov", "mkv", "avi"]),
+    icon: "🎬",
+  },
+  {
+    extensions: new Set(["zip", "gz", "tar", "rar", "7z", "bz2"]),
+    icon: "🗜️",
+  },
+  {
+    extensions: new Set(["ttf", "otf", "woff", "woff2"]),
+    icon: "🔤",
+  },
+]
+
+const getExtension = (name: string): string => {
+  const dotIndex = name.lastIndexOf(".")
+  return dotIndex === -1 || dotIndex === name.length - 1
+    ? ""
+    : name.slice(dotIndex + 1).toLowerCase()
+}
+
+export const fileIconFor = (name: string, isDirectory: boolean): string => {
+  if (isDirectory) {
+    return "📁"
+  }
+  const ext = getExtension(name)
+  return pipe(
+    FILE_ICON_GROUPS,
+    Array.findFirst((group) => group.extensions.has(ext)),
+    Option.match({
+      onNone: () => "📄",
+      onSome: (group) => group.icon,
+    }),
+  )
+}
+
+const viewBreadcrumbNav = (children: ReadonlyArray<Html.Html>, h: HtmlBuilder): Html.Html =>
+  h.nav([h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")], children)
+
+const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
+  StorageState.match(model.storageState, {
+    Initializing: () =>
+      viewBreadcrumbNav([h.span([h.Class("breadcrumb-current")], ["PWA Islands"])], h),
+
+    Unsupported: () =>
+      viewBreadcrumbNav(
+        [h.span([h.Class("breadcrumb-current")], ["Dateisystem-APIs nicht unterstützt"])],
+        h,
+      ),
+
+    NoFolderSelected: () =>
+      viewBreadcrumbNav([h.span([h.Class("breadcrumb-current")], ["PWA Islands"])], h),
+
+    PermissionRequired: () =>
+      viewBreadcrumbNav([h.span([h.Class("breadcrumb-current")], ["PWA Islands"])], h),
+
+    Ready: ({ subPath }) =>
+      Array.match(subPath, {
+        onEmpty: () =>
+          viewBreadcrumbNav(
+            [h.span([h.Class("breadcrumb-current"), h.Title("PWA Islands")], ["PWA Islands"])],
+            h,
+          ),
+        onNonEmpty: (subPath) => {
+          const segmentNodes = pipe(
+            subPath,
+            Array.flatMap((segment, i) => {
+              const isLast = Array.isArrayEmpty(Array.drop(subPath, i + 1))
+              const accumulatedPath = pipe(Array.take(subPath, i + 1), Array.join("/"))
+              const separator = h.span([h.Class("breadcrumb-separator"), h.AriaHidden(true)], ["/"])
+              const item = isLast
+                ? h.span([h.Class("breadcrumb-current"), h.Title(segment)], [segment])
+                : h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("breadcrumb-item"),
+                      h.Title(segment),
+                      h.DataAttribute("segment", accumulatedPath),
+                      h.OnClick(Message.ClickedBreadcrumbSegment({ index: i })),
+                    ],
+                    [segment],
+                  )
+              return [separator, item]
+            }),
+          )
+
+          return viewBreadcrumbNav(
+            [
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Class("breadcrumb-item"),
+                  h.Title("PWA Islands"),
+                  h.DataAttribute("segment", ""),
+                  h.OnClick(Message.ClickedBreadcrumbRoot()),
+                ],
+                ["PWA Islands"],
+              ),
+              ...segmentNodes,
+            ],
+            h,
+          )
+        },
+      }),
+  })
+
+const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
+  const isReady = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: () => false,
+    Ready: () => true,
+  })
+  const currentStorageType = StorageState.match(model.storageState, {
+    Initializing: () => Option.none(),
+    Unsupported: () => Option.none(),
+    NoFolderSelected: ({ storageType }) => Option.some(storageType),
+    PermissionRequired: ({ storageType }) => Option.some(storageType),
+    Ready: ({ storageType }) => Option.some(storageType),
+  })
+  const isFsaReady = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: () => false,
+    Ready: ({ storageType }) => storageType === "fsa",
+  })
+  const isFsaNoFolder = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: ({ storageType }) => storageType === "fsa",
+    PermissionRequired: () => false,
+    Ready: () => false,
+  })
+  const isFsaPermissionRequired = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: ({ storageType }) => storageType === "fsa",
+    Ready: () => false,
+  })
+  const isInstallAvailable = InstallPrompt.match(model.installPrompt, INSTALL_AVAILABLE)
+  const canSwitchToOpfs =
+    model.hasOPFS &&
+    Option.match(currentStorageType, {
+      onNone: () => false,
+      onSome: (type) => type !== "opfs",
+    })
+  const canSwitchToFsa =
+    model.hasDirectoryPicker &&
+    Option.match(currentStorageType, {
+      onNone: () => false,
+      onSome: (type) => type !== "fsa",
+    })
+
+  return h.div(
+    [h.Class("settings-menu"), h.Id("settings-menu")],
+    [
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("btn-settings"),
+          h.Class("btn btn-secondary btn-icon"),
+          h.Title("Einstellungen"),
+          h.AriaLabel("Einstellungen"),
+          h.AriaHasPopup("true"),
+          h.AriaExpanded(model.isSettingsOpen),
+          h.OnClick(Message.ClickedToggleSettings(), {
+            propagation: "Stop",
+          }),
+        ],
+        ["⚙️"],
+      ),
+      h.div(
+        [
+          h.Id("settings-menu-list"),
+          h.Class("settings-menu-list"),
+          h.Hidden(!model.isSettingsOpen),
+          h.Role("menu"),
+        ],
+        [
+          h.button(
+            [
+              h.Type("button"),
+              h.Id("btn-open-help"),
+              h.Class("settings-menu-item"),
+              h.Role("menuitem"),
+              h.OnClick(Message.ClickedOpenHelp()),
+            ],
+            ["❓ Hilfe"],
+          ),
+          isReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-toggle-file-info"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.OnClick(Message.ClickedToggleFileInfo()),
+                ],
+                [model.showFileInfo ? "🔢 Datei-Infos ausblenden" : "🔢 Datei-Infos einblenden"],
+              )
+            : h.empty,
+          canSwitchToOpfs
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-use-opfs"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.Title("Internen Browser-Speicher (OPFS) verwenden"),
+                  h.OnClick(Message.ClickedUseOpfs()),
+                ],
+                ["📦 Zu App-Speicher wechseln"],
+              )
+            : h.empty,
+          canSwitchToFsa
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-select-folder"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.OnClick(Message.ClickedUseFsa()),
+                ],
+                ["📁 Zu lokalem Ordner wechseln"],
+              )
+            : h.empty,
+          isFsaNoFolder
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-change-folder"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.Title("Ordner wählen"),
+                  h.OnClick(Message.ClickedSelectFolder()),
+                ],
+                ["📂 Ordner wählen"],
+              )
+            : h.empty,
+          isFsaReady || isFsaPermissionRequired
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-change-folder"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.Title("Anderen Ordner wählen"),
+                  h.OnClick(Message.ClickedChangeFolder()),
+                ],
+                ["📂 Ordner wechseln"],
+              )
+            : h.empty,
+          isFsaReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-disconnect-folder"),
+                  h.Class("settings-menu-item is-danger"),
+                  h.Role("menuitem"),
+                  h.Title("Ordner trennen"),
+                  h.OnClick(Message.ClickedDisconnectFolder()),
+                ],
+                ["🔌 Trennen"],
+              )
+            : h.empty,
+          isInstallAvailable
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-install-app"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.Title("PWA Islands als App installieren"),
+                  h.OnClick(Message.ClickedInstallApp()),
+                ],
+                ["📲 App installieren"],
+              )
+            : h.empty,
+        ],
+      ),
+    ],
+  )
+}
+
+const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
+  const isReady = StorageState.match(model.storageState, {
+    Initializing: () => false,
+    Unsupported: () => false,
+    NoFolderSelected: () => false,
+    PermissionRequired: () => false,
+    Ready: () => true,
+  })
+
+  return h.div(
+    [h.Class("files-toolbar")],
+    [
+      h.div(
+        [h.Class("folder-icon"), h.AriaHidden(true)],
+        [h.img([h.Class("breadcrumb-root-icon"), h.Src(rootIconUrl), h.Alt("")])],
+      ),
+      h.div(
+        [h.Id("folder-actions"), h.Class("folder-actions")],
+        [
+          isReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-new-file"),
+                  h.Class("btn btn-primary"),
+                  h.Title("Neue Datei erstellen"),
+                  h.AriaLabel("Neue Datei erstellen"),
+                  h.OnClick(Message.ClickedNewFile()),
+                ],
+                [
+                  h.span(
+                    [h.Class("btn-icon-only"), h.AriaHidden(true)],
+                    [
+                      h.span([h.Class("btn-icon-sub")], ["📄"]),
+                      h.span([h.Class("btn-icon-main")], ["➕"]),
+                    ],
+                  ),
+                  h.span([h.Class("btn-label")], ["Datei"]),
+                ],
+              )
+            : h.empty,
+          isReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-new-folder"),
+                  h.Class("btn btn-primary"),
+                  h.Title("Neuen Ordner erstellen"),
+                  h.AriaLabel("Neuen Ordner erstellen"),
+                  h.OnClick(Message.ClickedNewFolder()),
+                ],
+                [
+                  h.span(
+                    [h.Class("btn-icon-only"), h.AriaHidden(true)],
+                    [
+                      h.span([h.Class("btn-icon-sub")], ["📁"]),
+                      h.span([h.Class("btn-icon-main")], ["➕"]),
+                    ],
+                  ),
+                  h.span([h.Class("btn-label")], ["Ordner"]),
+                ],
+              )
+            : h.empty,
+          isReady
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-import-file"),
+                  h.Class("btn btn-secondary"),
+                  h.Title("Externe Dateien hochladen"),
+                  h.AriaLabel("Externe Dateien hochladen"),
+                  h.OnClick(Message.ClickedImportFiles()),
+                ],
+                [
+                  h.span([h.Class("btn-icon-only"), h.AriaHidden(true)], ["📥"]),
+                  h.span([h.Class("btn-label")], ["Hochladen"]),
+                ],
+              )
+            : h.empty,
+          viewSettingsMenu(model, h),
+        ],
+      ),
+      h.div([h.Id("folder-status"), h.Class("folder-status-box")], [viewBreadcrumbs(model, h)]),
+    ],
+  )
+}
+
+// VIEW CONTENT
+
+const viewAlertContainer = (model: Model, h: HtmlBuilder): Html.Html =>
+  Option.match(model.maybeAlertBanner, {
+    onNone: () => h.div([h.Id("files-alert-area"), h.AriaLive("polite")]),
+    onSome: (banner) =>
+      h.div(
+        [h.Id("files-alert-area"), h.AriaLive("polite")],
+        [h.div([h.Class(`alert alert-${banner.variant}`)], [banner.message])],
+      ),
+  })
+
+const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): Html.Html => {
+  const isDir = entry.kind === "directory"
+  const icon = fileIconFor(entry.name, isDir)
+  const sizeDisplay = isDir
+    ? "—"
+    : Option.match(entry.maybeSize, {
+        onNone: () => "—",
+        onSome: formatSize,
+      })
+  const dateDisplay = isDir
+    ? "—"
+    : Option.match(entry.maybeLastModified, {
+        onNone: () => "—",
+        onSome: formatDate,
+      })
+
+  return h.keyed("tr")(
+    entry.name,
+    [
+      h.Class(`file-row ${isDir ? "is-directory" : "is-file"}`),
+      h.DataAttribute("entry", entry.name),
+      h.DataAttribute("kind", entry.kind),
+      h.Title(isDir ? "Ordner öffnen" : "Datei öffnen"),
+      h.OnClick(Message.ClickedEntryRow({ entry })),
+    ],
+    [
+      h.td(
+        [h.Class("file-name-cell")],
+        [
+          h.span(
+            [h.Class("file-name-inner")],
+            [
+              h.span([h.Class("file-icon"), h.AriaHidden(true)], [icon]),
+              h.span([h.Class("file-name"), h.Title(entry.name)], [entry.name]),
+            ],
+          ),
+        ],
+      ),
+      showFileInfo
+        ? h.td([h.Class("file-size-cell"), h.DataAttribute("label", "Größe")], [sizeDisplay])
+        : h.empty,
+      showFileInfo
+        ? h.td(
+            [
+              h.Class("file-date-cell"),
+              h.DataAttribute("label", "Zuletzt geändert"),
+              h.DataAttribute("label-short", "Geändert"),
+            ],
+            [dateDisplay],
+          )
+        : h.empty,
+      h.td(
+        [h.Class("files-actions-cell")],
+        [
+          h.div(
+            [h.Class("files-actions-inner")],
+            [
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Class("btn btn-secondary btn-sm btn-edit-entry"),
+                  h.DataAttribute("entry", entry.name),
+                  h.Title(isDir ? "Ordner bearbeiten" : "Datei bearbeiten"),
+                  h.AriaLabel(isDir ? "Ordner bearbeiten" : "Datei bearbeiten"),
+                  h.OnClick(Message.ClickedEditEntry({ entry }), {
+                    propagation: "Stop",
+                  }),
+                ],
+                ["✏️ ", h.span([h.Class("btn-label")], ["Bearbeiten"])],
+              ),
+            ],
+          ),
+        ],
+      ),
+    ],
+  )
+}
+
+const viewFilesTable = (
+  entries: ReadonlyArray<FileEntry>,
+  showFileInfo: boolean,
+  h: HtmlBuilder,
+): Html.Html => {
+  return Array.match(entries, {
+    onEmpty: () =>
+      h.div(
+        [h.Class("empty-state")],
+        [h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📁"]), h.h3([], ["Ordner ist leer"])],
+      ),
+    onNonEmpty: (entries) => viewFilesTableContent(entries, showFileInfo, h),
+  })
+}
+
+const viewFilesTableContent = (
+  entries: ReadonlyArray<FileEntry>,
+  showFileInfo: boolean,
+  h: HtmlBuilder,
+): Html.Html =>
+  h.div(
+    [],
+    [
+      h.div([h.Class("files-summary")], [h.span([], [formatSummaryText(entries)])]),
+      h.div(
+        [h.Class("table-responsive")],
+        [
+          h.table(
+            [h.Class("files-table")],
+            [
+              h.thead(
+                [],
+                [
+                  h.tr(
+                    [],
+                    [
+                      h.th([h.Scope("col"), h.Class("th-name")], ["Name"]),
+                      showFileInfo
+                        ? h.th([h.Scope("col"), h.Class("th-size")], ["Größe"])
+                        : h.empty,
+                      showFileInfo
+                        ? h.th([h.Scope("col"), h.Class("th-date")], ["Zuletzt geändert"])
+                        : h.empty,
+                      h.th(
+                        [h.Scope("col"), h.Class("th-actions")],
+                        [h.span([h.Class("visually-hidden")], ["Aktion"])],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              h.tbody(
+                [],
+                pipe(
+                  entries,
+                  Array.map((entry) => viewEntryRow(entry, showFileInfo, h)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    ],
+  )
+
+const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
+  h.div(
+    [h.Id("files-content"), h.Class("files-content")],
+    [
+      StorageState.match(model.storageState, {
+        Initializing: () =>
+          h.div(
+            [h.Class("loading-state")],
+            [
+              h.div([h.Class("spinner"), h.AriaHidden(true)]),
+              h.p([], ["Dateien werden geladen..."]),
+            ],
+          ),
+
+        Unsupported: () =>
+          h.div(
+            [h.Class("empty-state")],
+            [
+              h.p(
+                [],
+                ["In dieser Umgebung ist keine kompatible lokale Dateisystem-API verfügbar."],
+              ),
+            ],
+          ),
+
+        NoFolderSelected: () =>
+          h.div(
+            [h.Class("empty-state")],
+            [
+              h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📂"]),
+              h.h3([], ["Kein Ordner ausgewählt"]),
+              h.p([], ["Wähle einen lokalen Ordner, in dem deine Projekte gespeichert werden."]),
+              h.div(
+                [h.Class("empty-actions")],
+                [
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Id("btn-select-folder-hero"),
+                      h.Class("btn btn-primary"),
+                      h.OnClick(Message.ClickedSelectFolder()),
+                    ],
+                    ["📂 Ordner wählen"],
+                  ),
+                ],
+              ),
+            ],
+          ),
+
+        PermissionRequired: ({ folderName }) =>
+          h.div(
+            [h.Class("empty-state")],
+            [
+              h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["🔒"]),
+              h.h3([], ["Zugriff erforderlich"]),
+              h.p(
+                [],
+                [
+                  "Um Ihre Dateien zu laden, bestätigen Sie bitte den dauerhaften Zugriff auf den Ordner ",
+                  h.strong([], [folderName]),
+                  ".",
+                ],
+              ),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-grant-permission-hero"),
+                  h.Class("btn btn-primary"),
+                  h.OnClick(Message.ClickedGrantPermission()),
+                ],
+                [`Zugriff auf "${folderName}" erlauben`],
+              ),
+            ],
+          ),
+
+        Ready: ({ entriesState }) =>
+          EntriesState.match(entriesState, {
+            Loading: () =>
+              h.div(
+                [h.Class("loading-state")],
+                [
+                  h.div([h.Class("spinner"), h.AriaHidden(true)]),
+                  h.p([], ["Dateien werden geladen..."]),
+                ],
+              ),
+            Loaded: ({ entries }) => viewFilesTable(entries, model.showFileInfo, h),
+            Error: ({ message }) =>
+              h.div(
+                [h.Class("empty-state")],
+                [
+                  h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["⚠️"]),
+                  h.h3([], ["Fehler beim Lesen der Dateien"]),
+                  h.p([], [message]),
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Id("btn-retry-list"),
+                      h.Class("btn btn-primary"),
+                      h.OnClick(Message.ClickedRetryList()),
+                    ],
+                    ["Erneut versuchen"],
+                  ),
+                ],
+              ),
+          }),
+      }),
+    ],
+  )
+
+// VIEW MODALS
+
+const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
+  Modal.view(
+    model.modalState,
+    {
+      origin: model.origin,
+      hasDirectoryPicker: model.hasDirectoryPicker,
+      hasOPFS: model.hasOPFS,
+    },
+    mapHtmlBuilder(h, (msg) => Message.GotModalMessage({ message: msg })),
+  )
+
+// VIEW DOCUMENT
+
+export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
+  title: computeDocumentTitle(model),
+  body: h.div(
+    [h.Id("app")],
+    [
+      h.main(
+        [h.Id("router-view"), h.Class("router-view")],
+        [
+          h.div(
+            [h.Class("files-page")],
+            [
+              viewAlertContainer(model, h),
+              viewToolbar(model, h),
+              viewContentSection(model, h),
+              viewModalContainer(model, h),
+            ],
+          ),
+        ],
+      ),
+    ],
+  ),
+})

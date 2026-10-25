@@ -2,40 +2,49 @@ import { Option } from "effect"
 import { Command, given, message, model, story } from "foldkit/story"
 import { fromString } from "foldkit/url"
 import { describe, expect, it } from "vitest"
+import * as Help from "./help"
+import {
+  CopyApiDtsToClipboard,
+  CopyDtsState,
+  ScrollHelpTopicIntoView,
+  WaitBeforeResetCopyDts,
+} from "./help"
 import {
   ActivateFsaBackend,
   ActivateOpfsBackend,
-  CopyApiDtsToClipboard,
-  DeleteModalEntry,
   DisconnectStorage,
-  FocusModalNameInput,
+  EntriesState,
+  InstallPrompt,
+  Message,
+  type Model,
   NavigateToSubfolder,
   PickLocalDirectory,
   PushUrl,
   ReplaceUrl,
-  RevokeActivePreviewUrl,
+  SavedBackend,
   SaveFileInfoPreference,
   SaveStorageTypePreference,
-  SaveModalChanges,
-  ScrollHelpTopicIntoView,
-  WaitBeforeResetCopyDts,
-  WritePendingImportFiles,
-} from "./command"
-import { Message, init, update } from "./main"
-import {
-  AppRoute,
-  CopyDtsState,
-  EditorFileMode,
-  EntriesState,
-  type FileEntry,
-  InstallPrompt,
-  type Model,
-  ModalState,
-  OPFS_APP_FOLDER,
-  OverwriteSource,
-  SavedBackend,
   StorageState,
-} from "./route"
+  init,
+  update,
+} from "./main"
+import * as Modal from "./modal"
+import {
+  DeleteModalEntry,
+  EditorFileMode,
+  FocusModalNameInput,
+  ModalState,
+  OverwriteSource,
+  RevokeActivePreviewUrl,
+  SaveModalChanges,
+  WritePendingImportFiles,
+} from "./modal"
+import { AppRoute, type FileEntry } from "./route"
+import { OPFS_APP_FOLDER } from "./storage"
+
+const modalMsg = (m: Modal.Message) => Message.GotModalMessage({ message: m })
+const helpMsg = (m: Help.Message) =>
+  Message.GotModalMessage({ message: Modal.Message.GotHelpMessage({ message: m }) })
 
 const sampleEntries: ReadonlyArray<FileEntry> = [
   {
@@ -119,8 +128,10 @@ describe("PWA Islands Story Tests", () => {
       ).toBe(true)
       expect(result.model.modalState).toEqual(
         ModalState.Help({
-          maybeOpenTopic: Option.some("fs"),
-          copyDtsState: CopyDtsState.Idle(),
+          help: {
+            maybeOpenTopic: Option.some("fs"),
+            copyDtsState: CopyDtsState.Idle(),
+          },
         }),
       )
       expect(result.commands).toHaveLength(2)
@@ -232,41 +243,49 @@ describe("PWA Islands Story Tests", () => {
         message(Message.ClickedOpenHelp()),
         Command.expectExact(PushUrl({ url: "/?pwaislands=help-api" })),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
-        message(Message.ClickedCopyDts()),
+        message(helpMsg(Help.Message.ClickedCopyDts())),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              maybeOpenTopic: Option.some("api"),
-              copyDtsState: CopyDtsState.Copying(),
+              help: {
+                maybeOpenTopic: Option.some("api"),
+                copyDtsState: CopyDtsState.Copying(),
+              },
             }),
           )
         }),
         Command.expectExact(CopyApiDtsToClipboard()),
-        Command.resolve(CopyApiDtsToClipboard, Message.SucceededCopyApiDtsToClipboard()),
+        Command.resolve(CopyApiDtsToClipboard, Help.Message.SucceededCopyApiDtsToClipboard()),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              maybeOpenTopic: Option.some("api"),
-              copyDtsState: CopyDtsState.Copied(),
+              help: {
+                maybeOpenTopic: Option.some("api"),
+                copyDtsState: CopyDtsState.Copied(),
+              },
             }),
           )
         }),
         Command.expectExact(WaitBeforeResetCopyDts()),
-        Command.resolve(WaitBeforeResetCopyDts, Message.CompletedWaitBeforeResetCopyDts()),
+        Command.resolve(WaitBeforeResetCopyDts, Help.Message.CompletedWaitBeforeResetCopyDts()),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              maybeOpenTopic: Option.some("api"),
-              copyDtsState: CopyDtsState.Idle(),
+              help: {
+                maybeOpenTopic: Option.some("api"),
+                copyDtsState: CopyDtsState.Idle(),
+              },
             }),
           )
         }),
-        message(Message.ToggledHelpTopic({ topic: "fs", isOpen: true })),
+        message(helpMsg(Help.Message.ToggledTopic({ topic: "fs", isOpen: true }))),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              maybeOpenTopic: Option.some("fs"),
-              copyDtsState: CopyDtsState.Idle(),
+              help: {
+                maybeOpenTopic: Option.some("fs"),
+                copyDtsState: CopyDtsState.Idle(),
+              },
             }),
           )
         }),
@@ -275,13 +294,15 @@ describe("PWA Islands Story Tests", () => {
           ScrollHelpTopicIntoView({ topic: "fs" }),
         ),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
-        Command.resolve(ScrollHelpTopicIntoView, Message.CompletedScrollHelpTopicIntoView()),
-        message(Message.ToggledHelpTopic({ topic: "fs", isOpen: false })),
+        Command.resolve(ScrollHelpTopicIntoView, Help.Message.CompletedScrollHelpTopicIntoView()),
+        message(helpMsg(Help.Message.ToggledTopic({ topic: "fs", isOpen: false }))),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              maybeOpenTopic: Option.none(),
-              copyDtsState: CopyDtsState.Idle(),
+              help: {
+                maybeOpenTopic: Option.none(),
+                copyDtsState: CopyDtsState.Idle(),
+              },
             }),
           )
         }),
@@ -295,8 +316,10 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              maybeOpenTopic: Option.none(),
-              copyDtsState: CopyDtsState.Idle(),
+              help: {
+                maybeOpenTopic: Option.none(),
+                copyDtsState: CopyDtsState.Idle(),
+              },
             }),
           )
         }),
@@ -319,8 +342,10 @@ describe("PWA Islands Story Tests", () => {
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
-              maybeOpenTopic: Option.some("fs"),
-              copyDtsState: CopyDtsState.Idle(),
+              help: {
+                maybeOpenTopic: Option.some("fs"),
+                copyDtsState: CopyDtsState.Idle(),
+              },
             }),
           )
         }),
@@ -341,7 +366,7 @@ describe("PWA Islands Story Tests", () => {
       story(
         update,
         given(modelWithNewFolder),
-        message(Message.ClickedSaveModal()),
+        message(modalMsg(Modal.Message.ClickedSaveModal())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
@@ -351,8 +376,8 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
-        message(Message.UpdatedModalName({ name: "sub/folder" })),
-        message(Message.ClickedSaveModal()),
+        message(modalMsg(Modal.Message.UpdatedModalName({ name: "sub/folder" }))),
+        message(modalMsg(Modal.Message.ClickedSaveModal())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
@@ -379,7 +404,7 @@ describe("PWA Islands Story Tests", () => {
       story(
         update,
         given(modelWithDuplicateFolder),
-        message(Message.ClickedSaveModal()),
+        message(modalMsg(Modal.Message.ClickedSaveModal())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
@@ -407,7 +432,7 @@ describe("PWA Islands Story Tests", () => {
       story(
         update,
         given(modelWithDuplicateFile),
-        message(Message.ClickedSaveModal()),
+        message(modalMsg(Modal.Message.ClickedSaveModal())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
@@ -419,7 +444,7 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
-        message(Message.ClickedConfirmOverwrite()),
+        message(modalMsg(Modal.Message.ClickedConfirmOverwrite())),
         Command.expectExact(
           SaveModalChanges({
             modalState: ModalState.ConfirmOverwrite({
@@ -433,7 +458,7 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.resolve(
           SaveModalChanges,
-          Message.SucceededSaveModalChanges({ entries: sampleEntries }),
+          Modal.Message.SucceededSaveModalChanges({ entries: sampleEntries }),
         ),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
@@ -456,7 +481,7 @@ describe("PWA Islands Story Tests", () => {
       story(
         update,
         given(modelWithEditFile),
-        message(Message.ClickedDeleteModalEntry()),
+        message(modalMsg(Modal.Message.ClickedDeleteModalEntry())),
         Command.expectNone(),
         model((m) => {
           expect(m.modalState).toEqual(
@@ -466,7 +491,7 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
-        message(Message.ConfirmedDeleteModalEntry()),
+        message(modalMsg(Modal.Message.ConfirmedDeleteModalEntry())),
         Command.expectExact(
           DeleteModalEntry({
             entryName: "index.html",
@@ -474,7 +499,7 @@ describe("PWA Islands Story Tests", () => {
             subPath: [],
           }),
         ),
-        Command.resolve(DeleteModalEntry, Message.SucceededDeleteModalEntry({ entries: [] })),
+        Command.resolve(DeleteModalEntry, Modal.Message.SucceededDeleteModalEntry({ entries: [] })),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
           expect(m.modalState).toEqual(ModalState.Closed())
@@ -487,12 +512,14 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(
-          Message.CompletedSelectImportFiles({
-            files: [
-              { name: "index.html", size: 100, lastModified: 1000 },
-              { name: "neu.html", size: 200, lastModified: 1000 },
-            ],
-          }),
+          modalMsg(
+            Modal.Message.CompletedSelectImportFiles({
+              files: [
+                { name: "index.html", size: 100, lastModified: 1000 },
+                { name: "neu.html", size: 200, lastModified: 1000 },
+              ],
+            }),
+          ),
         ),
         Command.expectNone(),
         model((m) => {
@@ -513,7 +540,7 @@ describe("PWA Islands Story Tests", () => {
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
-        message(Message.SelectedImportConflictAction({ action: "rename" })),
+        message(modalMsg(Modal.Message.SelectedImportConflictAction({ action: "rename" }))),
         Command.expectExact(
           WritePendingImportFiles({
             items: [
@@ -525,7 +552,7 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.resolve(
           WritePendingImportFiles,
-          Message.CompletedWritePendingImportFiles({
+          Modal.Message.CompletedWritePendingImportFiles({
             entries: sampleEntries,
             maybeAlertBanner: Option.none(),
           }),
@@ -573,13 +600,15 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(modelWithFiles),
         message(
-          Message.CompletedSelectImportFiles({
-            files: [
-              { name: "file1.html", size: 100, lastModified: 1000 },
-              { name: "file2.html", size: 100, lastModified: 1000 },
-              { name: "file3.html", size: 100, lastModified: 1000 },
-            ],
-          }),
+          modalMsg(
+            Modal.Message.CompletedSelectImportFiles({
+              files: [
+                { name: "file1.html", size: 100, lastModified: 1000 },
+                { name: "file2.html", size: 100, lastModified: 1000 },
+                { name: "file3.html", size: 100, lastModified: 1000 },
+              ],
+            }),
+          ),
         ),
         Command.expectNone(),
         model((m) => {
@@ -598,7 +627,7 @@ describe("PWA Islands Story Tests", () => {
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
-        message(Message.SelectedImportConflictAction({ action: "skip" })),
+        message(modalMsg(Modal.Message.SelectedImportConflictAction({ action: "skip" }))),
         Command.expectNone(),
         model((m) => {
           ModalState.match(m.modalState, {
@@ -616,7 +645,7 @@ describe("PWA Islands Story Tests", () => {
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
-        message(Message.ToggledImportConflictApplyToAll({ applyToAll: true })),
+        message(modalMsg(Modal.Message.ToggledImportConflictApplyToAll({ applyToAll: true }))),
         Command.expectNone(),
         model((m) => {
           ModalState.match(m.modalState, {
@@ -633,7 +662,7 @@ describe("PWA Islands Story Tests", () => {
             Help: () => expect.fail("Expected ImportConflict"),
           })
         }),
-        message(Message.SelectedImportConflictAction({ action: "replace" })),
+        message(modalMsg(Modal.Message.SelectedImportConflictAction({ action: "replace" }))),
         Command.expectExact(
           WritePendingImportFiles({
             items: [
@@ -646,7 +675,7 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.resolve(
           WritePendingImportFiles,
-          Message.CompletedWritePendingImportFiles({
+          Modal.Message.CompletedWritePendingImportFiles({
             entries: sampleEntries,
             maybeAlertBanner: Option.none(),
           }),
@@ -664,7 +693,7 @@ describe("PWA Islands Story Tests", () => {
         message(Message.ClickedNewFile()),
         Command.expectExact(PushUrl({ url: "/?pwaislands=new" }), FocusModalNameInput()),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
-        Command.resolve(FocusModalNameInput, Message.CompletedFocusModalNameInput()),
+        Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.CreateFile({
@@ -674,10 +703,10 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
-        message(Message.ClickedCloseModal()),
+        message(modalMsg(Modal.Message.ClickedCloseModal())),
         Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), RevokeActivePreviewUrl()),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
-        Command.resolve(RevokeActivePreviewUrl, Message.CompletedRevokeActivePreviewUrl()),
+        Command.resolve(RevokeActivePreviewUrl, Modal.Message.CompletedRevokeActivePreviewUrl()),
         model((m) => {
           expect(m.modalState).toEqual(ModalState.Closed())
         }),
@@ -691,7 +720,7 @@ describe("PWA Islands Story Tests", () => {
         message(Message.ClickedNewFolder()),
         Command.expectExact(PushUrl({ url: "/?pwaislands=new-folder" }), FocusModalNameInput()),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
-        Command.resolve(FocusModalNameInput, Message.CompletedFocusModalNameInput()),
+        Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.CreateFolder({
@@ -710,7 +739,7 @@ describe("PWA Islands Story Tests", () => {
         given(readyModel),
         message(Message.ChangedUrl({ url: newUrl })),
         Command.expectExact(FocusModalNameInput()),
-        Command.resolve(FocusModalNameInput, Message.CompletedFocusModalNameInput()),
+        Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.CreateFile({

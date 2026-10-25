@@ -1,12 +1,6 @@
-import { Array, Option, Order } from "effect"
-import {
-  BinaryEdit,
-  EditorFileMode,
-  type FileEntry,
-  FileInspection,
-  PreviewContent,
-  type StorageType,
-} from "./route"
+import { Array, Option, Order, Schema } from "effect"
+import { defineTaggedUnion } from "foldkit/schema"
+import { type FileEntry, FileInspection, type StorageType } from "./route"
 import {
   OPFS_APP_FOLDER,
   checkTextBytes,
@@ -391,6 +385,14 @@ export const setPendingImportFiles = (files: ReadonlyArray<globalThis.File>): vo
 export const getActiveStorage = (): Option.Option<FileSystemHandleStorage> =>
   runtimeBridge.activeStorage
 
+export const requireActiveStorage = (): FileSystemHandleStorage =>
+  Option.match(getActiveStorage(), {
+    onNone: () => {
+      throw new Error("Kein aktiver Speicher verfügbar.")
+    },
+    onSome: (storage) => storage,
+  })
+
 export const setActiveStorage = (storage: Option.Option<FileSystemHandleStorage>): void => {
   runtimeBridge.activeStorage = storage
 }
@@ -421,6 +423,40 @@ export const getDeferredInstallPrompt = (): Option.Option<BeforeInstallPromptEve
 export const setDeferredInstallPrompt = (prompt: Option.Option<BeforeInstallPromptEvent>): void => {
   runtimeBridge.deferredInstallPrompt = prompt
 }
+
+export const PreviewContent = defineTaggedUnion({
+  None: {},
+  Image: {
+    objectUrl: Schema.String,
+  },
+  Pdf: {
+    objectUrl: Schema.String,
+  },
+})
+export type PreviewContent = typeof PreviewContent.Type
+
+export const BinaryEdit = defineTaggedUnion({
+  Locked: {
+    reason: Schema.String,
+  },
+  Disabled: {},
+  Loading: {},
+  Editing: {
+    content: Schema.String,
+  },
+})
+export type BinaryEdit = typeof BinaryEdit.Type
+
+export const EditorFileMode = defineTaggedUnion({
+  Text: {
+    content: Schema.String,
+  },
+  Binary: {
+    preview: PreviewContent,
+    edit: BinaryEdit,
+  },
+})
+export type EditorFileMode = typeof EditorFileMode.Type
 
 const loadBinaryEditorFileMode = async (
   storage: FileSystemHandleStorage,

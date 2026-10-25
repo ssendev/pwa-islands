@@ -3,8 +3,7 @@ import { Effect } from "effect"
 import * as Runtime from "foldkit/runtime"
 import { registerSW } from "virtual:pwa-register"
 import { supportsDirectoryPicker, supportsOPFS } from "./files"
-import { Flags, Model, init, subscriptions, update, view } from "./main"
-import { Message } from "./message"
+import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
 
 registerSW({
   immediate: true,
