@@ -291,6 +291,33 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
+    it("opens FS help when the folder view is not visible", () => {
+      const noFolderModel: Model = {
+        ...readyModel,
+        storageState: StorageState.NoFolderSelected({
+          storageType: "fsa",
+          otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
+        }),
+      }
+
+      story(
+        update,
+        given(noFolderModel),
+        message(Message.ClickedOpenHelp()),
+        model((m) => {
+          expect(m.modalState).toEqual(
+            ModalState.Help({
+              isApiOpen: false,
+              isFsOpen: true,
+              copyDtsState: CopyDtsState.Idle(),
+            }),
+          )
+        }),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=help-fs" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+      )
+    })
+
     it("validates empty name and slash in folder name", () => {
       const modelWithNewFolder: Model = {
         ...readyModel,

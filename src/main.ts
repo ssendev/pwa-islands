@@ -1593,18 +1593,23 @@ export const update = (model: Model, message: Message) =>
     // Help Modal
     ClickedOpenHelp: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
+      const isFolderViewVisible = model.storageState._tag === "Ready"
       revokeActivePreviewUrl()
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           modalState: () =>
             ModalState.Help({
-              isApiOpen: true,
-              isFsOpen: false,
+              isApiOpen: isFolderViewVisible,
+              isFsOpen: !isFolderViewVisible,
               copyDtsState: CopyDtsState.Idle(),
             }),
         }),
-        commands: [PushUrl({ url: buildHelpUrl(subPath, Option.some("api")) })],
+        commands: [
+          PushUrl({
+            url: buildHelpUrl(subPath, Option.some(isFolderViewVisible ? "api" : "fs")),
+          }),
+        ],
       }
     },
 
