@@ -1385,13 +1385,7 @@ export const update = (
     },
 
     ClickedChangeFolder: () => {
-      const otherBackend = StorageState.match(model.storageState, {
-        Ready: ({ otherBackend }) => otherBackend,
-        NoFolderSelected: ({ otherBackend }) => otherBackend,
-        PermissionRequired: ({ otherBackend }) => otherBackend,
-        Initializing: () => SavedBackend.Unsupported(),
-        Unsupported: () => SavedBackend.Unsupported(),
-      })
+      const otherBackend = getOtherBackend(model.storageState)
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
@@ -1407,13 +1401,7 @@ export const update = (
     },
 
     ClickedGrantPermission: () => {
-      const otherBackend = StorageState.match(model.storageState, {
-        PermissionRequired: ({ otherBackend }) => otherBackend,
-        Ready: ({ otherBackend }) => otherBackend,
-        NoFolderSelected: ({ otherBackend }) => otherBackend,
-        Initializing: () => SavedBackend.Unsupported(),
-        Unsupported: () => SavedBackend.Unsupported(),
-      })
+      const otherBackend = getOtherBackend(model.storageState)
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model,
