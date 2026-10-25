@@ -1,4 +1,4 @@
-import { Array, Option, pipe } from "effect"
+import { Array, Option } from "effect"
 import {
   BinaryEdit,
   EditorFileMode,
@@ -533,16 +533,3 @@ export const findFreeFileName = (
   }
   return findCandidate(1)
 }
-
-export const decodeUrlPathnameSegments = (pathname: string): ReadonlyArray<string> =>
-  pipe(
-    pathname.split("/"),
-    Array.filter((segment) => segment !== ""),
-    Array.map((segment) => {
-      try {
-        return decodeURIComponent(segment)
-      } catch {
-        return segment
-      }
-    }),
-  )

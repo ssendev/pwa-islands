@@ -22,6 +22,7 @@ import {
   PushUrl,
   RefreshEntries,
   ReplaceUrl,
+  RevokeActivePreviewUrl,
   SaveFileInfoPreference,
   SaveModalChanges,
   ScrollHelpTopicIntoView,
@@ -204,14 +205,6 @@ const isReady = (storageState: StorageState): storageState is ReadyStorageState 
     Match.orElse(() => false),
   )
 
-const isModal =
-  <Tag extends ModalState["_tag"]>(tag: Tag) =>
-  (modalState: ModalState): modalState is Extract<ModalState, { readonly _tag: Tag }> =>
-    Match.value(modalState).pipe(
-      Match.tag(tag, () => true),
-      Match.orElse(() => false),
-    )
-
 const whenReady = (
   model: Model,
   fn: (readyState: ReadyStorageState) => Update.Return<Model, Message>,
@@ -246,7 +239,11 @@ const handleStorageActivated = (
   }: Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">,
 ): Update.Return<Model, Message> => {
   const nextModalState = Option.match(maybeModalState, {
-    onNone: () => (isModal("Help")(model.modalState) ? model.modalState : ModalState.Closed()),
+    onNone: () =>
+      Match.value(model.modalState).pipe(
+        Match.tag("Help", () => model.modalState),
+        Match.orElse(() => ModalState.Closed()),
+      ),
     onSome: (modalState) => modalState,
   })
 
@@ -304,7 +301,11 @@ const handleNoFolderSelected = (
   model: modifyFields(model, {
     storageState: () => StorageState.NoFolderSelected({ storageType, otherBackend }),
     isSettingsOpen: () => false,
-    modalState: () => (isModal("Help")(model.modalState) ? model.modalState : ModalState.Closed()),
+    modalState: () =>
+      Match.value(model.modalState).pipe(
+        Match.tag("Help", () => model.modalState),
+        Match.orElse(() => ModalState.Closed()),
+      ),
     maybeAlertBanner: () => Option.none(),
   }),
 })
@@ -459,9 +460,10 @@ export const update = (model: Model, message: Message) =>
       const route = parseUrlToRoute(url)
       return AppRoute.match(route, {
         Folder: ({ subPath }) => {
-          const nextModalState = !isModal("Closed")(model.modalState)
-            ? ModalState.Closed()
-            : model.modalState
+          const nextModalState = Match.value(model.modalState).pipe(
+            Match.tag("Closed", () => model.modalState),
+            Match.orElse(() => ModalState.Closed()),
+          )
           if (!isReady(model.storageState)) {
             return {
               model: modifyFields(model, {
@@ -488,9 +490,11 @@ export const update = (model: Model, message: Message) =>
         },
 
         New: ({ subPath, target }) => {
-          const isAlreadyNew =
-            (target === "folder" && isModal("CreateFolder")(model.modalState)) ||
-            (target === "file" && isModal("CreateFile")(model.modalState))
+          const isAlreadyNew = Match.value(model.modalState).pipe(
+            Match.tag("CreateFolder", () => target === "folder"),
+            Match.tag("CreateFile", () => target === "file"),
+            Match.orElse(() => false),
+          )
 
           const targetModalState =
             target === "folder"
@@ -540,9 +544,11 @@ export const update = (model: Model, message: Message) =>
         },
 
         Edit: ({ subPath, name }) => {
-          const isAlreadyEditing =
-            (isModal("EditFile")(model.modalState) && model.modalState.originalName === name) ||
-            (isModal("EditFolder")(model.modalState) && model.modalState.originalName === name)
+          const isAlreadyEditing = Match.value(model.modalState).pipe(
+            Match.tag("EditFile", (editFile) => editFile.originalName === name),
+            Match.tag("EditFolder", (editFolder) => editFolder.originalName === name),
+            Match.orElse(() => false),
+          )
 
           if (isAlreadyEditing) {
             return { model }
@@ -587,9 +593,10 @@ export const update = (model: Model, message: Message) =>
         },
 
         Help: ({ maybeTopic }) => {
-          const maybeExistingHelp = isModal("Help")(model.modalState)
-            ? Option.some(model.modalState)
-            : Option.none()
+          const maybeExistingHelp = Match.value(model.modalState).pipe(
+            Match.tag("Help", (helpState) => Option.some(helpState)),
+            Match.orElse(() => Option.none()),
+          )
 
           return {
             model: modifyFields(model, {
@@ -917,105 +924,103 @@ export const update = (model: Model, message: Message) =>
       }
     },
 
-    ToggledImportConflictApplyToAll: ({ applyToAll }) => {
-      if (!isModal("ImportConflict")(model.modalState)) {
-        return { model }
-      }
-      const conflictState = model.modalState
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            modifyFields(conflictState, {
-              applyToAll: () => applyToAll,
-            }),
-        }),
-      }
-    },
-
-    SelectedImportConflictAction: ({ action }) => {
-      if (!isModal("ImportConflict")(model.modalState)) {
-        return { model }
-      }
-      const conflictState = model.modalState
-      const { current, suggestedName, queue, resolved, applyToAll } = conflictState
-
-      const targetName = action === "rename" ? suggestedName : current.name
-      const updatedResolved: ReadonlyArray<ResolvedImportItem> = [
-        ...resolved,
-        {
-          sourceName: current.name,
-          targetName,
-          action,
-        },
-      ]
-
-      const existingEntries = StorageState.match(model.storageState, {
-        Ready: ({ entriesState }) =>
-          EntriesState.match(entriesState, {
-            Loaded: ({ entries }) => entries,
-            Loading: () => [],
-            Error: () => [],
+    ToggledImportConflictApplyToAll: ({ applyToAll }) =>
+      Match.value(model.modalState).pipe(
+        Match.tag("ImportConflict", (conflictState) => ({
+          model: modifyFields(model, {
+            modalState: () =>
+              modifyFields(conflictState, {
+                applyToAll: () => applyToAll,
+              }),
           }),
-        Initializing: () => [],
-        Unsupported: () => [],
-        NoFolderSelected: () => [],
-        PermissionRequired: () => [],
-      })
-      const reservedNames = new Set<string>([
-        ...existingEntries.map((e) => e.name),
-        ...updatedResolved.map((r) => r.targetName),
-      ])
+        })),
+        Match.orElse(() => ({ model })),
+      ),
 
-      const subPath = currentSubPathFromStorageState(model.storageState)
+    SelectedImportConflictAction: ({ action }) =>
+      Match.value(model.modalState).pipe(
+        Match.tag("ImportConflict", (conflictState) => {
+          const { current, suggestedName, queue, resolved, applyToAll } = conflictState
 
-      if (applyToAll) {
-        const batchResolved: ReadonlyArray<ResolvedImportItem> = [
-          ...updatedResolved,
-          ...queue.map((item) => {
-            const itemTarget =
-              action === "rename" ? findFreeFileName(item.name, reservedNames) : item.name
-            reservedNames.add(itemTarget)
-            return {
-              sourceName: item.name,
-              targetName: itemTarget,
+          const targetName = action === "rename" ? suggestedName : current.name
+          const updatedResolved: ReadonlyArray<ResolvedImportItem> = [
+            ...resolved,
+            {
+              sourceName: current.name,
+              targetName,
               action,
+            },
+          ]
+
+          const existingEntries = StorageState.match(model.storageState, {
+            Ready: ({ entriesState }) =>
+              EntriesState.match(entriesState, {
+                Loaded: ({ entries }) => entries,
+                Loading: () => [],
+                Error: () => [],
+              }),
+            Initializing: () => [],
+            Unsupported: () => [],
+            NoFolderSelected: () => [],
+            PermissionRequired: () => [],
+          })
+          const reservedNames = new Set<string>([
+            ...existingEntries.map((e) => e.name),
+            ...updatedResolved.map((r) => r.targetName),
+          ])
+
+          const subPath = currentSubPathFromStorageState(model.storageState)
+
+          if (applyToAll) {
+            const batchResolved: ReadonlyArray<ResolvedImportItem> = [
+              ...updatedResolved,
+              ...queue.map((item) => {
+                const itemTarget =
+                  action === "rename" ? findFreeFileName(item.name, reservedNames) : item.name
+                reservedNames.add(itemTarget)
+                return {
+                  sourceName: item.name,
+                  targetName: itemTarget,
+                  action,
+                }
+              }),
+            ]
+
+            return {
+              model: modifyFields(model, {
+                modalState: () => ModalState.Closed(),
+              }),
+              commands: [WritePendingImportFiles({ items: batchResolved, subPath })],
             }
-          }),
-        ]
+          }
 
-        return {
-          model: modifyFields(model, {
-            modalState: () => ModalState.Closed(),
-          }),
-          commands: [WritePendingImportFiles({ items: batchResolved, subPath })],
-        }
-      }
+          if (Array.isReadonlyArrayEmpty(queue)) {
+            return {
+              model: modifyFields(model, {
+                modalState: () => ModalState.Closed(),
+              }),
+              commands: [WritePendingImportFiles({ items: updatedResolved, subPath })],
+            }
+          }
 
-      if (Array.isReadonlyArrayEmpty(queue)) {
-        return {
-          model: modifyFields(model, {
-            modalState: () => ModalState.Closed(),
-          }),
-          commands: [WritePendingImportFiles({ items: updatedResolved, subPath })],
-        }
-      }
+          const [nextCurrent, ...nextQueue] = queue
+          const nextSuggested = findFreeFileName(nextCurrent.name, reservedNames)
 
-      const [nextCurrent, ...nextQueue] = queue
-      const nextSuggested = findFreeFileName(nextCurrent.name, reservedNames)
-
-      return {
-        model: modifyFields(model, {
-          modalState: () =>
-            ModalState.ImportConflict({
-              current: nextCurrent,
-              suggestedName: nextSuggested,
-              queue: nextQueue,
-              resolved: updatedResolved,
-              applyToAll: false,
+          return {
+            model: modifyFields(model, {
+              modalState: () =>
+                ModalState.ImportConflict({
+                  current: nextCurrent,
+                  suggestedName: nextSuggested,
+                  queue: nextQueue,
+                  resolved: updatedResolved,
+                  applyToAll: false,
+                }),
             }),
+          }
         }),
-      }
-    },
+        Match.orElse(() => ({ model })),
+      ),
 
     CancelledImportConflict: () => ({
       model: modifyFields(model, {
@@ -1572,30 +1577,103 @@ export const update = (model: Model, message: Message) =>
         model: modifyFields(model, {
           modalState: () => ModalState.Closed(),
         }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })],
+        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
       }
     },
 
-    PressedEscape: () => {
-      if (!isModal("Closed")(model.modalState)) {
-        const subPath = currentSubPathFromStorageState(model.storageState)
-        return {
-          model: modifyFields(model, {
-            isSettingsOpen: () => false,
-            modalState: () => ModalState.Closed(),
-          }),
-          commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })],
-        }
-      }
-      if (model.isSettingsOpen) {
-        return {
-          model: modifyFields(model, {
-            isSettingsOpen: () => false,
-          }),
-        }
-      }
-      return { model }
-    },
+    PressedEscape: () =>
+      ModalState.match(model.modalState, {
+        Closed: () => {
+          if (model.isSettingsOpen) {
+            return {
+              model: modifyFields(model, {
+                isSettingsOpen: () => false,
+              }),
+            }
+          }
+          return { model }
+        },
+        CreateFile: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+        CreateFolder: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+        EditFolder: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+        EditFile: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+        ConfirmDelete: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+        ConfirmOverwrite: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+        ImportConflict: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+        Help: () => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          return {
+            model: modifyFields(model, {
+              isSettingsOpen: () => false,
+              modalState: () => ModalState.Closed(),
+            }),
+            commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RevokeActivePreviewUrl()],
+          }
+        },
+      }),
 
     SucceededSaveModalChanges: ({ entries }) => {
       if (!isReady(model.storageState)) {

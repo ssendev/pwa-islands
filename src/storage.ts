@@ -36,7 +36,9 @@ export function openDB(): Promise<IDBDatabase> {
   dbPromise = pending
   // NOTE: Evict failed connection so future calls can retry
   void pending.catch(() => {
-    if (dbPromise === pending) dbPromise = null
+    if (dbPromise === pending) {
+      dbPromise = null
+    }
   })
 
   return pending
@@ -218,17 +220,17 @@ export async function resolveFileInDirectory(
   indexFile = DEFAULT_INDEX_FILE,
 ): Promise<Option.Option<SavedFile>> {
   const parts = splitPath(relativePath)
-  if (Array.isReadonlyArrayEmpty(parts)) {
+  if (!Array.isReadonlyArrayNonEmpty(parts)) {
     return Option.none()
   }
 
-  const maybeParent = await walkToParent(root, parts.slice(0, -1))
+  const maybeParent = await walkToParent(root, Array.dropRight(parts, 1))
   if (Option.isNone(maybeParent)) {
     return Option.none()
   }
   const parent = maybeParent.value
 
-  const name = parts[parts.length - 1]
+  const name = Array.lastNonEmpty(parts)
   const filePath = parts.join("/")
 
   try {

@@ -13,6 +13,7 @@ import {
   PickLocalDirectory,
   PushUrl,
   ReplaceUrl,
+  RevokeActivePreviewUrl,
   SaveFileInfoPreference,
   SaveModalChanges,
   ScrollHelpTopicIntoView,
@@ -83,7 +84,15 @@ describe("PWA Islands Story Tests", () => {
         rootUrl,
       )
 
-      expect(result.model.storageState._tag).toBe("Unsupported")
+      expect(
+        StorageState.match(result.model.storageState, {
+          Unsupported: () => true,
+          Initializing: () => false,
+          NoFolderSelected: () => false,
+          PermissionRequired: () => false,
+          Ready: () => false,
+        }),
+      ).toBe(true)
       expect(Option.isSome(result.model.maybeAlertBanner)).toBe(true)
       expect(result.commands).toBeUndefined()
     })
@@ -98,7 +107,15 @@ describe("PWA Islands Story Tests", () => {
         helpFsUrl,
       )
 
-      expect(result.model.storageState._tag).toBe("Initializing")
+      expect(
+        StorageState.match(result.model.storageState, {
+          Initializing: () => true,
+          Unsupported: () => false,
+          NoFolderSelected: () => false,
+          PermissionRequired: () => false,
+          Ready: () => false,
+        }),
+      ).toBe(true)
       expect(result.model.modalState).toEqual(
         ModalState.Help({
           maybeOpenTopic: Option.some("fs"),
@@ -478,13 +495,22 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.expectNone(),
         model((m) => {
-          expect(m.modalState._tag).toBe("ImportConflict")
-          if (m.modalState._tag === "ImportConflict") {
-            expect(m.modalState.current.name).toBe("index.html")
-            expect(m.modalState.suggestedName).toBe("index (1).html")
-            expect(m.modalState.resolved).toHaveLength(1)
-            expect(m.modalState.resolved[0].targetName).toBe("neu.html")
-          }
+          ModalState.match(m.modalState, {
+            ImportConflict: ({ current, suggestedName, resolved }) => {
+              expect(current.name).toBe("index.html")
+              expect(suggestedName).toBe("index (1).html")
+              expect(resolved).toHaveLength(1)
+              expect(resolved[0].targetName).toBe("neu.html")
+            },
+            Closed: () => expect.fail("Expected ImportConflict"),
+            CreateFile: () => expect.fail("Expected ImportConflict"),
+            CreateFolder: () => expect.fail("Expected ImportConflict"),
+            EditFolder: () => expect.fail("Expected ImportConflict"),
+            EditFile: () => expect.fail("Expected ImportConflict"),
+            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
+            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Help: () => expect.fail("Expected ImportConflict"),
+          })
         }),
         message(Message.SelectedImportConflictAction({ action: "rename" })),
         Command.expectExact(
@@ -556,28 +582,55 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.expectNone(),
         model((m) => {
-          expect(m.modalState._tag).toBe("ImportConflict")
-          if (m.modalState._tag === "ImportConflict") {
-            expect(m.modalState.current.name).toBe("file1.html")
-            expect(m.modalState.queue).toHaveLength(2)
-          }
+          ModalState.match(m.modalState, {
+            ImportConflict: ({ current, queue }) => {
+              expect(current.name).toBe("file1.html")
+              expect(queue).toHaveLength(2)
+            },
+            Closed: () => expect.fail("Expected ImportConflict"),
+            CreateFile: () => expect.fail("Expected ImportConflict"),
+            CreateFolder: () => expect.fail("Expected ImportConflict"),
+            EditFolder: () => expect.fail("Expected ImportConflict"),
+            EditFile: () => expect.fail("Expected ImportConflict"),
+            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
+            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Help: () => expect.fail("Expected ImportConflict"),
+          })
         }),
         message(Message.SelectedImportConflictAction({ action: "skip" })),
         Command.expectNone(),
         model((m) => {
-          expect(m.modalState._tag).toBe("ImportConflict")
-          if (m.modalState._tag === "ImportConflict") {
-            expect(m.modalState.current.name).toBe("file2.html")
-            expect(m.modalState.queue).toHaveLength(1)
-          }
+          ModalState.match(m.modalState, {
+            ImportConflict: ({ current, queue }) => {
+              expect(current.name).toBe("file2.html")
+              expect(queue).toHaveLength(1)
+            },
+            Closed: () => expect.fail("Expected ImportConflict"),
+            CreateFile: () => expect.fail("Expected ImportConflict"),
+            CreateFolder: () => expect.fail("Expected ImportConflict"),
+            EditFolder: () => expect.fail("Expected ImportConflict"),
+            EditFile: () => expect.fail("Expected ImportConflict"),
+            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
+            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Help: () => expect.fail("Expected ImportConflict"),
+          })
         }),
         message(Message.ToggledImportConflictApplyToAll({ applyToAll: true })),
         Command.expectNone(),
         model((m) => {
-          expect(m.modalState._tag).toBe("ImportConflict")
-          if (m.modalState._tag === "ImportConflict") {
-            expect(m.modalState.applyToAll).toBe(true)
-          }
+          ModalState.match(m.modalState, {
+            ImportConflict: ({ applyToAll }) => {
+              expect(applyToAll).toBe(true)
+            },
+            Closed: () => expect.fail("Expected ImportConflict"),
+            CreateFile: () => expect.fail("Expected ImportConflict"),
+            CreateFolder: () => expect.fail("Expected ImportConflict"),
+            EditFolder: () => expect.fail("Expected ImportConflict"),
+            EditFile: () => expect.fail("Expected ImportConflict"),
+            ConfirmDelete: () => expect.fail("Expected ImportConflict"),
+            ConfirmOverwrite: () => expect.fail("Expected ImportConflict"),
+            Help: () => expect.fail("Expected ImportConflict"),
+          })
         }),
         message(Message.SelectedImportConflictAction({ action: "replace" })),
         Command.expectExact(
@@ -621,8 +674,9 @@ describe("PWA Islands Story Tests", () => {
           )
         }),
         message(Message.ClickedCloseModal()),
-        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" })),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), RevokeActivePreviewUrl()),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        Command.resolve(RevokeActivePreviewUrl, Message.CompletedRevokeActivePreviewUrl()),
         model((m) => {
           expect(m.modalState).toEqual(ModalState.Closed())
         }),

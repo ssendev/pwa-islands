@@ -3,7 +3,7 @@ import * as Dom from "foldkit/dom"
 import * as Subscription from "foldkit/subscription"
 import { type BeforeInstallPromptEvent, setDeferredInstallPrompt } from "./files"
 import { Message } from "./message"
-import type { Model } from "./model"
+import { type Model, ModalState } from "./model"
 
 export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
   escapeKey: entry(
@@ -12,7 +12,19 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
     },
     {
       modelToDependencies: (model) => ({
-        isActive: model.isSettingsOpen || model.modalState._tag !== "Closed",
+        isActive:
+          model.isSettingsOpen ||
+          ModalState.match(model.modalState, {
+            Closed: () => false,
+            CreateFile: () => true,
+            CreateFolder: () => true,
+            EditFolder: () => true,
+            EditFile: () => true,
+            ConfirmDelete: () => true,
+            ConfirmOverwrite: () => true,
+            ImportConflict: () => true,
+            Help: () => true,
+          }),
       }),
       dependenciesToStream: ({ isActive }) =>
         Dom.streamFromKeyBindings<Message>({

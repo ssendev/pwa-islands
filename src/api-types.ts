@@ -11,7 +11,7 @@ export interface IslandEntry {
   lastModified?: number
 }
 
-export type IslandInput = string | Blob | Uint8Array | ArrayBuffer
+export type IslandInput = string | Blob | Uint8Array<ArrayBuffer> | ArrayBuffer
 
 export interface WriteOptions {
   /**

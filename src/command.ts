@@ -913,7 +913,12 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
 
         const fileMap = new Map<string, globalThis.File>(pendingFiles.map((f) => [f.name, f]))
 
-        const importResults = await args.items.reduce(
+        const importResults = await Array.reduce(
+          args.items,
+          Promise.resolve({
+            importedCount: 0,
+            errors: [] as ReadonlyArray<string>,
+          }),
           async (accPromise, item) => {
             const acc = await accPromise
             if (item.action === "skip") {
@@ -938,10 +943,6 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
               }
             }
           },
-          Promise.resolve({
-            importedCount: 0,
-            errors: [] as ReadonlyArray<string>,
-          }),
         )
 
         const entries = await storage.listEntries(args.subPath)

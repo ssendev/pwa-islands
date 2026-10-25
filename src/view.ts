@@ -1774,8 +1774,8 @@ const viewImportConflictModal = (
                               }),
                             ),
                           ]),
-                          ` Auswahl auf alle weiteren ${queue.length} ${
-                            queue.length === 1 ? "Konflikt" : "Konflikte"
+                          ` Auswahl auf alle weiteren ${Array.length(queue)} ${
+                            Array.length(queue) === 1 ? "Konflikt" : "Konflikte"
                           } anwenden`,
                         ],
                       ),

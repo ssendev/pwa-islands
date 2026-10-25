@@ -1,4 +1,4 @@
-import { Option } from "effect"
+import { Array, Option } from "effect"
 import { findActiveStorage, normalizePath, splitPath, getDirectory } from "./storage.ts"
 import { readTextOrThrow } from "./text.ts"
 import type { IslandEntry, IslandsApi } from "./api-types.ts"
@@ -35,12 +35,14 @@ async function requireRoot(): Promise<FileSystemDirectoryHandle> {
 }
 
 function splitEntryPath(path: string): { dirs: ReadonlyArray<string>; name: string } {
-  const parts = [...splitPath(normalizePath(path))]
-  const name = parts.pop()
-  if (!name) {
+  const parts = splitPath(normalizePath(path))
+  if (!Array.isReadonlyArrayNonEmpty(parts)) {
     throw new Error("Ungültiger Pfad: Datei- oder Ordnername fehlt.")
   }
-  return { dirs: parts, name }
+  return {
+    dirs: Array.dropRight(parts, 1),
+    name: Array.lastNonEmpty(parts),
+  }
 }
 
 const api: IslandsApi = {
@@ -104,11 +106,7 @@ const api: IslandsApi = {
     const handle = await resolveFile(path, true)
     const writable = await handle.createWritable()
     try {
-      await writable.write(
-        content instanceof Uint8Array || content instanceof ArrayBuffer
-          ? new Blob([content as BlobPart])
-          : content,
-      )
+      await writable.write(content)
     } finally {
       await writable.close()
     }
