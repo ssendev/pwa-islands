@@ -1980,54 +1980,56 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
   })
 
 const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
-  const isReady = StorageState.match(model.storageState, {
-    Initializing: () => false,
-    Unsupported: () => false,
-    NoFolderSelected: () => false,
-    PermissionRequired: () => false,
-    Ready: () => true,
-  })
-  const currentStorageType = StorageState.match(model.storageState, {
-    Initializing: () => Option.none(),
-    Unsupported: () => Option.none(),
-    NoFolderSelected: ({ storageType }) => Option.some(storageType),
-    PermissionRequired: ({ storageType }) => Option.some(storageType),
-    Ready: ({ storageType }) => Option.some(storageType),
-  })
-  const isFsaReady = StorageState.match(model.storageState, {
-    Initializing: () => false,
-    Unsupported: () => false,
-    NoFolderSelected: () => false,
-    PermissionRequired: () => false,
-    Ready: ({ storageType }) => storageType === "fsa",
-  })
-  const isFsaNoFolder = StorageState.match(model.storageState, {
-    Initializing: () => false,
-    Unsupported: () => false,
-    NoFolderSelected: ({ storageType }) => storageType === "fsa",
-    PermissionRequired: () => false,
-    Ready: () => false,
-  })
-  const isFsaPermissionRequired = StorageState.match(model.storageState, {
-    Initializing: () => false,
-    Unsupported: () => false,
-    NoFolderSelected: () => false,
-    PermissionRequired: ({ storageType }) => storageType === "fsa",
-    Ready: () => false,
+  const {
+    isReady,
+    isFsaReady,
+    isFsaNoFolder,
+    isFsaPermissionRequired,
+    canSwitchToOpfs,
+    canSwitchToFsa,
+  } = StorageState.match(model.storageState, {
+    Initializing: () => ({
+      isReady: false,
+      isFsaReady: false,
+      isFsaNoFolder: false,
+      isFsaPermissionRequired: false,
+      canSwitchToOpfs: false,
+      canSwitchToFsa: false,
+    }),
+    Unsupported: () => ({
+      isReady: false,
+      isFsaReady: false,
+      isFsaNoFolder: false,
+      isFsaPermissionRequired: false,
+      canSwitchToOpfs: false,
+      canSwitchToFsa: false,
+    }),
+    NoFolderSelected: ({ storageType }) => ({
+      isReady: false,
+      isFsaReady: false,
+      isFsaNoFolder: storageType === "fsa",
+      isFsaPermissionRequired: false,
+      canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
+      canSwitchToFsa: model.hasDirectoryPicker && storageType !== "fsa",
+    }),
+    PermissionRequired: ({ storageType }) => ({
+      isReady: false,
+      isFsaReady: false,
+      isFsaNoFolder: false,
+      isFsaPermissionRequired: storageType === "fsa",
+      canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
+      canSwitchToFsa: model.hasDirectoryPicker && storageType !== "fsa",
+    }),
+    Ready: ({ storageType }) => ({
+      isReady: true,
+      isFsaReady: storageType === "fsa",
+      isFsaNoFolder: false,
+      isFsaPermissionRequired: false,
+      canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
+      canSwitchToFsa: model.hasDirectoryPicker && storageType !== "fsa",
+    }),
   })
   const isInstallAvailable = InstallPrompt.match(model.installPrompt, INSTALL_AVAILABLE)
-  const canSwitchToOpfs =
-    model.hasOPFS &&
-    Option.match(currentStorageType, {
-      onNone: () => false,
-      onSome: (type) => type !== "opfs",
-    })
-  const canSwitchToFsa =
-    model.hasDirectoryPicker &&
-    Option.match(currentStorageType, {
-      onNone: () => false,
-      onSome: (type) => type !== "fsa",
-    })
 
   return h.div(
     [h.Class("settings-menu"), h.Id("settings-menu")],
