@@ -1,4 +1,9 @@
-import { Array, Option } from "effect"
+import { Array, Data, Effect, Option, Stream } from "effect"
+
+export class DirectoryIterationError extends Data.TaggedError("DirectoryIterationError")<{
+  readonly message: string
+  readonly cause?: unknown
+}> {}
 
 export const DB_NAME = "pwa-islands-db"
 export const DB_VERSION = 1
@@ -186,18 +191,31 @@ export async function collectDirectoryHandles(
   dir: FileSystemDirectoryHandle,
 ): Promise<ReadonlyArray<FileSystemDirectoryHandle | FileSystemFileHandle>> {
   if (typeof dir.values === "function") {
-    const handles: Array<FileSystemDirectoryHandle | FileSystemFileHandle> = []
-    for await (const entry of dir.values()) {
-      handles.push(entry)
-    }
-    return handles
+    const chunk = await Effect.runPromise(
+      Stream.runCollect(
+        Stream.fromAsyncIterable(
+          dir.values(),
+          (cause) =>
+            new DirectoryIterationError({ message: "Fehler beim Lesen der Einträge", cause }),
+        ),
+      ),
+    )
+    return Array.fromIterable(chunk)
   }
   if (typeof dir.entries === "function") {
-    const handles: Array<FileSystemDirectoryHandle | FileSystemFileHandle> = []
-    for await (const [, handle] of dir.entries()) {
-      handles.push(handle)
-    }
-    return handles
+    const chunk = await Effect.runPromise(
+      Stream.runCollect(
+        Stream.map(
+          Stream.fromAsyncIterable(
+            dir.entries(),
+            (cause) =>
+              new DirectoryIterationError({ message: "Fehler beim Lesen der Einträge", cause }),
+          ),
+          ([, handle]) => handle,
+        ),
+      ),
+    )
+    return Array.fromIterable(chunk)
   }
   throw new Error("Das Verzeichnis-Handle unterstützt keine Iteration über Einträge.")
 }
