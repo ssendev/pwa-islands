@@ -6,6 +6,7 @@ import {
   clearStoredDirectoryHandle,
   collectDirectoryHandles,
   copyDirectory,
+  getFileExtension,
   getOPFSDirectoryHandle,
   getStoredDirectoryHandle,
   getStoredFileInfoVisible,
@@ -131,14 +132,6 @@ export const PREVIEWABLE_IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
   "ico",
   "avif",
 ])
-
-const getFileExtension = (fileName: string): string => {
-  const dotIdx = fileName.lastIndexOf(".")
-  if (dotIdx < 0 || dotIdx === fileName.length - 1) {
-    return ""
-  }
-  return fileName.slice(dotIdx + 1).toLowerCase()
-}
 
 export const getPreviewType = (fileName: string): Option.Option<"image" | "pdf"> => {
   const ext = getFileExtension(fileName)

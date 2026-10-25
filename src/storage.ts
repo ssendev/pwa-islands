@@ -421,13 +421,17 @@ export async function getDirectory(
   )
 }
 
+export function getFileExtension(fileName: string): string {
+  const dotIndex = fileName.lastIndexOf(".")
+  return dotIndex === -1 || dotIndex === fileName.length - 1
+    ? ""
+    : fileName.slice(dotIndex + 1).toLowerCase()
+}
+
 export function getMimeType(filename: string, fallback?: string): string {
-  const dotIndex = filename.lastIndexOf(".")
-  if (dotIndex !== -1) {
-    const ext = filename.slice(dotIndex + 1).toLowerCase()
-    if (ext in MIME_TYPES) {
-      return MIME_TYPES[ext]
-    }
+  const ext = getFileExtension(filename)
+  if (ext in MIME_TYPES) {
+    return MIME_TYPES[ext]
   }
   return fallback && fallback !== "" ? fallback : "application/octet-stream"
 }

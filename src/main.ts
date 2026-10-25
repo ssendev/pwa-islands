@@ -41,7 +41,6 @@ import * as Modal from "./modal"
 import { AlertBanner } from "./modal"
 import {
   AppRoute,
-  HelpTopic,
   buildEditUrl,
   buildFolderUrl,
   buildHelpUrl,
@@ -49,7 +48,7 @@ import {
   encodeSubPath,
   parseUrlToRoute,
 } from "./route"
-import { OPFS_APP_FOLDER } from "./storage"
+import { OPFS_APP_FOLDER, getFileExtension } from "./storage"
 
 // FORMATTING
 
@@ -1578,7 +1577,7 @@ export const update = (
     ClickedOpenHelp: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       const isFolderViewVisible = isReadyStorage(model.storageState)
-      const activeTopic: HelpTopic = isFolderViewVisible ? "api" : "fs"
+      const activeTopic = isFolderViewVisible ? ("api" as const) : ("fs" as const)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1887,18 +1886,11 @@ const FILE_ICON_GROUPS: ReadonlyArray<{
   },
 ]
 
-const getExtension = (name: string): string => {
-  const dotIndex = name.lastIndexOf(".")
-  return dotIndex === -1 || dotIndex === name.length - 1
-    ? ""
-    : name.slice(dotIndex + 1).toLowerCase()
-}
-
 export const fileIconFor = (name: string, isDirectory: boolean): string => {
   if (isDirectory) {
     return "📁"
   }
-  const ext = getExtension(name)
+  const ext = getFileExtension(name)
   return pipe(
     FILE_ICON_GROUPS,
     Array.findFirst((group) => group.extensions.has(ext)),

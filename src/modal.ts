@@ -603,10 +603,7 @@ export const update = (
         return { model: modalState, outMessage: OutMessage.None() }
       }
 
-      const existingByName = new Map<string, FileEntry>(
-        Array.map(context.existingEntries, (e) => [e.name, e]),
-      )
-      const reservedNames = new Set<string>(existingByName.keys())
+      const reservedNames = new Set<string>(Array.map(context.existingEntries, (e) => e.name))
 
       const { collisions, resolved } = pipe(
         files,
@@ -621,7 +618,7 @@ export const update = (
               return acc
             }
 
-            if (existingByName.has(rawName)) {
+            if (reservedNames.has(rawName)) {
               return {
                 ...acc,
                 collisions: [...acc.collisions, file],

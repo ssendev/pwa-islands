@@ -199,6 +199,27 @@ export const SaveChanges = Command.define("SaveChanges", {
       try: async () => {
         const storage = requireActiveStorage()
 
+        const saveEditedFile = (
+          originalName: string,
+          targetName: string,
+          fileMode: EditorFileMode,
+        ) =>
+          BinaryOrText(fileMode, {
+            text: async (content) => {
+              await storage.writeFile(args.subPath, targetName, content)
+              if (originalName !== targetName) {
+                await storage.deleteEntry(args.subPath, originalName, "file")
+              }
+            },
+            binaryEditing: async (content) => {
+              await storage.writeFileBuffer(args.subPath, targetName, base64ToUint8Array(content))
+              if (originalName !== targetName) {
+                await storage.deleteEntry(args.subPath, originalName, "file")
+              }
+            },
+            binaryRename: () => storage.renameBinaryFile(args.subPath, originalName, targetName),
+          })
+
         await Match.value(args.model).pipe(
           Match.tag("CreateFolder", ({ name }) =>
             storage.createDirectory(args.subPath, name.trim()),
@@ -213,22 +234,7 @@ export const SaveChanges = Command.define("SaveChanges", {
             storage.writeFile(args.subPath, name.trim(), content),
           ),
           Match.tag("EditFile", async ({ name, originalName, fileMode }) => {
-            const newName = name.trim()
-            await BinaryOrText(fileMode, {
-              text: async (content) => {
-                await storage.writeFile(args.subPath, newName, content)
-                if (originalName !== newName) {
-                  await storage.deleteEntry(args.subPath, originalName, "file")
-                }
-              },
-              binaryEditing: async (content) => {
-                await storage.writeFileBuffer(args.subPath, newName, base64ToUint8Array(content))
-                if (originalName !== newName) {
-                  await storage.deleteEntry(args.subPath, originalName, "file")
-                }
-              },
-              binaryRename: () => storage.renameBinaryFile(args.subPath, originalName, newName),
-            })
+            await saveEditedFile(originalName, name.trim(), fileMode)
           }),
           Match.tag("ConfirmOverwrite", async ({ targetName, source }) => {
             await Match.value(source).pipe(
@@ -236,26 +242,7 @@ export const SaveChanges = Command.define("SaveChanges", {
                 await storage.writeFile(args.subPath, targetName, content)
               }),
               Match.tag("EditFile", async ({ originalName, fileMode }) => {
-                await BinaryOrText(fileMode, {
-                  text: async (content) => {
-                    await storage.writeFile(args.subPath, targetName, content)
-                    if (originalName !== targetName) {
-                      await storage.deleteEntry(args.subPath, originalName, "file")
-                    }
-                  },
-                  binaryEditing: async (content) => {
-                    await storage.writeFileBuffer(
-                      args.subPath,
-                      targetName,
-                      base64ToUint8Array(content),
-                    )
-                    if (originalName !== targetName) {
-                      await storage.deleteEntry(args.subPath, originalName, "file")
-                    }
-                  },
-                  binaryRename: () =>
-                    storage.renameBinaryFile(args.subPath, originalName, targetName),
-                })
+                await saveEditedFile(originalName, targetName, fileMode)
               }),
               Match.exhaustive,
             )
