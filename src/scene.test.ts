@@ -94,7 +94,7 @@ describe("PWA Islands Scene Tests", () => {
       type(selector("#modal-file-content"), "<h1>Hallo Welt</h1>"),
       click(selector("#modal-btn-save")),
       Command.resolveAll(
-        [SaveModalChanges, Message.SucceededModalMutation({ entries: updatedEntries })],
+        [SaveModalChanges, Message.SucceededSaveModalChanges({ entries: updatedEntries })],
         [ReplaceUrl, Message.CompletedReplaceUrl()],
       ),
       sceneExpect(selector(".modal-overlay")).toBeAbsent(),
@@ -187,7 +187,7 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolveAll(
         [
           ActivateOpfsBackend,
-          Message.SucceededInitializeStorage({
+          Message.SucceededActivateOpfsBackend({
             storageType: "opfs",
             rootName: "PWA Islands",
             subPath: [],
@@ -225,7 +225,7 @@ describe("PWA Islands Scene Tests", () => {
       click(selector("#btn-change-folder")),
       Command.resolveAll([
         PickLocalDirectory,
-        Message.SucceededInitializeStorage({
+        Message.SucceededPickLocalDirectory({
           storageType: "fsa",
           rootName: "Meine Islands",
           subPath: [],

@@ -16,26 +16,32 @@ import {
 
 // MESSAGE
 
+const StorageActivatedFields = {
+  storageType: StorageType,
+  rootName: Schema.String,
+  subPath: Schema.Array(Schema.String),
+  entries: Schema.Array(FileEntry),
+  otherBackend: SavedBackend,
+  maybeModalState: Schema.Option(ModalState),
+  maybeAlertBanner: Schema.Option(AlertBanner),
+}
+
+const PermissionRequiredFields = {
+  storageType: StorageType,
+  folderName: Schema.String,
+  otherBackend: SavedBackend,
+}
+
+const NoFolderSelectedFields = {
+  storageType: StorageType,
+  otherBackend: SavedBackend,
+}
+
 export const Message = defineMessageUnion({
   // Initialization & Storage Backend Lifecycle
-  SucceededInitializeStorage: {
-    storageType: StorageType,
-    rootName: Schema.String,
-    subPath: Schema.Array(Schema.String),
-    entries: Schema.Array(FileEntry),
-    otherBackend: SavedBackend,
-    maybeModalState: Schema.Option(ModalState),
-    maybeAlertBanner: Schema.Option(AlertBanner),
-  },
-  DetectedPermissionRequired: {
-    storageType: StorageType,
-    folderName: Schema.String,
-    otherBackend: SavedBackend,
-  },
-  DetectedNoFolderSelected: {
-    storageType: StorageType,
-    otherBackend: SavedBackend,
-  },
+  SucceededInitializeStorage: StorageActivatedFields,
+  CompletedInitializeStoragePermissionRequired: PermissionRequiredFields,
+  CompletedInitializeStorageNoFolderSelected: NoFolderSelectedFields,
   FailedInitializeStorage: {
     message: Schema.String,
   },
@@ -45,12 +51,16 @@ export const Message = defineMessageUnion({
   CompletedSaveFileInfoPreference: {},
 
   // Directory Listing & Navigation
-  SucceededListEntries: {
+  SucceededRefreshEntries: {
     subPath: Schema.Array(Schema.String),
     entries: Schema.Array(FileEntry),
   },
-  FailedListEntries: {
+  FailedRefreshEntries: {
     message: Schema.String,
+  },
+  SucceededNavigateToSubfolder: {
+    subPath: Schema.Array(Schema.String),
+    entries: Schema.Array(FileEntry),
   },
   ClickedRetryList: {},
   ClickedBreadcrumbRoot: {},
@@ -83,16 +93,27 @@ export const Message = defineMessageUnion({
   ClickedUseOpfs: {},
   ClickedUseFsa: {},
   ClickedDisconnectFolder: {},
-  CancelledFolderSelection: {},
+  SucceededPickLocalDirectory: StorageActivatedFields,
+  CancelledPickLocalDirectory: {},
   FailedPickLocalDirectory: {
     message: Schema.String,
   },
+  SucceededGrantDirectoryPermission: StorageActivatedFields,
+  CompletedGrantDirectoryPermissionNoFolderSelected: NoFolderSelectedFields,
   FailedGrantDirectoryPermission: {
     message: Schema.String,
   },
+  SucceededActivateOpfsBackend: StorageActivatedFields,
   FailedActivateOpfsBackend: {
     message: Schema.String,
   },
+  SucceededActivateFsaBackend: StorageActivatedFields,
+  CompletedActivateFsaBackendPermissionRequired: PermissionRequiredFields,
+  CompletedActivateFsaBackendNoFolderSelected: NoFolderSelectedFields,
+  FailedActivateFsaBackend: {
+    message: Schema.String,
+  },
+  SucceededDisconnectStorage: NoFolderSelectedFields,
   FailedDisconnectStorage: {
     message: Schema.String,
   },
@@ -104,7 +125,7 @@ export const Message = defineMessageUnion({
   ClickedNewFile: {},
   ClickedNewFolder: {},
   ClickedImportFiles: {},
-  SelectedImportFiles: {
+  CompletedSelectImportFiles: {
     files: Schema.Array(PendingImportFile),
   },
   SelectedImportConflictAction: {
@@ -114,7 +135,7 @@ export const Message = defineMessageUnion({
     applyToAll: Schema.Boolean,
   },
   CancelledImportConflict: {},
-  CompletedImportFiles: {
+  CompletedWritePendingImportFiles: {
     entries: Schema.Array(FileEntry),
     maybeAlertBanner: Schema.Option(AlertBanner),
   },
@@ -156,11 +177,16 @@ export const Message = defineMessageUnion({
   ClickedCancelDeleteModal: {},
   ClickedCloseModal: {},
   PressedEscape: {},
-  SucceededModalMutation: {
+  SucceededSaveModalChanges: {
     entries: Schema.Array(FileEntry),
   },
-  CancelledModalMutation: {},
-  FailedModalMutation: {
+  FailedSaveModalChanges: {
+    message: Schema.String,
+  },
+  SucceededDeleteModalEntry: {
+    entries: Schema.Array(FileEntry),
+  },
+  FailedDeleteModalEntry: {
     message: Schema.String,
   },
 
@@ -171,9 +197,9 @@ export const Message = defineMessageUnion({
     isOpen: Schema.Boolean,
   },
   ClickedCopyDts: {},
-  SucceededCopyDts: {},
+  SucceededCopyApiDtsToClipboard: {},
   CompletedWaitBeforeResetCopyDts: {},
-  FailedCopyDts: {
+  FailedCopyApiDtsToClipboard: {
     message: Schema.String,
   },
 

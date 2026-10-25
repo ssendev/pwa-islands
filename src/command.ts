@@ -214,7 +214,7 @@ const activateStorageBackend = async (
   type: "fsa" | "opfs",
   route: AppRoute,
   otherBackend: SavedBackend,
-): Promise<typeof Message.SucceededInitializeStorage.Type> => {
+): Promise<Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">> => {
   await saveDirectoryHandle(handle, type)
   const storage = new FileSystemHandleStorage(handle, type)
   setActiveStorage(storage)
@@ -225,7 +225,7 @@ const activateStorageBackend = async (
 
   const resolved = await resolveRouteDeepLink(storage, route)
 
-  return Message.SucceededInitializeStorage({
+  return {
     storageType: type,
     rootName: storage.name,
     subPath: resolved.subPath,
@@ -233,7 +233,7 @@ const activateStorageBackend = async (
     otherBackend,
     maybeModalState: resolved.maybeModalState,
     maybeAlertBanner: resolved.maybeAlertBanner,
-  })
+  }
 }
 
 // COMMAND
@@ -272,8 +272,8 @@ export const InitializeStorage = Command.define("InitializeStorage", {
   },
   messages: [
     Message.SucceededInitializeStorage,
-    Message.DetectedPermissionRequired,
-    Message.DetectedNoFolderSelected,
+    Message.CompletedInitializeStoragePermissionRequired,
+    Message.CompletedInitializeStorageNoFolderSelected,
     Message.FailedInitializeStorage,
   ],
   execute: (args) =>
@@ -303,7 +303,9 @@ export const InitializeStorage = Command.define("InitializeStorage", {
         if (savedType === "opfs" && args.hasOPFS) {
           const fsaSavedBackend = await determineFsaSavedBackend()
           const opfsRoot = await getOPFSRootDirectory()
-          return await activateStorageBackend(opfsRoot, "opfs", args.route, fsaSavedBackend)
+          return Message.SucceededInitializeStorage(
+            await activateStorageBackend(opfsRoot, "opfs", args.route, fsaSavedBackend),
+          )
         }
 
         if (args.hasDirectoryPicker) {
@@ -312,16 +314,18 @@ export const InitializeStorage = Command.define("InitializeStorage", {
             setSavedFsaHandle(savedHandle)
             const perm = await queryDirectoryPermission(savedHandle, "readwrite")
             if (perm === "granted") {
-              return await activateStorageBackend(savedHandle, "fsa", args.route, opfsSavedBackend)
+              return Message.SucceededInitializeStorage(
+                await activateStorageBackend(savedHandle, "fsa", args.route, opfsSavedBackend),
+              )
             }
             setPendingHandle(savedHandle)
-            return Message.DetectedPermissionRequired({
+            return Message.CompletedInitializeStoragePermissionRequired({
               storageType: "fsa",
               folderName: savedHandle.name || "Gespeicherter Ordner",
               otherBackend: opfsSavedBackend,
             })
           }
-          return Message.DetectedNoFolderSelected({
+          return Message.CompletedInitializeStorageNoFolderSelected({
             storageType: "fsa",
             otherBackend: opfsSavedBackend,
           })
@@ -329,15 +333,12 @@ export const InitializeStorage = Command.define("InitializeStorage", {
 
         if (args.hasOPFS) {
           const opfsRoot = await getOPFSRootDirectory()
-          return await activateStorageBackend(
-            opfsRoot,
-            "opfs",
-            args.route,
-            SavedBackend.Unsupported(),
+          return Message.SucceededInitializeStorage(
+            await activateStorageBackend(opfsRoot, "opfs", args.route, SavedBackend.Unsupported()),
           )
         }
 
-        return Message.DetectedNoFolderSelected({
+        return Message.CompletedInitializeStorageNoFolderSelected({
           storageType: "fsa",
           otherBackend: SavedBackend.Unsupported(),
         })
@@ -360,8 +361,8 @@ export const PickLocalDirectory = Command.define("PickLocalDirectory", {
     route: AppRoute,
   },
   messages: [
-    Message.SucceededInitializeStorage,
-    Message.CancelledFolderSelection,
+    Message.SucceededPickLocalDirectory,
+    Message.CancelledPickLocalDirectory,
     Message.FailedPickLocalDirectory,
   ],
   execute: (args) =>
@@ -369,10 +370,12 @@ export const PickLocalDirectory = Command.define("PickLocalDirectory", {
       try: async () => {
         try {
           const handle = await showDirectoryPicker({ mode: "readwrite" })
-          return await activateStorageBackend(handle, "fsa", args.route, args.otherBackend)
+          return Message.SucceededPickLocalDirectory(
+            await activateStorageBackend(handle, "fsa", args.route, args.otherBackend),
+          )
         } catch (error) {
           if (error instanceof DOMException && error.name === "AbortError") {
-            return Message.CancelledFolderSelection()
+            return Message.CancelledPickLocalDirectory()
           }
           throw error
         }
@@ -395,8 +398,8 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
     route: AppRoute,
   },
   messages: [
-    Message.SucceededInitializeStorage,
-    Message.DetectedNoFolderSelected,
+    Message.SucceededGrantDirectoryPermission,
+    Message.CompletedGrantDirectoryPermissionNoFolderSelected,
     Message.FailedGrantDirectoryPermission,
   ],
   execute: (args) =>
@@ -405,14 +408,16 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
         const pending =
           getPendingHandle() ?? getSavedFsaHandle() ?? (await getSavedDirectoryHandle())
         if (!pending) {
-          return Message.DetectedNoFolderSelected({
+          return Message.CompletedGrantDirectoryPermissionNoFolderSelected({
             storageType: "fsa",
             otherBackend: args.otherBackend,
           })
         }
         const state = await requestDirectoryPermission(pending, "readwrite")
         if (state === "granted") {
-          return await activateStorageBackend(pending, "fsa", args.route, args.otherBackend)
+          return Message.SucceededGrantDirectoryPermission(
+            await activateStorageBackend(pending, "fsa", args.route, args.otherBackend),
+          )
         }
         return Message.FailedGrantDirectoryPermission({
           message:
@@ -436,12 +441,14 @@ export const ActivateOpfsBackend = Command.define("ActivateOpfsBackend", {
     otherBackend: SavedBackend,
     route: AppRoute,
   },
-  messages: [Message.SucceededInitializeStorage, Message.FailedActivateOpfsBackend],
+  messages: [Message.SucceededActivateOpfsBackend, Message.FailedActivateOpfsBackend],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
         const opfsRoot = await getOPFSRootDirectory()
-        return await activateStorageBackend(opfsRoot, "opfs", args.route, args.otherBackend)
+        return Message.SucceededActivateOpfsBackend(
+          await activateStorageBackend(opfsRoot, "opfs", args.route, args.otherBackend),
+        )
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(
@@ -461,27 +468,29 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
     route: AppRoute,
   },
   messages: [
-    Message.SucceededInitializeStorage,
-    Message.DetectedPermissionRequired,
-    Message.DetectedNoFolderSelected,
-    Message.FailedPickLocalDirectory,
+    Message.SucceededActivateFsaBackend,
+    Message.CompletedActivateFsaBackendPermissionRequired,
+    Message.CompletedActivateFsaBackendNoFolderSelected,
+    Message.FailedActivateFsaBackend,
   ],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
         const handle = getSavedFsaHandle() ?? (await getSavedDirectoryHandle())
         if (!handle) {
-          return Message.DetectedNoFolderSelected({
+          return Message.CompletedActivateFsaBackendNoFolderSelected({
             storageType: "fsa",
             otherBackend: args.otherBackend,
           })
         }
         const perm = await queryDirectoryPermission(handle, "readwrite")
         if (perm === "granted") {
-          return await activateStorageBackend(handle, "fsa", args.route, args.otherBackend)
+          return Message.SucceededActivateFsaBackend(
+            await activateStorageBackend(handle, "fsa", args.route, args.otherBackend),
+          )
         }
         setPendingHandle(handle)
-        return Message.DetectedPermissionRequired({
+        return Message.CompletedActivateFsaBackendPermissionRequired({
           storageType: "fsa",
           folderName: handle.name || "Gespeicherter Ordner",
           otherBackend: args.otherBackend,
@@ -491,7 +500,7 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed(
-          Message.FailedPickLocalDirectory({
+          Message.FailedActivateFsaBackend({
             message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
           }),
         ),
@@ -505,11 +514,7 @@ export const DisconnectStorage = Command.define("DisconnectStorage", {
     hasOPFS: Schema.Boolean,
     route: AppRoute,
   },
-  messages: [
-    Message.DetectedNoFolderSelected,
-    Message.SucceededInitializeStorage,
-    Message.FailedDisconnectStorage,
-  ],
+  messages: [Message.SucceededDisconnectStorage, Message.FailedDisconnectStorage],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
@@ -527,7 +532,7 @@ export const DisconnectStorage = Command.define("DisconnectStorage", {
           ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
           : SavedBackend.Unsupported()
 
-        return Message.DetectedNoFolderSelected({
+        return Message.SucceededDisconnectStorage({
           storageType: "fsa",
           otherBackend: opfsSavedBackend,
         })
@@ -548,7 +553,7 @@ export const RefreshEntries = Command.define("RefreshEntries", {
   args: {
     subPath: Schema.Array(Schema.String),
   },
-  messages: [Message.SucceededListEntries, Message.FailedListEntries],
+  messages: [Message.SucceededRefreshEntries, Message.FailedRefreshEntries],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
@@ -557,7 +562,7 @@ export const RefreshEntries = Command.define("RefreshEntries", {
           throw new Error("Kein aktiver Speicher verfügbar.")
         }
         const entries = await storage.listEntries(args.subPath)
-        return Message.SucceededListEntries({
+        return Message.SucceededRefreshEntries({
           subPath: args.subPath,
           entries,
         })
@@ -566,7 +571,7 @@ export const RefreshEntries = Command.define("RefreshEntries", {
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed(
-          Message.FailedListEntries({
+          Message.FailedRefreshEntries({
             message: error.message,
           }),
         ),
@@ -578,7 +583,7 @@ export const NavigateToSubfolder = Command.define("NavigateToSubfolder", {
   args: {
     targetSubPath: Schema.Array(Schema.String),
   },
-  messages: [Message.SucceededListEntries, Message.FailedNavigateToSubfolder],
+  messages: [Message.SucceededNavigateToSubfolder, Message.FailedNavigateToSubfolder],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
@@ -587,7 +592,7 @@ export const NavigateToSubfolder = Command.define("NavigateToSubfolder", {
           throw new Error("Kein aktiver Speicher verfügbar.")
         }
         const entries = await storage.listEntries(args.targetSubPath)
-        return Message.SucceededListEntries({
+        return Message.SucceededNavigateToSubfolder({
           subPath: args.targetSubPath,
           entries,
         })
@@ -713,11 +718,7 @@ export const SaveModalChanges = Command.define("SaveModalChanges", {
     modalState: ModalState,
     subPath: Schema.Array(Schema.String),
   },
-  messages: [
-    Message.SucceededModalMutation,
-    Message.CancelledModalMutation,
-    Message.FailedModalMutation,
-  ],
+  messages: [Message.SucceededSaveModalChanges, Message.FailedSaveModalChanges],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
@@ -773,13 +774,13 @@ export const SaveModalChanges = Command.define("SaveModalChanges", {
 
         revokeActivePreviewUrl()
         const updatedEntries = await storage.listEntries(args.subPath)
-        return Message.SucceededModalMutation({ entries: updatedEntries })
+        return Message.SucceededSaveModalChanges({ entries: updatedEntries })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed(
-          Message.FailedModalMutation({
+          Message.FailedSaveModalChanges({
             message: `Speichern fehlgeschlagen: ${error.message}`,
           }),
         ),
@@ -793,11 +794,7 @@ export const DeleteModalEntry = Command.define("DeleteModalEntry", {
     isFolder: Schema.Boolean,
     subPath: Schema.Array(Schema.String),
   },
-  messages: [
-    Message.SucceededModalMutation,
-    Message.CancelledModalMutation,
-    Message.FailedModalMutation,
-  ],
+  messages: [Message.SucceededDeleteModalEntry, Message.FailedDeleteModalEntry],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
@@ -813,13 +810,13 @@ export const DeleteModalEntry = Command.define("DeleteModalEntry", {
         )
         revokeActivePreviewUrl()
         const updatedEntries = await storage.listEntries(args.subPath)
-        return Message.SucceededModalMutation({ entries: updatedEntries })
+        return Message.SucceededDeleteModalEntry({ entries: updatedEntries })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed(
-          Message.FailedModalMutation({
+          Message.FailedDeleteModalEntry({
             message: `Löschen fehlgeschlagen: ${error.message}`,
           }),
         ),
@@ -828,7 +825,7 @@ export const DeleteModalEntry = Command.define("DeleteModalEntry", {
 })
 
 export const SelectImportFiles = Command.define("SelectImportFiles", {
-  messages: [Message.SelectedImportFiles],
+  messages: [Message.CompletedSelectImportFiles],
   execute: File.selectMultiple([]).pipe(
     Effect.map((selectedFiles) => {
       setPendingImportFiles(selectedFiles)
@@ -837,7 +834,7 @@ export const SelectImportFiles = Command.define("SelectImportFiles", {
         size: file.size,
         lastModified: file.lastModified,
       }))
-      return Message.SelectedImportFiles({ files: pendingFiles })
+      return Message.CompletedSelectImportFiles({ files: pendingFiles })
     }),
   ),
 })
@@ -847,7 +844,7 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
     items: Schema.Array(ResolvedImportItem),
     subPath: Schema.Array(Schema.String),
   },
-  messages: [Message.CompletedImportFiles],
+  messages: [Message.CompletedWritePendingImportFiles],
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
@@ -894,7 +891,7 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
 
         const entries = await storage.listEntries(args.subPath)
         if (Array.isReadonlyArrayNonEmpty(importResults.errors)) {
-          return Message.CompletedImportFiles({
+          return Message.CompletedWritePendingImportFiles({
             entries,
             maybeAlertBanner: Option.some({
               message: `Fehler beim Importieren (${importResults.importedCount} erfolgreich): ${Array.join(importResults.errors, "; ")}`,
@@ -903,7 +900,7 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
           })
         }
 
-        return Message.CompletedImportFiles({
+        return Message.CompletedWritePendingImportFiles({
           entries,
           maybeAlertBanner: Option.none(),
         })
@@ -912,7 +909,7 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
     }).pipe(
       Effect.catch((error) =>
         Effect.succeed(
-          Message.CompletedImportFiles({
+          Message.CompletedWritePendingImportFiles({
             entries: [],
             maybeAlertBanner: Option.some({
               message: `Fehler beim Datei-Import: ${error.message}`,
@@ -925,7 +922,7 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
 })
 
 export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
-  messages: [Message.SucceededCopyDts, Message.FailedCopyDts],
+  messages: [Message.SucceededCopyApiDtsToClipboard, Message.FailedCopyApiDtsToClipboard],
   execute: Effect.tryPromise({
     try: async () => {
       const res = await fetch("/api.d.ts", { cache: "no-cache" })
@@ -934,13 +931,13 @@ export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
       }
       const dtsText = await res.text()
       await navigator.clipboard.writeText(dtsText)
-      return Message.SucceededCopyDts()
+      return Message.SucceededCopyApiDtsToClipboard()
     },
     catch: (error) => (error instanceof Error ? error : new Error(String(error))),
   }).pipe(
     Effect.catch((error) =>
       Effect.succeed(
-        Message.FailedCopyDts({
+        Message.FailedCopyApiDtsToClipboard({
           message: `Kopieren fehlgeschlagen: ${error.message}`,
         }),
       ),

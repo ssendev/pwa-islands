@@ -174,7 +174,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(NavigateToSubfolder({ targetSubPath: ["projekte"] })),
         Command.resolve(
           NavigateToSubfolder,
-          Message.SucceededListEntries({
+          Message.SucceededNavigateToSubfolder({
             subPath: ["projekte"],
             entries: subEntries,
           }),
@@ -225,7 +225,7 @@ describe("PWA Islands Story Tests", () => {
           )
         }),
         Command.expectExact(CopyApiDtsToClipboard()),
-        Command.resolve(CopyApiDtsToClipboard, Message.SucceededCopyDts()),
+        Command.resolve(CopyApiDtsToClipboard, Message.SucceededCopyApiDtsToClipboard()),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
@@ -424,7 +424,7 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.resolve(
           SaveModalChanges,
-          Message.SucceededModalMutation({ entries: sampleEntries }),
+          Message.SucceededSaveModalChanges({ entries: sampleEntries }),
         ),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
@@ -465,7 +465,7 @@ describe("PWA Islands Story Tests", () => {
             subPath: [],
           }),
         ),
-        Command.resolve(DeleteModalEntry, Message.SucceededModalMutation({ entries: [] })),
+        Command.resolve(DeleteModalEntry, Message.SucceededDeleteModalEntry({ entries: [] })),
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
           expect(m.modalState).toEqual(ModalState.Closed())
@@ -478,7 +478,7 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(
-          Message.SelectedImportFiles({
+          Message.CompletedSelectImportFiles({
             files: [
               { name: "index.html", size: 100, lastModified: 1000 },
               { name: "neu.html", size: 200, lastModified: 1000 },
@@ -507,7 +507,7 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.resolve(
           WritePendingImportFiles,
-          Message.CompletedImportFiles({
+          Message.CompletedWritePendingImportFiles({
             entries: sampleEntries,
             maybeAlertBanner: Option.none(),
           }),
@@ -555,7 +555,7 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(modelWithFiles),
         message(
-          Message.SelectedImportFiles({
+          Message.CompletedSelectImportFiles({
             files: [
               { name: "file1.html", size: 100, lastModified: 1000 },
               { name: "file2.html", size: 100, lastModified: 1000 },
@@ -601,7 +601,7 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.resolve(
           WritePendingImportFiles,
-          Message.CompletedImportFiles({
+          Message.CompletedWritePendingImportFiles({
             entries: sampleEntries,
             maybeAlertBanner: Option.none(),
           }),
@@ -702,7 +702,7 @@ describe("PWA Islands Story Tests", () => {
           ),
           Command.resolve(
             ActivateOpfsBackend,
-            Message.SucceededInitializeStorage({
+            Message.SucceededActivateOpfsBackend({
               storageType: "opfs",
               rootName: OPFS_APP_FOLDER,
               subPath: [],
@@ -752,7 +752,7 @@ describe("PWA Islands Story Tests", () => {
           ),
           Command.resolve(
             ActivateFsaBackend,
-            Message.SucceededInitializeStorage({
+            Message.SucceededActivateFsaBackend({
               storageType: "fsa",
               rootName: "Meine Islands",
               subPath: [],
@@ -831,7 +831,7 @@ describe("PWA Islands Story Tests", () => {
           ),
           Command.resolve(
             PickLocalDirectory,
-            Message.SucceededInitializeStorage({
+            Message.SucceededPickLocalDirectory({
               storageType: "fsa",
               rootName: "Neuer Ordner",
               subPath: [],
@@ -870,7 +870,7 @@ describe("PWA Islands Story Tests", () => {
           ),
           Command.resolve(
             DisconnectStorage,
-            Message.DetectedNoFolderSelected({
+            Message.SucceededDisconnectStorage({
               storageType: "fsa",
               otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
             }),

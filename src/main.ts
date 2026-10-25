@@ -203,63 +203,110 @@ const whenReady = (
 ): Update.Return<Model, Message> =>
   model.storageState._tag === "Ready" ? fn(model.storageState) : { model }
 
+const handleEntriesListed = (
+  model: Model,
+  { subPath, entries }: Omit<typeof Message.SucceededRefreshEntries.Type, "_tag">,
+): Update.Return<Model, Message> =>
+  model.storageState._tag === "Ready"
+    ? {
+        model: modifyFields(model, {
+          storageState: () =>
+            modifyFields(model.storageState as typeof StorageState.Type & { _tag: "Ready" }, {
+              subPath: () => subPath,
+              entriesState: () => EntriesState.Loaded({ entries }),
+            }),
+          maybeAlertBanner: () => Option.none(),
+        }),
+      }
+    : { model }
+
+const handleStorageActivated = (
+  model: Model,
+  {
+    storageType,
+    rootName,
+    subPath,
+    entries,
+    otherBackend,
+    maybeModalState,
+    maybeAlertBanner,
+  }: Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">,
+): Update.Return<Model, Message> => {
+  const nextModalState = Option.getOrElse(maybeModalState, () =>
+    model.modalState._tag === "Help" ? model.modalState : ModalState.Closed(),
+  )
+
+  const shouldFocusModal =
+    nextModalState._tag === "EditFile" ||
+    nextModalState._tag === "EditFolder" ||
+    nextModalState._tag === "CreateFile" ||
+    nextModalState._tag === "CreateFolder"
+
+  return {
+    model: modifyFields(model, {
+      storageState: () =>
+        StorageState.Ready({
+          storageType,
+          rootName,
+          subPath,
+          entriesState: EntriesState.Loaded({ entries }),
+          otherBackend,
+        }),
+      isSettingsOpen: () => false,
+      modalState: () => nextModalState,
+      maybeAlertBanner: () => maybeAlertBanner,
+    }),
+    ...(shouldFocusModal && { commands: [FocusModalNameInput()] }),
+  }
+}
+
+const handlePermissionRequired = (
+  model: Model,
+  {
+    storageType,
+    folderName,
+    otherBackend,
+  }: Omit<typeof Message.CompletedInitializeStoragePermissionRequired.Type, "_tag">,
+): Update.Return<Model, Message> => ({
+  model: modifyFields(model, {
+    storageState: () => StorageState.PermissionRequired({ storageType, folderName, otherBackend }),
+    isSettingsOpen: () => false,
+  }),
+})
+
+const handleNoFolderSelected = (
+  model: Model,
+  {
+    storageType,
+    otherBackend,
+  }: Omit<typeof Message.CompletedInitializeStorageNoFolderSelected.Type, "_tag">,
+): Update.Return<Model, Message> => ({
+  model: modifyFields(model, {
+    storageState: () => StorageState.NoFolderSelected({ storageType, otherBackend }),
+    isSettingsOpen: () => false,
+    modalState: () => (model.modalState._tag === "Help" ? model.modalState : ModalState.Closed()),
+    maybeAlertBanner: () => Option.none(),
+  }),
+})
+
 export const update = (model: Model, message: Message) =>
   Message.match<Update.Return<Model, Message>>(message, {
     // Initialization & Storage Backend Lifecycle
-    SucceededInitializeStorage: ({
-      storageType,
-      rootName,
-      subPath,
-      entries,
-      otherBackend,
-      maybeModalState,
-      maybeAlertBanner,
-    }) => {
-      const nextModalState = Option.getOrElse(maybeModalState, () =>
-        model.modalState._tag === "Help" ? model.modalState : ModalState.Closed(),
-      )
-
-      const shouldFocusModal =
-        nextModalState._tag === "EditFile" ||
-        nextModalState._tag === "EditFolder" ||
-        nextModalState._tag === "CreateFile" ||
-        nextModalState._tag === "CreateFolder"
-
-      return {
-        model: modifyFields(model, {
-          storageState: () =>
-            StorageState.Ready({
-              storageType,
-              rootName,
-              subPath,
-              entriesState: EntriesState.Loaded({ entries }),
-              otherBackend,
-            }),
-          isSettingsOpen: () => false,
-          modalState: () => nextModalState,
-          maybeAlertBanner: () => maybeAlertBanner,
-        }),
-        ...(shouldFocusModal && { commands: [FocusModalNameInput()] }),
-      }
-    },
-
-    DetectedPermissionRequired: ({ storageType, folderName, otherBackend }) => ({
-      model: modifyFields(model, {
-        storageState: () =>
-          StorageState.PermissionRequired({ storageType, folderName, otherBackend }),
-        isSettingsOpen: () => false,
-      }),
-    }),
-
-    DetectedNoFolderSelected: ({ storageType, otherBackend }) => ({
-      model: modifyFields(model, {
-        storageState: () => StorageState.NoFolderSelected({ storageType, otherBackend }),
-        isSettingsOpen: () => false,
-        modalState: () =>
-          model.modalState._tag === "Help" ? model.modalState : ModalState.Closed(),
-        maybeAlertBanner: () => Option.none(),
-      }),
-    }),
+    SucceededInitializeStorage: (payload) => handleStorageActivated(model, payload),
+    CompletedInitializeStoragePermissionRequired: (payload) =>
+      handlePermissionRequired(model, payload),
+    CompletedInitializeStorageNoFolderSelected: (payload) => handleNoFolderSelected(model, payload),
+    SucceededPickLocalDirectory: (payload) => handleStorageActivated(model, payload),
+    SucceededGrantDirectoryPermission: (payload) => handleStorageActivated(model, payload),
+    CompletedGrantDirectoryPermissionNoFolderSelected: (payload) =>
+      handleNoFolderSelected(model, payload),
+    SucceededActivateOpfsBackend: (payload) => handleStorageActivated(model, payload),
+    SucceededActivateFsaBackend: (payload) => handleStorageActivated(model, payload),
+    CompletedActivateFsaBackendPermissionRequired: (payload) =>
+      handlePermissionRequired(model, payload),
+    CompletedActivateFsaBackendNoFolderSelected: (payload) =>
+      handleNoFolderSelected(model, payload),
+    SucceededDisconnectStorage: (payload) => handleNoFolderSelected(model, payload),
 
     FailedInitializeStorage: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
@@ -288,19 +335,10 @@ export const update = (model: Model, message: Message) =>
     CompletedSaveFileInfoPreference: () => ({ model }),
 
     // Directory Listing & Navigation
-    SucceededListEntries: ({ subPath, entries }) =>
-      whenReady(model, (readyState) => ({
-        model: modifyFields(model, {
-          storageState: () =>
-            modifyFields(readyState, {
-              subPath: () => subPath,
-              entriesState: () => EntriesState.Loaded({ entries }),
-            }),
-          maybeAlertBanner: () => Option.none(),
-        }),
-      })),
+    SucceededRefreshEntries: (payload) => handleEntriesListed(model, payload),
+    SucceededNavigateToSubfolder: (payload) => handleEntriesListed(model, payload),
 
-    FailedListEntries: ({ message: errorMessage }) =>
+    FailedRefreshEntries: ({ message: errorMessage }) =>
       whenReady(model, (readyState) => ({
         model: modifyFields(model, {
           storageState: () =>
@@ -668,7 +706,7 @@ export const update = (model: Model, message: Message) =>
       ],
     }),
 
-    CancelledFolderSelection: () => ({ model }),
+    CancelledPickLocalDirectory: () => ({ model }),
 
     FailedPickLocalDirectory: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
@@ -686,6 +724,16 @@ export const update = (model: Model, message: Message) =>
           Option.some({
             message: errorMessage,
             variant: "warning",
+          }),
+      }),
+    }),
+
+    FailedActivateFsaBackend: ({ message: errorMessage }) => ({
+      model: modifyFields(model, {
+        maybeAlertBanner: () =>
+          Option.some({
+            message: errorMessage,
+            variant: "danger",
           }),
       }),
     }),
@@ -761,7 +809,7 @@ export const update = (model: Model, message: Message) =>
       commands: [SelectImportFiles()],
     }),
 
-    SelectedImportFiles: ({ files }) => {
+    CompletedSelectImportFiles: ({ files }) => {
       if (Array.isReadonlyArrayEmpty(files)) {
         return { model }
       }
@@ -947,7 +995,7 @@ export const update = (model: Model, message: Message) =>
       }),
     }),
 
-    CompletedImportFiles: ({ entries, maybeAlertBanner }) => {
+    CompletedWritePendingImportFiles: ({ entries, maybeAlertBanner }) => {
       if (model.storageState._tag !== "Ready") {
         return {
           model: modifyFields(model, {
@@ -1557,7 +1605,7 @@ export const update = (model: Model, message: Message) =>
       return { model }
     },
 
-    SucceededModalMutation: ({ entries }) => {
+    SucceededSaveModalChanges: ({ entries }) => {
       if (model.storageState._tag !== "Ready") {
         return {
           model: modifyFields(model, {
@@ -1578,9 +1626,38 @@ export const update = (model: Model, message: Message) =>
       }
     },
 
-    CancelledModalMutation: () => ({ model }),
+    SucceededDeleteModalEntry: ({ entries }) => {
+      if (model.storageState._tag !== "Ready") {
+        return {
+          model: modifyFields(model, {
+            modalState: () => ModalState.Closed(),
+          }),
+        }
+      }
+      const readyState = model.storageState
+      return {
+        model: modifyFields(model, {
+          storageState: () =>
+            modifyFields(readyState, {
+              entriesState: () => EntriesState.Loaded({ entries }),
+            }),
+          modalState: () => ModalState.Closed(),
+        }),
+        commands: [ReplaceUrl({ url: buildFolderUrl(readyState.subPath) })],
+      }
+    },
 
-    FailedModalMutation: ({ message: errorMessage }) => ({
+    FailedSaveModalChanges: ({ message: errorMessage }) => ({
+      model: modifyFields(model, {
+        maybeAlertBanner: () =>
+          Option.some({
+            message: errorMessage,
+            variant: "danger",
+          }),
+      }),
+    }),
+
+    FailedDeleteModalEntry: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
         maybeAlertBanner: () =>
           Option.some({
@@ -1666,7 +1743,7 @@ export const update = (model: Model, message: Message) =>
       }
     },
 
-    SucceededCopyDts: () => {
+    SucceededCopyApiDtsToClipboard: () => {
       if (model.modalState._tag !== "Help") {
         return { model }
       }
@@ -1700,7 +1777,7 @@ export const update = (model: Model, message: Message) =>
       }
     },
 
-    FailedCopyDts: ({ message: errorMessage }) => {
+    FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => {
       if (model.modalState._tag !== "Help") {
         return { model }
       }
