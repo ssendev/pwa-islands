@@ -853,6 +853,7 @@ code {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
   padding: 16px 20px;
   border-top: 1px solid var(--border);
   background: var(--social-bg);
@@ -866,20 +867,13 @@ code {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
 /* Wie der Schliessen-Knopf im Kopf: gleiche Hoehe in beiden Leisten. */
 .modal-footer .btn {
   height: 38px;
   box-sizing: border-box;
-}
-
-/* Nur das Symbol zu sehen: quadratisch, sonst waere der Knopf ein Strich. */
-@media (max-width: 520px) {
-  .modal-footer .btn {
-    width: 38px;
-    padding: 0;
-  }
 }
 
 /*
