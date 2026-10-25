@@ -1,7 +1,6 @@
 import { Array, Option, Schema, pipe } from "effect"
 import { defineRouteUnion } from "foldkit/route"
 import type { Url } from "foldkit/url"
-import type { FileEntry } from "./files"
 
 // SCHEMAS & TYPES
 
@@ -30,42 +29,7 @@ export const AppRoute = defineRouteUnion({
 })
 export type AppRoute = typeof AppRoute.Type
 
-// PURE ROUTE & FORMATTING FUNCTIONS
-
-export const formatSize = (bytes: number): string => {
-  if (bytes < 1024) {
-    return `${bytes} B`
-  }
-  if (bytes < 1024 * 1024) {
-    return `${(bytes / 1024).toFixed(1)} KB`
-  }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-export const formatDate = (timestamp: number): string => {
-  return new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(timestamp)
-}
-
-export const formatSummaryText = (entries: ReadonlyArray<FileEntry>): string => {
-  const fileCount = pipe(
-    entries,
-    Array.filter((entry) => entry.kind === "file"),
-    Array.length,
-  )
-  const dirCount = pipe(
-    entries,
-    Array.filter((entry) => entry.kind === "directory"),
-    Array.length,
-  )
-  const parts: ReadonlyArray<string> = [
-    ...(fileCount > 0 ? [`${fileCount} ${fileCount === 1 ? "Datei" : "Dateien"}`] : []),
-    ...(dirCount > 0 ? [`${dirCount} ${dirCount === 1 ? "Ordner" : "Ordner"}`] : []),
-  ]
-  return Array.join(parts, ", ")
-}
+// PURE ROUTE FUNCTIONS
 
 export const encodeSubPath = (segments: ReadonlyArray<string>): string =>
   pipe(segments, Array.map(encodeURIComponent), Array.join("/"))

@@ -49,12 +49,46 @@ import {
   buildHelpUrl,
   buildNewUrl,
   encodeSubPath,
-  formatDate,
-  formatSize,
-  formatSummaryText,
   parseUrlToRoute,
 } from "./route"
 import { OPFS_APP_FOLDER } from "./storage"
+
+// FORMATTING
+
+const formatSize = (bytes: number): string => {
+  if (bytes < 1024) {
+    return `${bytes} B`
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const formatDate = (timestamp: number): string => {
+  return new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(timestamp)
+}
+
+const formatSummaryText = (entries: ReadonlyArray<FileEntry>): string => {
+  const fileCount = pipe(
+    entries,
+    Array.filter((entry) => entry.kind === "file"),
+    Array.length,
+  )
+  const dirCount = pipe(
+    entries,
+    Array.filter((entry) => entry.kind === "directory"),
+    Array.length,
+  )
+  const parts: ReadonlyArray<string> = [
+    ...(fileCount > 0 ? [`${fileCount} ${fileCount === 1 ? "Datei" : "Dateien"}`] : []),
+    ...(dirCount > 0 ? [`${dirCount} ${dirCount === 1 ? "Ordner" : "Ordner"}`] : []),
+  ]
+  return Array.join(parts, ", ")
+}
 
 // MODEL
 
