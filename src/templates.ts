@@ -166,7 +166,10 @@ export function replaceFileExtension(currentName: string, templateFileName: stri
   if (!trimmed) {
     return templateFileName
   }
+  if (!templateExt) {
+    return trimmed // Keep current extension if the template has none!
+  }
   const lastDot = trimmed.lastIndexOf(".")
   const baseName = lastDot > 0 ? trimmed.slice(0, lastDot) : trimmed
-  return templateExt ? `${baseName}.${templateExt}` : baseName
+  return `${baseName}.${templateExt}`
 }

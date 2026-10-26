@@ -28,6 +28,7 @@ import {
 import * as Editor from "./editor"
 import * as Modal from "./modal"
 import { BinaryEdit, EditorFileMode, ModalState, PreviewContent } from "./modal"
+import { AppRoute } from "./route"
 import type { FileEntry } from "./files"
 
 const sampleEntries: ReadonlyArray<FileEntry> = [
@@ -61,6 +62,7 @@ const readyModel: Model = {
   showFileInfo: true,
   isSettingsOpen: false,
   installPrompt: InstallPrompt.Unavailable(),
+  pendingRoute: AppRoute.Folder({ subPath: [] }),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
 }

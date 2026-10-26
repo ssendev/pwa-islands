@@ -78,6 +78,7 @@ const readyModel: Model = {
   showFileInfo: true,
   isSettingsOpen: false,
   installPrompt: InstallPrompt.Unavailable(),
+  pendingRoute: AppRoute.Folder({ subPath: [] }),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
 }

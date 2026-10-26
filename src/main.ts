@@ -46,7 +46,6 @@ import {
   buildHelpUrl,
   buildNewUrl,
   encodeSubPath,
-  parsePathAndSearchToRoute,
   parseUrlToRoute,
 } from "./route"
 import { OPFS_APP_FOLDER, getFileExtension } from "./storage"
@@ -166,6 +165,7 @@ export const Model = Schema.Struct({
   hasOPFS: Schema.Boolean,
   origin: Schema.String,
   storageState: StorageState,
+  pendingRoute: AppRoute,
   showFileInfo: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
   installPrompt: InstallPrompt,
@@ -187,13 +187,6 @@ export const computeDocumentTitle = (model: Model): string => {
 }
 
 // MESSAGE
-
-const currentRouteFromLocation = (defaultSubPath: ReadonlyArray<string>): AppRoute => {
-  if (typeof window !== "undefined") {
-    return parsePathAndSearchToRoute(window.location.pathname, window.location.search)
-  }
-  return AppRoute.Folder({ subPath: defaultSubPath })
-}
 
 const StorageActivatedFields = {
   storageType: StorageType,
@@ -891,6 +884,7 @@ export const init = (
         hasOPFS: false,
         origin: flags.origin,
         storageState: StorageState.Unsupported(),
+        pendingRoute: initialRoute,
         showFileInfo: true,
         isSettingsOpen: false,
         installPrompt: InstallPrompt.Unavailable(),
@@ -910,6 +904,7 @@ export const init = (
       hasOPFS: flags.hasOPFS,
       origin: flags.origin,
       storageState: StorageState.Initializing(),
+      pendingRoute: initialRoute,
       showFileInfo: true,
       isSettingsOpen: false,
       installPrompt: InstallPrompt.Unavailable(),
@@ -966,6 +961,9 @@ const handleStorageActivated = (
           onSome: (alert) => Option.some(alert),
         }),
     }),
+    commands: Option.exists(payload.maybeModalState, (modal) => modal._tag === "Editor")
+      ? [toModalCommand(Modal.FocusModalNameInput())]
+      : [],
   }
 }
 
@@ -1228,22 +1226,25 @@ export const update = (
 
     ChangedUrl: ({ url }) => {
       const route = parseUrlToRoute(url)
+      const modelWithRoute = modifyFields(model, {
+        pendingRoute: () => route,
+      })
       return AppRoute.match(route, {
         Folder: ({ subPath }) => {
           const nextModalState = Modal.close()
-          return Match.value(model.storageState).pipe(
+          return Match.value(modelWithRoute.storageState).pipe(
             Match.tag("Ready", (readyState) => {
               const isSamePath = isSameSubPath(readyState.subPath, subPath)
               if (isSamePath) {
                 return {
-                  model: modifyFields(model, {
+                  model: modifyFields(modelWithRoute, {
                     isSettingsOpen: () => false,
                     modalState: () => nextModalState,
                   }),
                 }
               }
               return {
-                model: modifyFields(model, {
+                model: modifyFields(modelWithRoute, {
                   isSettingsOpen: () => false,
                   modalState: () => nextModalState,
                   storageState: () =>
@@ -1255,7 +1256,7 @@ export const update = (
               }
             }),
             Match.orElse(() => ({
-              model: modifyFields(model, {
+              model: modifyFields(modelWithRoute, {
                 isSettingsOpen: () => false,
                 modalState: () => nextModalState,
               }),
@@ -1268,11 +1269,11 @@ export const update = (
           const templateLoadCommands =
             target === "file" ? [toModalCommand(Modal.LoadEditorUserTemplates)] : []
 
-          return whenReady(model, (readyState) => {
+          return whenReady(modelWithRoute, (readyState) => {
             const isSamePath = isSameSubPath(readyState.subPath, subPath)
             if (isSamePath) {
               return {
-                model: modifyFields(model, {
+                model: modifyFields(modelWithRoute, {
                   isSettingsOpen: () => false,
                   modalState: () => newModalState,
                 }),
@@ -1280,7 +1281,7 @@ export const update = (
               }
             }
             return {
-              model: modifyFields(model, {
+              model: modifyFields(modelWithRoute, {
                 isSettingsOpen: () => false,
                 modalState: () => newModalState,
                 storageState: () =>
@@ -1298,11 +1299,11 @@ export const update = (
         },
 
         Edit: ({ subPath, name }) => {
-          if (Modal.isEditingEntry(model.modalState, name)) {
-            return { model }
+          if (Modal.isEditingEntry(modelWithRoute.modalState, name)) {
+            return { model: modelWithRoute }
           }
 
-          return whenReady(model, (readyState) => {
+          return whenReady(modelWithRoute, (readyState) => {
             const isSamePath = isSameSubPath(readyState.subPath, subPath)
 
             const maybeEntry = isSamePath
@@ -1315,7 +1316,7 @@ export const update = (
 
             if (Option.exists(maybeEntry, (entry) => entry.kind === "directory")) {
               return {
-                model: modifyFields(model, {
+                model: modifyFields(modelWithRoute, {
                   isSettingsOpen: () => false,
                   modalState: () => Modal.openEditFolder(name),
                 }),
@@ -1324,7 +1325,7 @@ export const update = (
             }
 
             return {
-              model: modifyFields(model, {
+              model: modifyFields(modelWithRoute, {
                 isSettingsOpen: () => false,
               }),
               commands: [toModalCommand(Modal.InspectFileForEditor({ entryName: name, subPath }))],
@@ -1333,9 +1334,9 @@ export const update = (
         },
 
         Help: ({ maybeTopic }) => ({
-          model: modifyFields(model, {
+          model: modifyFields(modelWithRoute, {
             isSettingsOpen: () => false,
-            modalState: () => Modal.openHelp(maybeTopic, model.modalState),
+            modalState: () => Modal.openHelp(maybeTopic, modelWithRoute.modalState),
           }),
         }),
       })
@@ -1380,8 +1381,6 @@ export const update = (
         return handleUseFsa(model)
       }
       const otherBackend = getOtherBackend(model.storageState)
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      const route = currentRouteFromLocation(subPath)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1389,7 +1388,7 @@ export const update = (
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route,
+            route: model.pendingRoute,
           }),
         ],
       }
@@ -1397,8 +1396,6 @@ export const update = (
 
     ClickedChangeFolder: () => {
       const otherBackend = getOtherBackend(model.storageState)
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      const route = currentRouteFromLocation(subPath)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1406,7 +1403,7 @@ export const update = (
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route,
+            route: model.pendingRoute,
           }),
         ],
       }
@@ -1414,14 +1411,12 @@ export const update = (
 
     ClickedGrantPermission: () => {
       const otherBackend = getOtherBackend(model.storageState)
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      const route = currentRouteFromLocation(subPath)
       return {
         model,
         commands: [
           GrantDirectoryPermission({
             otherBackend,
-            route,
+            route: model.pendingRoute,
           }),
         ],
       }
