@@ -62,7 +62,6 @@ const readyModel: Model = {
   showFileInfo: true,
   isSettingsOpen: false,
   installPrompt: InstallPrompt.Unavailable(),
-  pendingRoute: AppRoute.Folder({ subPath: [] }),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
 }
@@ -219,6 +218,7 @@ describe("PWA Islands Scene Tests", () => {
       storageState: StorageState.NoFolderSelected({
         storageType: "fsa",
         otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
+        pendingRoute: AppRoute.Folder({ subPath: [] }),
       }),
     }
 

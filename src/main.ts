@@ -119,12 +119,14 @@ export const StorageState = defineTaggedUnion({
   NoFolderSelected: {
     storageType: StorageType,
     otherBackend: SavedBackend,
+    pendingRoute: AppRoute,
   },
 
   PermissionRequired: {
     storageType: StorageType,
     folderName: Schema.String,
     otherBackend: SavedBackend,
+    pendingRoute: AppRoute,
   },
 
   Ready: {
@@ -146,6 +148,18 @@ export const currentSubPathFromStorageState = (storageState: StorageState): Read
     Ready: ({ subPath }) => subPath,
   })
 
+export const pendingRouteFromStorageState = (
+  storageState: StorageState,
+  fallbackSubPath: ReadonlyArray<string> = [],
+): AppRoute =>
+  StorageState.match(storageState, {
+    Initializing: () => AppRoute.Folder({ subPath: fallbackSubPath }),
+    Unsupported: () => AppRoute.Folder({ subPath: fallbackSubPath }),
+    NoFolderSelected: ({ pendingRoute }) => pendingRoute,
+    PermissionRequired: ({ pendingRoute }) => pendingRoute,
+    Ready: ({ subPath }) => AppRoute.Folder({ subPath }),
+  })
+
 export const InstallPrompt = defineTaggedUnion({
   Unavailable: {},
   Available: {},
@@ -165,7 +179,6 @@ export const Model = Schema.Struct({
   hasOPFS: Schema.Boolean,
   origin: Schema.String,
   storageState: StorageState,
-  pendingRoute: AppRoute,
   showFileInfo: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
   installPrompt: InstallPrompt,
@@ -202,11 +215,13 @@ const PermissionRequiredFields = {
   storageType: StorageType,
   folderName: Schema.String,
   otherBackend: SavedBackend,
+  pendingRoute: AppRoute,
 }
 
 const NoFolderSelectedFields = {
   storageType: StorageType,
   otherBackend: SavedBackend,
+  pendingRoute: AppRoute,
 }
 
 export const Message = defineMessageUnion({
@@ -498,6 +513,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
               Message.CompletedInitializeStorageNoFolderSelected({
                 storageType: "fsa",
                 otherBackend: opfsSavedBackend,
+                pendingRoute: args.route,
               }),
             onSome: async (savedHandle) => {
               setSavedFsaHandle(Option.some(savedHandle))
@@ -512,6 +528,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
                 storageType: "fsa",
                 folderName: savedHandle.name || "Gespeicherter Ordner",
                 otherBackend: opfsSavedBackend,
+                pendingRoute: args.route,
               })
             },
           })
@@ -527,6 +544,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
         return Message.CompletedInitializeStorageNoFolderSelected({
           storageType: "fsa",
           otherBackend: SavedBackend.Unsupported(),
+          pendingRoute: args.route,
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -608,6 +626,7 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
             return Message.CompletedGrantDirectoryPermissionNoFolderSelected({
               storageType: "fsa",
               otherBackend: args.otherBackend,
+              pendingRoute: args.route,
             })
           },
           onSome: async (pending) => {
@@ -681,6 +700,7 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
             return Message.CompletedActivateFsaBackendNoFolderSelected({
               storageType: "fsa",
               otherBackend: args.otherBackend,
+              pendingRoute: args.route,
             })
           },
           onSome: async (handle) => {
@@ -695,6 +715,7 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
               storageType: "fsa",
               folderName: handle.name || "Gespeicherter Ordner",
               otherBackend: args.otherBackend,
+              pendingRoute: args.route,
             })
           },
         })
@@ -736,6 +757,7 @@ export const DisconnectStorage = Command.define("DisconnectStorage", {
         return Message.SucceededDisconnectStorage({
           storageType: "fsa",
           otherBackend: opfsSavedBackend,
+          pendingRoute: AppRoute.Folder({ subPath: [] }),
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -884,7 +906,6 @@ export const init = (
         hasOPFS: false,
         origin: flags.origin,
         storageState: StorageState.Unsupported(),
-        pendingRoute: initialRoute,
         showFileInfo: true,
         isSettingsOpen: false,
         installPrompt: InstallPrompt.Unavailable(),
@@ -904,7 +925,6 @@ export const init = (
       hasOPFS: flags.hasOPFS,
       origin: flags.origin,
       storageState: StorageState.Initializing(),
-      pendingRoute: initialRoute,
       showFileInfo: true,
       isSettingsOpen: false,
       installPrompt: InstallPrompt.Unavailable(),
@@ -973,6 +993,7 @@ const handlePermissionRequired = (
     readonly storageType: "fsa" | "opfs"
     readonly folderName: string
     readonly otherBackend: SavedBackend
+    readonly pendingRoute: AppRoute
   },
 ): {
   readonly model: Model
@@ -984,6 +1005,7 @@ const handlePermissionRequired = (
         storageType: payload.storageType,
         folderName: payload.folderName,
         otherBackend: payload.otherBackend,
+        pendingRoute: payload.pendingRoute,
       }),
   }),
 })
@@ -993,6 +1015,7 @@ const handleNoFolderSelected = (
   payload: {
     readonly storageType: "fsa" | "opfs"
     readonly otherBackend: SavedBackend
+    readonly pendingRoute: AppRoute
   },
 ): {
   readonly model: Model
@@ -1003,6 +1026,7 @@ const handleNoFolderSelected = (
       StorageState.NoFolderSelected({
         storageType: payload.storageType,
         otherBackend: payload.otherBackend,
+        pendingRoute: payload.pendingRoute,
       }),
   }),
 })
@@ -1077,6 +1101,7 @@ const handleUseFsa = (
             storageType: "fsa",
             folderName,
             otherBackend: opfsSavedBackend,
+            pendingRoute: AppRoute.Folder({ subPath: [] }),
           }),
         isSettingsOpen: () => false,
       }),
@@ -1227,7 +1252,14 @@ export const update = (
     ChangedUrl: ({ url }) => {
       const route = parseUrlToRoute(url)
       const modelWithRoute = modifyFields(model, {
-        pendingRoute: () => route,
+        storageState: (state) =>
+          StorageState.match(state, {
+            Initializing: () => state,
+            Unsupported: () => state,
+            Ready: () => state,
+            NoFolderSelected: (s) => modifyFields(s, { pendingRoute: () => route }),
+            PermissionRequired: (s) => modifyFields(s, { pendingRoute: () => route }),
+          }),
       })
       return AppRoute.match(route, {
         Folder: ({ subPath }) => {
@@ -1381,6 +1413,8 @@ export const update = (
         return handleUseFsa(model)
       }
       const otherBackend = getOtherBackend(model.storageState)
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      const route = pendingRouteFromStorageState(model.storageState, subPath)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1388,7 +1422,7 @@ export const update = (
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route: model.pendingRoute,
+            route,
           }),
         ],
       }
@@ -1396,6 +1430,8 @@ export const update = (
 
     ClickedChangeFolder: () => {
       const otherBackend = getOtherBackend(model.storageState)
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      const route = pendingRouteFromStorageState(model.storageState, subPath)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1403,7 +1439,7 @@ export const update = (
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route: model.pendingRoute,
+            route,
           }),
         ],
       }
@@ -1411,12 +1447,14 @@ export const update = (
 
     ClickedGrantPermission: () => {
       const otherBackend = getOtherBackend(model.storageState)
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      const route = pendingRouteFromStorageState(model.storageState, subPath)
       return {
         model,
         commands: [
           GrantDirectoryPermission({
             otherBackend,
-            route: model.pendingRoute,
+            route,
           }),
         ],
       }

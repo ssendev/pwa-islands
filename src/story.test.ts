@@ -78,7 +78,6 @@ const readyModel: Model = {
   showFileInfo: true,
   isSettingsOpen: false,
   installPrompt: InstallPrompt.Unavailable(),
-  pendingRoute: AppRoute.Folder({ subPath: [] }),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
 }
@@ -337,6 +336,7 @@ describe("PWA Islands Story Tests", () => {
         storageState: StorageState.NoFolderSelected({
           storageType: "fsa",
           otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
+          pendingRoute: AppRoute.Folder({ subPath: [] }),
         }),
       }
 
@@ -933,6 +933,7 @@ describe("PWA Islands Story Tests", () => {
                 storageType: "fsa",
                 folderName: "Gespeicherter Ordner",
                 otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+                pendingRoute: AppRoute.Folder({ subPath: [] }),
               }),
             )
           }),
@@ -1003,6 +1004,7 @@ describe("PWA Islands Story Tests", () => {
             Message.SucceededDisconnectStorage({
               storageType: "fsa",
               otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              pendingRoute: AppRoute.Folder({ subPath: [] }),
             }),
           ),
           Command.resolve(PushUrl, Message.CompletedPushUrl()),
@@ -1011,6 +1013,7 @@ describe("PWA Islands Story Tests", () => {
               StorageState.NoFolderSelected({
                 storageType: "fsa",
                 otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+                pendingRoute: AppRoute.Folder({ subPath: [] }),
               }),
             )
           }),
