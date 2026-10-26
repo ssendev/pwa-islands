@@ -559,8 +559,6 @@ export const sanitizeTemplateName = (label: string): string => {
   return cleaned === "" ? "Vorlage" : cleaned
 }
 
-const templateFileName = (t: StoredUserTemplate): string => sanitizeTemplateName(t.label)
-
 export async function getStoredUserTemplates(
   type: string,
   rootHandle: FileSystemDirectoryHandle,
@@ -599,29 +597,34 @@ export async function getStoredUserTemplates(
   }
 }
 
-export async function storeUserTemplates(
+export async function saveUserTemplate(
   type: string,
   rootHandle: FileSystemDirectoryHandle,
-  templates: ReadonlyArray<StoredUserTemplate>,
+  name: string,
+  content: string,
 ): Promise<void> {
   const dir = await getTemplatesDir(type, rootHandle, true)
-  const wanted = new Set(Array.map(templates, templateFileName))
-  const existing = await collectDirectoryHandles(dir)
-  await Promise.all(
-    Array.map(
-      Array.filter(existing, (h) => h.kind === "file" && !wanted.has(h.name)),
-      (h) => dir.removeEntry(h.name),
-    ),
-  )
-  await Promise.all(
-    Array.map(templates, async (t) => {
-      const fh = await dir.getFileHandle(templateFileName(t), { create: true })
-      const w = await fh.createWritable()
-      try {
-        await w.write(t.content)
-      } finally {
-        await w.close()
-      }
-    }),
-  )
+  const fileName = sanitizeTemplateName(name)
+  const fh = await dir.getFileHandle(fileName, { create: true })
+  const w = await fh.createWritable()
+  try {
+    await w.write(content)
+  } finally {
+    await w.close()
+  }
+}
+
+export async function deleteUserTemplate(
+  type: string,
+  rootHandle: FileSystemDirectoryHandle,
+  name: string,
+): Promise<void> {
+  try {
+    const dir = await getTemplatesDir(type, rootHandle, false)
+    const fileName = sanitizeTemplateName(name)
+    await dir.removeEntry(fileName)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") return
+    console.error("Fehler beim Löschen der Benutzervorlage:", error)
+  }
 }

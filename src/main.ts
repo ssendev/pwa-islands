@@ -46,6 +46,7 @@ import {
   buildHelpUrl,
   buildNewUrl,
   encodeSubPath,
+  parsePathAndSearchToRoute,
   parseUrlToRoute,
 } from "./route"
 import { OPFS_APP_FOLDER, getFileExtension } from "./storage"
@@ -186,6 +187,13 @@ export const computeDocumentTitle = (model: Model): string => {
 }
 
 // MESSAGE
+
+const currentRouteFromLocation = (defaultSubPath: ReadonlyArray<string>): AppRoute => {
+  if (typeof window !== "undefined") {
+    return parsePathAndSearchToRoute(window.location.pathname, window.location.search)
+  }
+  return AppRoute.Folder({ subPath: defaultSubPath })
+}
 
 const StorageActivatedFields = {
   storageType: StorageType,
@@ -958,12 +966,6 @@ const handleStorageActivated = (
           onSome: (alert) => Option.some(alert),
         }),
     }),
-    commands: Option.exists(
-      payload.maybeModalState,
-      (modal) => modal._tag === "Editor" && modal.editor._tag === "CreateFile",
-    )
-      ? [toModalCommand(Modal.LoadEditorUserTemplates)]
-      : [],
   }
 }
 
@@ -1379,6 +1381,7 @@ export const update = (
       }
       const otherBackend = getOtherBackend(model.storageState)
       const subPath = currentSubPathFromStorageState(model.storageState)
+      const route = currentRouteFromLocation(subPath)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1386,7 +1389,7 @@ export const update = (
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route: AppRoute.Folder({ subPath }),
+            route,
           }),
         ],
       }
@@ -1395,6 +1398,7 @@ export const update = (
     ClickedChangeFolder: () => {
       const otherBackend = getOtherBackend(model.storageState)
       const subPath = currentSubPathFromStorageState(model.storageState)
+      const route = currentRouteFromLocation(subPath)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
@@ -1402,7 +1406,7 @@ export const update = (
         commands: [
           PickLocalDirectory({
             otherBackend,
-            route: AppRoute.Folder({ subPath }),
+            route,
           }),
         ],
       }
@@ -1411,12 +1415,13 @@ export const update = (
     ClickedGrantPermission: () => {
       const otherBackend = getOtherBackend(model.storageState)
       const subPath = currentSubPathFromStorageState(model.storageState)
+      const route = currentRouteFromLocation(subPath)
       return {
         model,
         commands: [
           GrantDirectoryPermission({
             otherBackend,
-            route: AppRoute.Folder({ subPath }),
+            route,
           }),
         ],
       }

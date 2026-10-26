@@ -17,7 +17,12 @@ import {
   requireActiveStorage,
   revokeActivePreviewUrl,
 } from "./files"
-import { getStoredUserTemplates, sanitizeTemplateName, storeUserTemplates } from "./storage"
+import {
+  deleteUserTemplate,
+  getStoredUserTemplates,
+  sanitizeTemplateName,
+  saveUserTemplate,
+} from "./storage"
 import { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate } from "./templates"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
@@ -134,6 +139,12 @@ export const Message = defineMessageUnion({
     templates: Schema.Array(StarterTemplate),
     selectedTemplateId: Schema.String,
   },
+  CompletedSaveUserTemplate: {
+    template: StarterTemplate,
+  },
+  CompletedDeleteUserTemplate: {
+    templateId: Schema.String,
+  },
   ToggledBase64: {
     isChecked: Schema.Boolean,
   },
@@ -249,15 +260,11 @@ export const PersistUserTemplates = Command.define("PersistUserTemplates", {
   execute: ({ templates, selectedTemplateId }) =>
     Effect.tryPromise({
       try: async () => {
-        await storeUserTemplates(
-          requireActiveStorage().type,
-          requireActiveStorage().rootHandle,
-          Array.map(templates, (t) => ({
-            id: t.id,
-            label: t.label,
-            defaultFileName: t.defaultFileName,
-            content: t.content,
-          })),
+        const storage = requireActiveStorage()
+        await Promise.all(
+          Array.map(templates, (t) =>
+            saveUserTemplate(storage.type, storage.rootHandle, t.label, t.content),
+          ),
         )
         return Message.CompletedPersistUserTemplates({ templates, selectedTemplateId })
       },
@@ -266,6 +273,41 @@ export const PersistUserTemplates = Command.define("PersistUserTemplates", {
       Effect.catch(() =>
         Effect.succeed(Message.CompletedPersistUserTemplates({ templates, selectedTemplateId })),
       ),
+    ),
+})
+
+export const SaveUserTemplate = Command.define("SaveUserTemplate", {
+  args: {
+    template: StarterTemplate,
+  },
+  messages: [Message.CompletedSaveUserTemplate],
+  execute: ({ template }) =>
+    Effect.tryPromise({
+      try: async () => {
+        const storage = requireActiveStorage()
+        await saveUserTemplate(storage.type, storage.rootHandle, template.label, template.content)
+        return Message.CompletedSaveUserTemplate({ template })
+      },
+      catch: () => new Error("Failed to save user template"),
+    }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedSaveUserTemplate({ template })))),
+})
+
+export const DeleteUserTemplate = Command.define("DeleteUserTemplate", {
+  args: {
+    name: Schema.String,
+    templateId: Schema.String,
+  },
+  messages: [Message.CompletedDeleteUserTemplate],
+  execute: ({ name, templateId }) =>
+    Effect.tryPromise({
+      try: async () => {
+        const storage = requireActiveStorage()
+        await deleteUserTemplate(storage.type, storage.rootHandle, name)
+        return Message.CompletedDeleteUserTemplate({ templateId })
+      },
+      catch: () => new Error("Failed to delete user template"),
+    }).pipe(
+      Effect.catch(() => Effect.succeed(Message.CompletedDeleteUserTemplate({ templateId }))),
     ),
 })
 
@@ -604,9 +646,8 @@ export const update = (
             newTemplateLabel: () => "",
           }),
           commands: [
-            PersistUserTemplates({
-              templates: nextTemplates,
-              selectedTemplateId: id,
+            SaveUserTemplate({
+              template: newTemplate,
             }),
           ],
           outMessage: OutMessage.None(),
@@ -632,11 +673,11 @@ export const update = (
 
     ClickedConfirmDeleteTemplate: () =>
       whenCreateFile(model, (state) => {
-        const isUserTemplate = Array.some(
+        const templateToDelete = Array.findFirst(
           state.userTemplates,
           (t) => t.id === state.selectedTemplateId,
         )
-        if (!isUserTemplate) {
+        if (Option.isNone(templateToDelete)) {
           return {
             model: modifyFields(state, {
               isDeletingTemplate: () => false,
@@ -655,9 +696,9 @@ export const update = (
             isDeletingTemplate: () => false,
           }),
           commands: [
-            PersistUserTemplates({
-              templates: nextTemplates,
-              selectedTemplateId: "builtin:empty",
+            DeleteUserTemplate({
+              name: templateToDelete.value.label,
+              templateId: templateToDelete.value.id,
             }),
           ],
           outMessage: OutMessage.None(),
@@ -666,11 +707,11 @@ export const update = (
 
     ClickedDeleteSelectedTemplate: () =>
       whenCreateFile(model, (state) => {
-        const isUserTemplate = Array.some(
+        const templateToDelete = Array.findFirst(
           state.userTemplates,
           (t) => t.id === state.selectedTemplateId,
         )
-        if (!isUserTemplate) {
+        if (Option.isNone(templateToDelete)) {
           return { model: state, outMessage: OutMessage.None() }
         }
         const nextTemplates = Array.filter(
@@ -684,9 +725,9 @@ export const update = (
             isDeletingTemplate: () => false,
           }),
           commands: [
-            PersistUserTemplates({
-              templates: nextTemplates,
-              selectedTemplateId: "builtin:empty",
+            DeleteUserTemplate({
+              name: templateToDelete.value.label,
+              templateId: templateToDelete.value.id,
             }),
           ],
           outMessage: OutMessage.None(),
@@ -707,6 +748,18 @@ export const update = (
           userTemplates: () => templates,
           selectedTemplateId: () => selectedTemplateId,
         }),
+        outMessage: OutMessage.None(),
+      })),
+
+    CompletedSaveUserTemplate: () =>
+      whenCreateFile(model, (state) => ({
+        model: state,
+        outMessage: OutMessage.None(),
+      })),
+
+    CompletedDeleteUserTemplate: () =>
+      whenCreateFile(model, (state) => ({
+        model: state,
         outMessage: OutMessage.None(),
       })),
 

@@ -23,6 +23,8 @@ import {
 } from "./files"
 import * as Help from "./help"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
+import { StarterTemplate } from "./templates"
+import { getStoredUserTemplates } from "./storage"
 import type { FileSystemHandleStorage } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
@@ -100,7 +102,10 @@ export const formatDocumentTitle = (state: ModalState, folderTitle: string): str
       }),
   })
 
-export const openCreate = (target: NewTarget | "file" | "folder"): ModalState =>
+export const openCreate = (
+  target: NewTarget | "file" | "folder",
+  templates: ReadonlyArray<StarterTemplate> = [],
+): ModalState =>
   ModalState.Editor({
     editor:
       target === "folder"
@@ -108,7 +113,7 @@ export const openCreate = (target: NewTarget | "file" | "folder"): ModalState =>
             name: "Neuer Ordner",
             maybeValidationError: Option.none(),
           })
-        : Editor.makeCreateFile(),
+        : Editor.makeCreateFile(templates),
   })
 
 export const LoadEditorUserTemplates = Command.mapMessage(Editor.LoadUserTemplates(), (message) =>
@@ -171,7 +176,7 @@ export const openHelp = (
 export const initFromRoute = (route: AppRoute): Option.Option<ModalState> =>
   AppRoute.match(route, {
     Folder: () => Option.none(),
-    New: ({ target }) => Option.some(openCreate(target)),
+    New: () => Option.none(), // Wait for resolveModalForRoute!
     Edit: () => Option.none(),
     Help: ({ maybeTopic }) => Option.some(openHelp(maybeTopic)),
   })
@@ -203,16 +208,26 @@ export const resolveModalForRoute = async (
           : Option.none(),
       }),
 
-    New: ({ subPath, target }) =>
-      Promise.resolve({
-        maybeModalState: Option.some(openCreate(target)),
+    New: async ({ subPath, target }) => {
+      const stored =
+        target === "file" ? await getStoredUserTemplates(storage.type, storage.rootHandle) : []
+      const templates: ReadonlyArray<StarterTemplate> = Array.map(stored, (t) => ({
+        id: t.id,
+        label: t.label,
+        defaultFileName: t.defaultFileName,
+        content: t.content,
+        isBuiltin: false,
+      }))
+      return {
+        maybeModalState: Option.some(openCreate(target, templates)),
         maybeAlertBanner: didFallback
           ? Option.some<AlertBanner>({
               message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
               variant: "warning",
             })
           : Option.none(),
-      }),
+      }
+    },
 
     Edit: async ({ subPath, name }) => {
       if (didFallback) {

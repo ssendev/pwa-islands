@@ -112,10 +112,9 @@ export const decodeUrlPathnameSegments = (pathname: string): ReadonlyArray<strin
     }),
   )
 
-export const parseUrlToRoute = (url: Url): AppRoute => {
-  const segments = decodeUrlPathnameSegments(url.pathname)
-  const searchStr = Option.getOrElse(url.search, () => "")
-  const searchParams = new URLSearchParams(searchStr.startsWith("?") ? searchStr : `?${searchStr}`)
+export const parsePathAndSearchToRoute = (pathname: string, search: string): AppRoute => {
+  const segments = decodeUrlPathnameSegments(pathname)
+  const searchParams = new URLSearchParams(search.startsWith("?") ? search : `?${search}`)
   const maybePwaislandsParam = Option.fromNullishOr(searchParams.get("pwaislands"))
 
   const maybeHelp = parseHelpParam(maybePwaislandsParam)
@@ -143,6 +142,11 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
   }
 
   return AppRoute.Folder({ subPath: segments })
+}
+
+export const parseUrlToRoute = (url: Url): AppRoute => {
+  const searchStr = Option.getOrElse(url.search, () => "")
+  return parsePathAndSearchToRoute(url.pathname, searchStr)
 }
 
 export const isEditActionParam = (maybeRaw: Option.Option<string>): boolean =>
