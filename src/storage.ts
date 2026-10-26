@@ -101,10 +101,12 @@ export async function clearStoredDirectoryHandle(): Promise<void> {
   })
 }
 
-const isStoredStorageType = (value: unknown): value is "fsa" | "opfs" =>
-  value === "fsa" || value === "opfs"
+export const TAURI_APP_FOLDER = "/tmp/PWA-Islands"
 
-export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opfs">> {
+const isStoredStorageType = (value: unknown): value is "fsa" | "opfs" | "tauri" =>
+  value === "fsa" || value === "opfs" || value === "tauri"
+
+export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opfs" | "tauri">> {
   try {
     const db = await openDB()
     return new Promise((resolve, reject) => {
@@ -121,7 +123,7 @@ export async function getStoredStorageType(): Promise<Option.Option<"fsa" | "opf
   }
 }
 
-export async function storeStorageType(type: "fsa" | "opfs"): Promise<void> {
+export async function storeStorageType(type: "fsa" | "opfs" | "tauri"): Promise<void> {
   invalidateRootCache()
   const db = await openDB()
   return new Promise((resolve, reject) => {
@@ -326,11 +328,42 @@ export async function findSavedFile(
   relativePath: string,
   indexFile = DEFAULT_INDEX_FILE,
 ): Promise<Option.Option<SavedFile>> {
-  if (Array.isReadonlyArrayEmpty(splitPath(relativePath))) {
+  const parts = splitPath(relativePath)
+  if (Array.isReadonlyArrayEmpty(parts)) {
     return Option.none()
   }
 
   try {
+    const maybeStoredType = await getStoredStorageType()
+    if (Option.exists(maybeStoredType, (t) => t === "tauri")) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core")
+        const joined = parts.join("/")
+        const existsDirect = await invoke<boolean>("tauri_fs_exists", { subPath: joined })
+        if (existsDirect) {
+          const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", { subPath: joined })
+          const fileName = Array.isReadonlyArrayNonEmpty(parts)
+            ? Array.lastNonEmpty(parts)
+            : DEFAULT_INDEX_FILE
+          const file = new File([buffer], fileName)
+          return Option.some({ file, path: joined })
+        }
+        if (indexFile) {
+          const indexPath = `${joined}/${indexFile}`
+          const existsIndex = await invoke<boolean>("tauri_fs_exists", { subPath: indexPath })
+          if (existsIndex) {
+            const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", { subPath: indexPath })
+            const file = new File([buffer], indexFile)
+            return Option.some({ file, path: indexPath })
+          }
+        }
+        return Option.none()
+      } catch (err) {
+        console.warn("findSavedFile Tauri Fehler:", err)
+        return Option.none()
+      }
+    }
+
     const maybeRoot = await findCachedActiveStorage()
     if (Option.isNone(maybeRoot)) {
       return Option.none()
@@ -533,6 +566,7 @@ export interface StoredUserTemplate {
 
 export const FS_TEMPLATES_FOLDER = "Vorlagen"
 export const OPFS_TEMPLATES_FOLDER = "PWA Islands Vorlagen"
+export const TAURI_TEMPLATES_FOLDER = "Vorlagen"
 
 async function getTemplatesDir(
   type: string,
@@ -561,8 +595,53 @@ export const sanitizeTemplateName = (label: string): string => {
 
 export async function getStoredUserTemplates(
   type: string,
-  rootHandle: FileSystemDirectoryHandle,
+  rootHandle: FileSystemDirectoryHandle | null,
 ): Promise<ReadonlyArray<StoredUserTemplate>> {
+  if (type === "tauri") {
+    try {
+      const { invoke } = await import("@tauri-apps/api/core")
+      const files = await invoke<
+        ReadonlyArray<{
+          name: string
+          isDirectory: boolean
+          size: number | null
+          lastModified: number | null
+        }>
+      >("tauri_fs_list_entries", { subPath: TAURI_TEMPLATES_FOLDER })
+      const textFiles = Array.filter(files, (f) => !f.isDirectory)
+      const results = await Promise.all(
+        Array.map(textFiles, async (f): Promise<ReadonlyArray<StoredUserTemplate>> => {
+          try {
+            const data = await invoke<ArrayBuffer>("tauri_fs_read_file", {
+              subPath: `${TAURI_TEMPLATES_FOLDER}/${f.name}`,
+            })
+            const bytes = new Uint8Array(data)
+            const text = decodeUtf8Strict(bytes)
+            if (Option.isNone(text)) return []
+            return [
+              {
+                id: `user:${f.name}`,
+                label: f.name,
+                defaultFileName: f.name,
+                content: text.value,
+              },
+            ]
+          } catch {
+            return []
+          }
+        }),
+      )
+      return Array.flatten(results)
+    } catch (err) {
+      console.warn("Fehler beim Abrufen der Benutzervorlagen aus Tauri:", err)
+      return []
+    }
+  }
+
+  if (!rootHandle) {
+    return []
+  }
+
   try {
     const dir = await getTemplatesDir(type, rootHandle, false)
     const handles = await collectDirectoryHandles(dir)
@@ -599,12 +678,26 @@ export async function getStoredUserTemplates(
 
 export async function saveUserTemplate(
   type: string,
-  rootHandle: FileSystemDirectoryHandle,
+  rootHandle: FileSystemDirectoryHandle | null,
   name: string,
   content: string,
 ): Promise<void> {
-  const dir = await getTemplatesDir(type, rootHandle, true)
   const fileName = sanitizeTemplateName(name)
+  if (type === "tauri") {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const bytes = new TextEncoder().encode(content)
+    await invoke("tauri_fs_write_file", {
+      subPath: `${TAURI_TEMPLATES_FOLDER}/${fileName}`,
+      data: globalThis.Array.from(bytes),
+    })
+    return
+  }
+
+  if (!rootHandle) {
+    return
+  }
+
+  const dir = await getTemplatesDir(type, rootHandle, true)
   const fh = await dir.getFileHandle(fileName, { create: true })
   const w = await fh.createWritable()
   try {
@@ -616,12 +709,25 @@ export async function saveUserTemplate(
 
 export async function deleteUserTemplate(
   type: string,
-  rootHandle: FileSystemDirectoryHandle,
+  rootHandle: FileSystemDirectoryHandle | null,
   name: string,
 ): Promise<void> {
+  const fileName = sanitizeTemplateName(name)
+  if (type === "tauri") {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("tauri_fs_remove_entry", {
+      subPath: `${TAURI_TEMPLATES_FOLDER}/${fileName}`,
+      isDirectory: false,
+    })
+    return
+  }
+
+  if (!rootHandle) {
+    return
+  }
+
   try {
     const dir = await getTemplatesDir(type, rootHandle, false)
-    const fileName = sanitizeTemplateName(name)
     await dir.removeEntry(fileName)
   } catch (error) {
     if (error instanceof DOMException && error.name === "NotFoundError") return

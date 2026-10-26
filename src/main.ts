@@ -12,6 +12,8 @@ import { Url, toString as urlToString } from "foldkit/url"
 import rootIconUrl from "./assets/pwa-islands.svg"
 import {
   FileSystemHandleStorage,
+  TauriStorage,
+  type StorageBackend,
   FileEntry,
   PREVIEWABLE_IMAGE_EXTENSIONS,
   StorageType,
@@ -170,6 +172,7 @@ export type InstallPrompt = typeof InstallPrompt.Type
 export const Flags = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
+  hasTauri: Schema.Boolean,
   origin: Schema.String,
 })
 export type Flags = typeof Flags.Type
@@ -177,6 +180,7 @@ export type Flags = typeof Flags.Type
 export const Model = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
+  hasTauri: Schema.Boolean,
   origin: Schema.String,
   storageState: StorageState,
   showFileInfo: Schema.Boolean,
@@ -352,7 +356,7 @@ const findCachedHandle = async ({
 }
 
 const listEntriesOrRoot = async (
-  storage: FileSystemHandleStorage,
+  storage: StorageBackend,
   subPath: ReadonlyArray<string>,
 ): Promise<{
   readonly resolvedSubPath: ReadonlyArray<string>
@@ -371,7 +375,7 @@ const listEntriesOrRoot = async (
 }
 
 const resolveRouteDeepLink = async (
-  storage: FileSystemHandleStorage,
+  storage: StorageBackend,
   route: AppRoute,
 ): Promise<{
   readonly subPath: ReadonlyArray<string>
@@ -404,15 +408,18 @@ const resolveRouteDeepLink = async (
 }
 
 const activateStorageBackend = async (
-  handle: FileSystemDirectoryHandle,
-  type: "fsa" | "opfs",
+  handle: FileSystemDirectoryHandle | null,
+  type: StorageType,
   route: AppRoute,
   otherBackend: SavedBackend,
 ): Promise<Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">> => {
   await saveDirectoryHandle(handle, type)
-  const storage = new FileSystemHandleStorage(handle, type)
+  const storage: StorageBackend =
+    type === "tauri"
+      ? new TauriStorage()
+      : new FileSystemHandleStorage(handle as FileSystemDirectoryHandle, type)
   setActiveStorage(Option.some(storage))
-  if (type === "fsa") {
+  if (type === "fsa" && handle) {
     setSavedFsaHandle(Option.some(handle))
     setPendingHandle(Option.none())
   }
@@ -460,6 +467,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
   args: {
     hasDirectoryPicker: Schema.Boolean,
     hasOPFS: Schema.Boolean,
+    hasTauri: Schema.Boolean,
     route: AppRoute,
   },
   messages: [
@@ -497,6 +505,17 @@ export const InitializeStorage = Command.define("InitializeStorage", {
               })
             },
           })
+        }
+
+        if (args.hasTauri) {
+          const fsaSavedBackend = await determineFsaSavedBackend()
+          const otherBackend =
+            Option.exists(maybeSavedType, (t) => t === "opfs") && args.hasOPFS
+              ? opfsSavedBackend
+              : fsaSavedBackend
+          return Message.SucceededInitializeStorage(
+            await activateStorageBackend(null, "tauri", args.route, otherBackend),
+          )
         }
 
         if (Option.exists(maybeSavedType, (savedType) => savedType === "opfs") && args.hasOPFS) {
@@ -561,7 +580,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
 
 export const SaveStorageTypePreference = Command.define("SaveStorageTypePreference", {
   args: {
-    storageType: Schema.Literals(["fsa", "opfs"]),
+    storageType: StorageType,
   },
   messages: [Message.CompletedSaveStorageTypePreference],
   execute: ({ storageType }) =>
@@ -895,7 +914,7 @@ export const init = (
   readonly model: Model
   readonly commands?: ReadonlyArray<Command.Command<Message>>
 } => {
-  const isSupported = flags.hasDirectoryPicker || flags.hasOPFS
+  const isSupported = flags.hasTauri || flags.hasDirectoryPicker || flags.hasOPFS
   const initialRoute = parseUrlToRoute(url)
   const maybeInitialModal: Option.Option<Modal.ModalState> = Modal.initFromRoute(initialRoute)
 
@@ -904,6 +923,7 @@ export const init = (
       model: {
         hasDirectoryPicker: false,
         hasOPFS: false,
+        hasTauri: false,
         origin: flags.origin,
         storageState: StorageState.Unsupported(),
         showFileInfo: true,
@@ -923,6 +943,7 @@ export const init = (
     model: {
       hasDirectoryPicker: flags.hasDirectoryPicker,
       hasOPFS: flags.hasOPFS,
+      hasTauri: flags.hasTauri,
       origin: flags.origin,
       storageState: StorageState.Initializing(),
       showFileInfo: true,
@@ -935,6 +956,7 @@ export const init = (
       InitializeStorage({
         hasDirectoryPicker: flags.hasDirectoryPicker,
         hasOPFS: flags.hasOPFS,
+        hasTauri: flags.hasTauri,
         route: initialRoute,
       }),
       LoadFileInfoPreference(),
@@ -947,7 +969,7 @@ export const init = (
 const handleStorageActivated = (
   model: Model,
   payload: {
-    readonly storageType: "fsa" | "opfs"
+    readonly storageType: StorageType
     readonly rootName: string
     readonly subPath: ReadonlyArray<string>
     readonly entries: ReadonlyArray<FileEntry>
@@ -990,7 +1012,7 @@ const handleStorageActivated = (
 const handlePermissionRequired = (
   model: Model,
   payload: {
-    readonly storageType: "fsa" | "opfs"
+    readonly storageType: StorageType
     readonly folderName: string
     readonly otherBackend: SavedBackend
     readonly pendingRoute: AppRoute
@@ -1013,7 +1035,7 @@ const handlePermissionRequired = (
 const handleNoFolderSelected = (
   model: Model,
   payload: {
-    readonly storageType: "fsa" | "opfs"
+    readonly storageType: StorageType
     readonly otherBackend: SavedBackend
     readonly pendingRoute: AppRoute
   },

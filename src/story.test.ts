@@ -67,6 +67,7 @@ const sampleEntries: ReadonlyArray<FileEntry> = [
 const readyModel: Model = {
   hasDirectoryPicker: true,
   hasOPFS: true,
+  hasTauri: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -92,6 +93,7 @@ describe("PWA Islands Story Tests", () => {
         {
           hasDirectoryPicker: false,
           hasOPFS: false,
+          hasTauri: false,
           origin: "http://localhost:5173",
         },
         rootUrl,
@@ -115,6 +117,7 @@ describe("PWA Islands Story Tests", () => {
         {
           hasDirectoryPicker: true,
           hasOPFS: true,
+          hasTauri: false,
           origin: "http://localhost:5173",
         },
         helpFsUrl,
@@ -147,6 +150,7 @@ describe("PWA Islands Story Tests", () => {
         {
           hasDirectoryPicker: true,
           hasOPFS: true,
+          hasTauri: false,
           origin: "http://localhost:5173",
         },
         rootUrl,

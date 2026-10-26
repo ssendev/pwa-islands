@@ -2,6 +2,7 @@ import { Array, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
 import {
   OPFS_APP_FOLDER,
+  TAURI_APP_FOLDER,
   checkTextBytes,
   clearStoredDirectoryHandle,
   collectDirectoryHandles,
@@ -18,7 +19,7 @@ import {
 
 // STORAGE & FILE ENTRY TYPES
 
-export const StorageType = Schema.Literals(["fsa", "opfs"])
+export const StorageType = Schema.Literals(["fsa", "opfs", "tauri"])
 export type StorageType = typeof StorageType.Type
 
 export const FileEntryKind = Schema.Literals(["file", "directory"])
@@ -45,6 +46,9 @@ export const FileInspection = defineTaggedUnion({
 export type FileInspection = typeof FileInspection.Type
 
 // CAPABILITIES
+
+export const supportsTauri = (): boolean =>
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
 export const supportsDirectoryPicker = (): boolean =>
   typeof window !== "undefined" && typeof window.showDirectoryPicker === "function"
@@ -95,10 +99,10 @@ export const getOPFSRootDirectory = async (): Promise<FileSystemDirectoryHandle>
 }
 
 export const saveDirectoryHandle = async (
-  handle: FileSystemDirectoryHandle,
+  handle: FileSystemDirectoryHandle | null,
   type: StorageType,
 ): Promise<void> => {
-  if (type === "fsa") {
+  if (type === "fsa" && handle) {
     await storeDirectoryHandle(handle)
     runtimeBridge.savedFsaHandle = Option.some(handle)
   }
@@ -180,7 +184,7 @@ const fileEntryOrder: Order.Order<FileEntry> = Order.make((a, b) => {
  */
 export class FileSystemHandleStorage {
   readonly type: StorageType
-  readonly rootHandle: FileSystemDirectoryHandle
+  readonly rootHandle: FileSystemDirectoryHandle | null
 
   constructor(handle: FileSystemDirectoryHandle, type: StorageType) {
     this.rootHandle = handle
@@ -188,10 +192,13 @@ export class FileSystemHandleStorage {
   }
 
   get name(): string {
-    return this.type === "opfs" ? OPFS_APP_FOLDER : this.rootHandle.name || "Lokaler Ordner"
+    return this.type === "opfs" ? OPFS_APP_FOLDER : this.rootHandle?.name || "Lokaler Ordner"
   }
 
   async getDirectoryHandle(subPath: ReadonlyArray<string>): Promise<FileSystemDirectoryHandle> {
+    if (!this.rootHandle) {
+      throw new Error("Kein lokales Handle verfügbar.")
+    }
     return await Array.reduce(
       subPath,
       Promise.resolve(this.rootHandle),
@@ -350,10 +357,161 @@ export class FileSystemHandleStorage {
   }
 }
 
+export class TauriStorage {
+  readonly type: StorageType = "tauri"
+  readonly rootHandle = null
+
+  get name(): string {
+    return TAURI_APP_FOLDER
+  }
+
+  private joinSubPath(subPath: ReadonlyArray<string>, name?: string): string {
+    const parts = name !== undefined ? [...subPath, name] : [...subPath]
+    return parts.filter(Boolean).join("/")
+  }
+
+  async listEntries(subPath: ReadonlyArray<string>): Promise<ReadonlyArray<FileEntry>> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const relPath = this.joinSubPath(subPath)
+    const raw = await invoke<
+      ReadonlyArray<{
+        name: string
+        isDirectory: boolean
+        size: number | null
+        lastModified: number | null
+      }>
+    >("tauri_fs_list_entries", { subPath: relPath })
+
+    const entries: ReadonlyArray<FileEntry> = Array.map(raw, (item) => ({
+      id: `${item.isDirectory ? "directory" : "file"}:${item.name}`,
+      name: item.name,
+      kind: item.isDirectory ? ("directory" as const) : ("file" as const),
+      maybeSize: Option.fromNullishOr(item.size),
+      maybeLastModified: Option.fromNullishOr(item.lastModified),
+    }))
+
+    return Array.sort(entries, fileEntryOrder)
+  }
+
+  async inspectFile(subPath: ReadonlyArray<string>, name: string): Promise<FileInspection> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const relPath = this.joinSubPath(subPath, name)
+    const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", { subPath: relPath })
+    const size = buffer.byteLength
+
+    if (size > MAX_TEXT_EDIT_SIZE_BYTES) {
+      return FileInspection.Binary({ size })
+    }
+
+    const bytes = new Uint8Array(buffer)
+    const textCheck = checkTextBytes(bytes)
+    return textCheck.kind === "binary"
+      ? FileInspection.Binary({ size })
+      : FileInspection.EditableText({
+          size,
+          text: textCheck.kind === "text" ? textCheck.text : "",
+        })
+  }
+
+  async readFileBuffer(subPath: ReadonlyArray<string>, name: string): Promise<ArrayBuffer> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const relPath = this.joinSubPath(subPath, name)
+    return await invoke<ArrayBuffer>("tauri_fs_read_file", { subPath: relPath })
+  }
+
+  async getFileObject(subPath: ReadonlyArray<string>, name: string): Promise<globalThis.File> {
+    const buffer = await this.readFileBuffer(subPath, name)
+    return new File([buffer], name)
+  }
+
+  async writeFile(subPath: ReadonlyArray<string>, name: string, content: string): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const relPath = this.joinSubPath(subPath, name)
+    const bytes = new TextEncoder().encode(content)
+    await invoke("tauri_fs_write_file", {
+      subPath: relPath,
+      data: globalThis.Array.from(bytes),
+    })
+  }
+
+  async writeFileBuffer(
+    subPath: ReadonlyArray<string>,
+    name: string,
+    data: ArrayBuffer | Uint8Array<ArrayBuffer>,
+  ): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const relPath = this.joinSubPath(subPath, name)
+    const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
+    await invoke("tauri_fs_write_file", {
+      subPath: relPath,
+      data: globalThis.Array.from(bytes),
+    })
+  }
+
+  async renameBinaryFile(
+    subPath: ReadonlyArray<string>,
+    oldName: string,
+    newName: string,
+  ): Promise<void> {
+    if (oldName === newName) {
+      return
+    }
+    const { invoke } = await import("@tauri-apps/api/core")
+    const fromPath = this.joinSubPath(subPath, oldName)
+    const toPath = this.joinSubPath(subPath, newName)
+    await invoke("tauri_fs_rename", {
+      fromSubPath: fromPath,
+      toSubPath: toPath,
+    })
+  }
+
+  async createDirectory(subPath: ReadonlyArray<string>, name: string): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const relPath = this.joinSubPath(subPath, name)
+    await invoke("tauri_fs_create_dir", { subPath: relPath })
+  }
+
+  async renameDirectory(
+    subPath: ReadonlyArray<string>,
+    oldName: string,
+    newName: string,
+  ): Promise<void> {
+    if (oldName === newName) {
+      return
+    }
+    const { invoke } = await import("@tauri-apps/api/core")
+    const fromPath = this.joinSubPath(subPath, oldName)
+    const toPath = this.joinSubPath(subPath, newName)
+    await invoke("tauri_fs_rename", {
+      fromSubPath: fromPath,
+      toSubPath: toPath,
+    })
+  }
+
+  async deleteEntry(
+    subPath: ReadonlyArray<string>,
+    name: string,
+    kind: "file" | "directory" = "file",
+  ): Promise<void> {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const relPath = this.joinSubPath(subPath, name)
+    await invoke("tauri_fs_remove_entry", {
+      subPath: relPath,
+      isDirectory: kind === "directory",
+    })
+  }
+
+  async disconnect(): Promise<void> {
+    // Tauri app folder is persistent local storage
+  }
+}
+
+export type StorageBackend = FileSystemHandleStorage | TauriStorage
+
 // RUNTIME BRIDGE
 
 const runtimeBridge: {
-  activeStorage: Option.Option<FileSystemHandleStorage>
+  activeStorage: Option.Option<StorageBackend>
   pendingHandle: Option.Option<FileSystemDirectoryHandle>
   savedFsaHandle: Option.Option<FileSystemDirectoryHandle>
   maybeActivePreviewObjectUrl: Option.Option<string>
@@ -382,10 +540,9 @@ export const setPendingImportFiles = (files: ReadonlyArray<globalThis.File>): vo
   runtimeBridge.pendingImportFiles = files
 }
 
-export const getActiveStorage = (): Option.Option<FileSystemHandleStorage> =>
-  runtimeBridge.activeStorage
+export const getActiveStorage = (): Option.Option<StorageBackend> => runtimeBridge.activeStorage
 
-export const requireActiveStorage = (): FileSystemHandleStorage =>
+export const requireActiveStorage = (): StorageBackend =>
   Option.match(getActiveStorage(), {
     onNone: () => {
       throw new Error("Kein aktiver Speicher verfügbar.")
@@ -393,7 +550,7 @@ export const requireActiveStorage = (): FileSystemHandleStorage =>
     onSome: (storage) => storage,
   })
 
-export const setActiveStorage = (storage: Option.Option<FileSystemHandleStorage>): void => {
+export const setActiveStorage = (storage: Option.Option<StorageBackend>): void => {
   runtimeBridge.activeStorage = storage
 }
 
@@ -459,7 +616,7 @@ export const EditorFileMode = defineTaggedUnion({
 export type EditorFileMode = typeof EditorFileMode.Type
 
 const loadBinaryEditorFileMode = async (
-  storage: FileSystemHandleStorage,
+  storage: StorageBackend,
   subPath: ReadonlyArray<string>,
   entryName: string,
   size: number,
@@ -495,7 +652,7 @@ const loadBinaryEditorFileMode = async (
 }
 
 export const loadEditorFileModeForEntry = async (
-  storage: FileSystemHandleStorage,
+  storage: StorageBackend,
   subPath: ReadonlyArray<string>,
   entryName: string,
 ): Promise<EditorFileMode> => {

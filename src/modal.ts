@@ -25,7 +25,7 @@ import * as Help from "./help"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
 import { StarterTemplate } from "./templates"
 import { getStoredUserTemplates } from "./storage"
-import type { FileSystemHandleStorage } from "./files"
+import type { StorageBackend } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
 export { AlertVariant, AlertBanner } from "./editor"
@@ -182,7 +182,7 @@ export const initFromRoute = (route: AppRoute): Option.Option<ModalState> =>
   })
 
 export const resolveModalForRoute = async (
-  storage: FileSystemHandleStorage,
+  storage: StorageBackend,
   route: AppRoute,
   entries: ReadonlyArray<FileEntry>,
   didFallback: boolean = false,

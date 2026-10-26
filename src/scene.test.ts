@@ -51,6 +51,7 @@ const sampleEntries: ReadonlyArray<FileEntry> = [
 const readyModel: Model = {
   hasDirectoryPicker: true,
   hasOPFS: true,
+  hasTauri: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
