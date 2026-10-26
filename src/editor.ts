@@ -152,6 +152,11 @@ export const Message = defineMessageUnion({
   UpdatedBase64Content: {
     base64Content: Schema.String,
   },
+  ClickedCopyDts: {},
+  SucceededCopyApiDtsToClipboard: {},
+  FailedCopyApiDtsToClipboard: {
+    message: Schema.String,
+  },
   ClickedSave: {},
   ClickedConfirmOverwrite: {},
   ClickedCancelOverwrite: {},
@@ -413,6 +418,30 @@ export const DeleteEntry = Command.define("DeleteEntry", {
         ),
       ),
     ),
+})
+
+export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
+  messages: [Message.SucceededCopyApiDtsToClipboard, Message.FailedCopyApiDtsToClipboard],
+  execute: Effect.tryPromise({
+    try: async () => {
+      const res = await fetch("/api.d.ts", { cache: "no-cache" })
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
+      }
+      const dtsText = await res.text()
+      await navigator.clipboard.writeText(dtsText)
+      return Message.SucceededCopyApiDtsToClipboard()
+    },
+    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(
+        Message.FailedCopyApiDtsToClipboard({
+          message: `Kopieren fehlgeschlagen: ${error.message}`,
+        }),
+      ),
+    ),
+  ),
 })
 
 // UPDATE
@@ -782,6 +811,36 @@ export const update = (
           outMessage: OutMessage.None(),
         }
       }),
+
+    ClickedCopyDts: () => ({
+      model,
+      commands: [CopyApiDtsToClipboard()],
+      outMessage: OutMessage.None(),
+    }),
+
+    SucceededCopyApiDtsToClipboard: () => ({
+      model,
+      outMessage: OutMessage.ShowAlert({
+        banner: {
+          message: "/api.d.ts in die Zwischenablage kopiert",
+          variant: "info",
+        },
+        closeModal: false,
+        replaceUrl: false,
+      }),
+    }),
+
+    FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => ({
+      model,
+      outMessage: OutMessage.ShowAlert({
+        banner: {
+          message: errorMessage,
+          variant: "danger",
+        },
+        closeModal: false,
+        replaceUrl: false,
+      }),
+    }),
 
     ClickedSave: () => {
       const validateName = (rawName: string, isFolder: boolean): Option.Option<string> => {
@@ -1489,6 +1548,22 @@ const viewEditorModal = (
                   h.div(
                     [h.Class("modal-footer-right")],
                     [
+                      !isFolder
+                        ? h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("modal-btn-copy-dts"),
+                              h.Class("btn btn-secondary icon-label-btn"),
+                              h.AriaLabel("/app.d.ts kopieren"),
+                              h.DataAttribute("tip", "/app.d.ts kopieren"),
+                              h.OnClick(Message.ClickedCopyDts()),
+                            ],
+                            [
+                              h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["📋"]),
+                              h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
+                            ],
+                          )
+                        : h.empty,
                       h.button(
                         [
                           h.Type("button"),

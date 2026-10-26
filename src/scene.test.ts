@@ -160,6 +160,48 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
+  it("copies /app.d.ts from editor modal", () => {
+    const modelWithEditor: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.makeCreateFile(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithEditor),
+      sceneExpect(selector("#modal-btn-copy-dts")).toExist(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toContainText("/app.d.ts"),
+      click(selector("#modal-btn-copy-dts")),
+      Command.expectExact(Editor.CopyApiDtsToClipboard()),
+      Command.resolve(
+        Editor.CopyApiDtsToClipboard,
+        Editor.Message.SucceededCopyApiDtsToClipboard(),
+      ),
+      sceneExpect(text("/api.d.ts in die Zwischenablage kopiert")).toExist(),
+    )
+  })
+
+  it("does not show /app.d.ts copy button in folder modal", () => {
+    const modelWithFolderModal: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.CreateFolder({
+          name: "Neuer Ordner",
+          maybeValidationError: Option.none(),
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithFolderModal),
+      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-cancel")).toExist(),
+    )
+  })
+
   it("shows delete confirmation dialog when clicking delete button in file edit modal", () => {
     const modelWithEditFile: Model = {
       ...readyModel,
