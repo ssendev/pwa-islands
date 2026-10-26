@@ -197,6 +197,9 @@ function islandsApiPlugin(): Plugin[] {
 export default defineConfig({
   server: {
     host: "pwaislands.localhost",
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
   },
 
   build: {
