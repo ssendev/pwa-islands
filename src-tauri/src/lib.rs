@@ -1,6 +1,9 @@
+use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tauri::http::{header, Response as HttpResponse, StatusCode};
 use tauri::ipc::Response;
+use url::Url;
 
 const STORAGE_ROOT: &str = "/tmp/PWA-Islands";
 
@@ -25,6 +28,88 @@ fn resolve_path(rel_path: &str) -> Result<PathBuf, String> {
     resolved.push(p);
   }
   Ok(resolved)
+}
+
+fn handle_pwaislands_request(
+  request: &tauri::http::Request<Vec<u8>>,
+) -> HttpResponse<Cow<'static, [u8]>> {
+  let uri = request.uri().to_string();
+  let decoded_path = match Url::parse(&uri) {
+    Ok(parsed_url) => {
+      let raw_path = match (parsed_url.host_str(), parsed_url.path()) {
+        (Some("localhost") | None, path) => path.to_string(),
+        (Some(host), path) => {
+          if path.is_empty() || path == "/" {
+            format!("/{host}")
+          } else {
+            format!("/{host}{path}")
+          }
+        }
+      };
+      urlencoding::decode(&raw_path)
+        .map(|c| c.into_owned())
+        .unwrap_or(raw_path)
+    }
+    Err(_) => {
+      let raw_path = request.uri().path();
+      urlencoding::decode(raw_path)
+        .map(|c| c.into_owned())
+        .unwrap_or_else(|_| raw_path.to_string())
+    }
+  };
+
+  let sub_path = decoded_path.trim_start_matches('/');
+  let file_path = match resolve_path(sub_path) {
+    Ok(path) => path,
+    Err(e) => {
+      return HttpResponse::builder()
+        .status(StatusCode::BAD_REQUEST)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(Cow::Owned(e.into_bytes()))
+        .unwrap_or_else(|_| HttpResponse::default());
+    }
+  };
+
+  let actual_path = if file_path.is_dir() {
+    let index = file_path.join("index.html");
+    if index.is_file() {
+      index
+    } else {
+      file_path
+    }
+  } else {
+    file_path
+  };
+
+  match fs::read(&actual_path) {
+    Ok(data) => {
+      let mime_type = mime_guess::from_path(&actual_path)
+        .first_or_octet_stream()
+        .to_string();
+
+      HttpResponse::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime_type)
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(Cow::Owned(data))
+        .unwrap_or_else(|_| HttpResponse::default())
+    }
+    Err(err) if err.kind() == std::io::ErrorKind::NotFound => HttpResponse::builder()
+      .status(StatusCode::NOT_FOUND)
+      .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+      .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+      .body(Cow::Borrowed(b"Datei nicht gefunden".as_slice()))
+      .unwrap_or_else(|_| HttpResponse::default()),
+    Err(err) => HttpResponse::builder()
+      .status(StatusCode::INTERNAL_SERVER_ERROR)
+      .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+      .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+      .body(Cow::Owned(
+        format!("Fehler beim Lesen der Datei: {err}").into_bytes(),
+      ))
+      .unwrap_or_else(|_| HttpResponse::default()),
+  }
 }
 
 #[derive(serde::Serialize)]
@@ -165,6 +250,9 @@ fn tauri_fs_init_root() -> Result<String, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .register_uri_scheme_protocol("pwaislands", |_ctx, request| {
+      handle_pwaislands_request(&request)
+    })
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -188,4 +276,45 @@ pub fn run() {
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use std::fs;
+  use tauri::http::Request;
+
+  #[test]
+  fn test_handle_pwaislands_request() {
+    let root = PathBuf::from(STORAGE_ROOT);
+    fs::create_dir_all(&root).unwrap();
+    let test_file = root.join("test_protocol.html");
+    fs::write(&test_file, b"<h1>Hello Island</h1>").unwrap();
+
+    let req = Request::builder()
+      .uri("pwaislands://localhost/test_protocol.html")
+      .body(Vec::new())
+      .unwrap();
+
+    let res = handle_pwaislands_request(&req);
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+      res.headers().get(header::CONTENT_TYPE).unwrap(),
+      "text/html"
+    );
+    assert_eq!(res.body().as_ref(), b"<h1>Hello Island</h1>");
+
+    let _ = fs::remove_file(test_file);
+  }
+
+  #[test]
+  fn test_handle_pwaislands_request_not_found() {
+    let req = Request::builder()
+      .uri("pwaislands://localhost/non_existent_file.xyz")
+      .body(Vec::new())
+      .unwrap();
+
+    let res = handle_pwaislands_request(&req);
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+  }
 }
