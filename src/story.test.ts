@@ -20,6 +20,7 @@ import {
   Message,
   type Model,
   NavigateToSubfolder,
+  OpenFileInBrowser,
   PickLocalDirectory,
   PushUrl,
   ReplaceUrl,
@@ -241,6 +242,50 @@ describe("PWA Islands Story Tests", () => {
           expect(m.showFileInfo).toBe(false)
           expect(m.isSettingsOpen).toBe(false)
         }),
+      )
+    })
+
+    it("opens file with pwaislands:// protocol when storage is tauri", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: ["unterordner"],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      story(
+        update,
+        given(tauriReadyModel),
+        message(Message.ClickedEntryRow({ entry: sampleEntries[1] })),
+        Command.expectExact(
+          OpenFileInBrowser({
+            subPath: ["unterordner"],
+            fileName: "index.html",
+            isTauri: true,
+          }),
+        ),
+        Command.resolve(OpenFileInBrowser, Message.CompletedOpenFileInBrowser()),
+      )
+    })
+
+    it("opens file with relative path when storage is not tauri", () => {
+      story(
+        update,
+        given(readyModel),
+        message(Message.ClickedEntryRow({ entry: sampleEntries[1] })),
+        Command.expectExact(
+          OpenFileInBrowser({
+            subPath: [],
+            fileName: "index.html",
+            isTauri: false,
+          }),
+        ),
+        Command.resolve(OpenFileInBrowser, Message.CompletedOpenFileInBrowser()),
       )
     })
 

@@ -1,3 +1,4 @@
+import { convertFileSrc } from "@tauri-apps/api/core"
 import { Array, Effect, Match, Option, Schema, Stream, pipe } from "effect"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
@@ -149,6 +150,20 @@ export const currentSubPathFromStorageState = (storageState: StorageState): Read
     PermissionRequired: () => [],
     Ready: ({ subPath }) => subPath,
   })
+
+export const currentStorageTypeFromStorageState = (
+  storageState: StorageState,
+): Option.Option<StorageType> =>
+  StorageState.match(storageState, {
+    Initializing: () => Option.none(),
+    Unsupported: () => Option.none(),
+    NoFolderSelected: ({ storageType }) => Option.some(storageType),
+    PermissionRequired: ({ storageType }) => Option.some(storageType),
+    Ready: ({ storageType }) => Option.some(storageType),
+  })
+
+export const isTauriStorageState = (storageState: StorageState): boolean =>
+  Option.exists(currentStorageTypeFromStorageState(storageState), (t) => t === "tauri")
 
 export const pendingRouteFromStorageState = (
   storageState: StorageState,
@@ -849,11 +864,23 @@ export const OpenFileInBrowser = Command.define("OpenFileInBrowser", {
   args: {
     subPath: Schema.Array(Schema.String),
     fileName: Schema.String,
+    isTauri: Schema.Boolean,
   },
   messages: [Message.CompletedOpenFileInBrowser],
   execute: (args) => {
     const encodedPath = encodeSubPath([...args.subPath, args.fileName])
-    return Navigation.load(`/${encodedPath}`).pipe(Effect.as(Message.CompletedOpenFileInBrowser()))
+    let targetUrl = `/${encodedPath}`
+    if (args.isTauri) {
+      try {
+        const protocolRoot = convertFileSrc("", "pwaislands")
+        targetUrl = protocolRoot.endsWith("/")
+          ? `${protocolRoot}${encodedPath}`
+          : `${protocolRoot}/${encodedPath}`
+      } catch {
+        targetUrl = `pwaislands://localhost/${encodedPath}`
+      }
+    }
+    return Navigation.load(targetUrl).pipe(Effect.as(Message.CompletedOpenFileInBrowser()))
   },
 })
 
@@ -1253,7 +1280,13 @@ export const update = (
       }
       return {
         model,
-        commands: [OpenFileInBrowser({ subPath, fileName: entry.name })],
+        commands: [
+          OpenFileInBrowser({
+            subPath,
+            fileName: entry.name,
+            isTauri: isTauriStorageState(model.storageState),
+          }),
+        ],
       }
     },
 
