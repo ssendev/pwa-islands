@@ -7,6 +7,138 @@ use url::Url;
 
 const STORAGE_ROOT: &str = "/tmp/PWA-Islands";
 
+const ISLANDS_APP_JS: &str = r#"// PWA Islands API for Tauri custom protocol
+const invoke = (cmd, args) => {
+  if (typeof window !== "undefined" && window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
+    return window.__TAURI_INTERNALS__.invoke(cmd, args);
+  }
+  return Promise.reject(new Error("Tauri IPC ist nicht verfügbar."));
+};
+
+function normalizePath(path) {
+  if (!path) return "";
+  return path.replace(/^\/+/g, "").replace(/\/+$/g, "").replace(/\/+/g, "/");
+}
+
+function splitEntryPath(path) {
+  const parts = normalizePath(path).split("/").filter(Boolean);
+  if (parts.length === 0) {
+    throw new Error("Ungültiger Pfad: Datei- oder Ordnername fehlt.");
+  }
+  return {
+    dirs: parts.slice(0, -1),
+    name: parts[parts.length - 1],
+  };
+}
+
+const islandEntrySort = (a, b) => {
+  if (a.kind !== b.kind) {
+    return a.kind === "directory" ? -1 : 1;
+  }
+  const cmp = a.name.localeCompare(b.name, "de", { sensitivity: "base", numeric: true });
+  return cmp < 0 ? -1 : cmp > 0 ? 1 : 0;
+};
+
+const islands = {
+  async list(path = "") {
+    const cleanPath = normalizePath(path);
+    const raw = await invoke("tauri_fs_list_entries", { subPath: cleanPath });
+    const entries = (raw || []).map((entry) => {
+      const entryPath = cleanPath ? `${cleanPath}/${entry.name}` : entry.name;
+      if (entry.isDirectory) {
+        return { name: entry.name, path: entryPath, kind: "directory" };
+      }
+      return {
+        name: entry.name,
+        path: entryPath,
+        kind: "file",
+        size: entry.size != null ? entry.size : undefined,
+        lastModified: entry.lastModified != null ? entry.lastModified : undefined,
+      };
+    });
+    return entries.sort(islandEntrySort);
+  },
+
+  async read(path, options) {
+    const cleanPath = normalizePath(path);
+    const buffer = await invoke("tauri_fs_read_file", { subPath: cleanPath });
+    const bytes = new Uint8Array(buffer);
+    const decoder = new TextDecoder("utf-8", { fatal: options?.ensureText ?? false });
+    try {
+      return decoder.decode(bytes);
+    } catch {
+      throw new Error(`Datei ist kein gültiger UTF-8-Text: (${path}).`);
+    }
+  },
+
+  async readBlob(path) {
+    const cleanPath = normalizePath(path);
+    const buffer = await invoke("tauri_fs_read_file", { subPath: cleanPath });
+    return new Blob([buffer]);
+  },
+
+  async exists(path) {
+    const cleanPath = normalizePath(path);
+    return await invoke("tauri_fs_exists", { subPath: cleanPath });
+  },
+
+  async write(path, content, options) {
+    const overwrite = options?.overwrite ?? false;
+    const cleanPath = normalizePath(path);
+    if (!overwrite && (await islands.exists(cleanPath))) {
+      throw new Error(`Datei existiert bereits: ${cleanPath}`);
+    }
+
+    let bytes;
+    if (typeof content === "string") {
+      bytes = new TextEncoder().encode(content);
+    } else if (content instanceof Blob) {
+      bytes = new Uint8Array(await content.arrayBuffer());
+    } else if (content instanceof ArrayBuffer) {
+      bytes = new Uint8Array(content);
+    } else if (ArrayBuffer.isView(content)) {
+      bytes = new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
+    } else {
+      bytes = new Uint8Array(content);
+    }
+
+    await invoke("tauri_fs_write_file", {
+      subPath: cleanPath,
+      data: Array.from(bytes),
+    });
+  },
+
+  async makeDir(path) {
+    const cleanPath = normalizePath(path);
+    await invoke("tauri_fs_create_dir", { subPath: cleanPath });
+  },
+
+  async rename(from, to) {
+    await invoke("tauri_fs_rename", {
+      fromSubPath: normalizePath(from),
+      toSubPath: normalizePath(to),
+    });
+  },
+
+  async remove(path, options) {
+    const recursive = options?.recursive ?? false;
+    await invoke("tauri_fs_remove_entry", {
+      subPath: normalizePath(path),
+      isDirectory: recursive,
+    });
+  },
+
+  async copy(from, to) {
+    await invoke("tauri_fs_copy", {
+      fromSubPath: normalizePath(from),
+      toSubPath: normalizePath(to),
+    });
+  },
+};
+
+export default islands;
+"#;
+
 fn get_storage_root() -> Result<PathBuf, String> {
   let root = PathBuf::from(STORAGE_ROOT);
   fs::create_dir_all(&root).map_err(|e| format!("Konnte Speicherordner nicht erstellen: {e}"))?;
@@ -59,6 +191,16 @@ fn handle_pwaislands_request(
   };
 
   let sub_path = decoded_path.trim_start_matches('/');
+
+  if sub_path == "app.js" || sub_path == "api.js" {
+    return HttpResponse::builder()
+      .status(StatusCode::OK)
+      .header(header::CONTENT_TYPE, "text/javascript; charset=utf-8")
+      .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+      .body(Cow::Borrowed(ISLANDS_APP_JS.as_bytes()))
+      .unwrap_or_else(|_| HttpResponse::default());
+  }
+
   let file_path = match resolve_path(sub_path) {
     Ok(path) => path,
     Err(e) => {
@@ -316,5 +458,33 @@ mod tests {
 
     let res = handle_pwaislands_request(&req);
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
+  }
+
+  #[test]
+  fn test_handle_pwaislands_request_app_js() {
+    let req = Request::builder()
+      .uri("pwaislands://localhost/app.js")
+      .body(Vec::new())
+      .unwrap();
+
+    let res = handle_pwaislands_request(&req);
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+      res.headers().get(header::CONTENT_TYPE).unwrap(),
+      "text/javascript; charset=utf-8"
+    );
+    assert!(res.body().starts_with(b"// PWA Islands API"));
+
+    let req_api = Request::builder()
+      .uri("pwaislands://localhost/api.js")
+      .body(Vec::new())
+      .unwrap();
+
+    let res_api = handle_pwaislands_request(&req_api);
+    assert_eq!(res_api.status(), StatusCode::OK);
+    assert_eq!(
+      res_api.headers().get(header::CONTENT_TYPE).unwrap(),
+      "text/javascript; charset=utf-8"
+    );
   }
 }
