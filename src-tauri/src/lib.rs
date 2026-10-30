@@ -9,14 +9,48 @@ const STORAGE_ROOT: &str = "/tmp/PWA-Islands";
 
 const ISLANDS_APP_JS: &str = r#"// PWA Islands API for Tauri custom protocol
 const API_BASE = "/__pwaislands_api__";
+let nextRequestId = 0;
 
-async function apiRequest(endpoint, options = {}) {
-  const res = await fetch(`${API_BASE}/${endpoint}`, options);
+async function apiGet(endpoint) {
+  const res = await fetch(`${API_BASE}/${endpoint}`);
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     throw new Error(errText || `HTTP ${res.status}`);
   }
   return res;
+}
+
+function ipcRequest(action, payload) {
+  return new Promise((resolve, reject) => {
+    const requestId = `${Date.now()}-${++nextRequestId}`;
+    function onMessage(event) {
+      const data = event.data;
+      if (
+        !data ||
+        typeof data !== "object" ||
+        data.type !== "pwaislands:ipc-response" ||
+        data.requestId !== requestId
+      ) {
+        return;
+      }
+      window.removeEventListener("message", onMessage);
+      if (data.ok) {
+        resolve();
+      } else {
+        reject(new Error(data.error || "Unbekannter IPC-Fehler"));
+      }
+    }
+    window.addEventListener("message", onMessage);
+    window.parent.postMessage(
+      {
+        type: "pwaislands:ipc",
+        requestId,
+        action,
+        ...payload,
+      },
+      "*"
+    );
+  });
 }
 
 function normalizePath(path) {
@@ -65,7 +99,7 @@ const islandEntrySort = (a, b) => {
 const islands = {
   async list(path = "") {
     const cleanPath = normalizePath(path);
-    const res = await apiRequest(`list?subPath=${encodeURIComponent(cleanPath)}`);
+    const res = await apiGet(`list?subPath=${encodeURIComponent(cleanPath)}`);
     const raw = await res.json();
     const entries = (raw || []).map((entry) => {
       const entryPath = cleanPath ? `${cleanPath}/${entry.name}` : entry.name;
@@ -85,7 +119,7 @@ const islands = {
 
   async read(path, options) {
     const cleanPath = normalizePath(path);
-    const res = await apiRequest(`read?subPath=${encodeURIComponent(cleanPath)}`);
+    const res = await apiGet(`read?subPath=${encodeURIComponent(cleanPath)}`);
     const buffer = await res.arrayBuffer();
     const bytes = new Uint8Array(buffer);
     if (options?.ensureText) {
@@ -100,14 +134,14 @@ const islands = {
 
   async readBlob(path) {
     const cleanPath = normalizePath(path);
-    const res = await apiRequest(`read?subPath=${encodeURIComponent(cleanPath)}`);
+    const res = await apiGet(`read?subPath=${encodeURIComponent(cleanPath)}`);
     const buffer = await res.arrayBuffer();
     return new Blob([buffer]);
   },
 
   async exists(path) {
     const cleanPath = normalizePath(path);
-    const res = await apiRequest(`exists?subPath=${encodeURIComponent(cleanPath)}`);
+    const res = await apiGet(`exists?subPath=${encodeURIComponent(cleanPath)}`);
     return await res.json();
   },
 
@@ -131,45 +165,36 @@ const islands = {
       bytes = new Uint8Array(content);
     }
 
-    await apiRequest(`write?subPath=${encodeURIComponent(cleanPath)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: bytes,
+    await ipcRequest("write", {
+      subPath: cleanPath,
+      data: Array.from(bytes),
     });
   },
 
   async makeDir(path) {
     const cleanPath = normalizePath(path);
-    await apiRequest(`mkdir?subPath=${encodeURIComponent(cleanPath)}`, {
-      method: "POST",
-    });
+    await ipcRequest("mkdir", { subPath: cleanPath });
   },
 
   async rename(from, to) {
     const cleanFrom = normalizePath(from);
     const cleanTo = normalizePath(to);
-    await apiRequest(
-      `rename?from=${encodeURIComponent(cleanFrom)}&to=${encodeURIComponent(cleanTo)}`,
-      { method: "POST" }
-    );
+    await ipcRequest("rename", { from: cleanFrom, to: cleanTo });
   },
 
   async remove(path, options) {
     const recursive = options?.recursive ?? false;
     const cleanPath = normalizePath(path);
-    await apiRequest(
-      `remove?subPath=${encodeURIComponent(cleanPath)}&recursive=${recursive ? "true" : "false"}`,
-      { method: "POST" }
-    );
+    await ipcRequest("remove", {
+      subPath: cleanPath,
+      recursive: Boolean(recursive),
+    });
   },
 
   async copy(from, to) {
     const cleanFrom = normalizePath(from);
     const cleanTo = normalizePath(to);
-    await apiRequest(
-      `copy?from=${encodeURIComponent(cleanFrom)}&to=${encodeURIComponent(cleanTo)}`,
-      { method: "POST" }
-    );
+    await ipcRequest("copy", { from: cleanFrom, to: cleanTo });
   },
 };
 
@@ -235,6 +260,13 @@ fn handle_api_request(
   query: &str,
   request: &tauri::http::Request<Vec<u8>>,
 ) -> HttpResponse<Cow<'static, [u8]>> {
+  if request.method() != tauri::http::Method::GET {
+    return text_response(
+      StatusCode::METHOD_NOT_ALLOWED,
+      "Nur GET-Anfragen sind über das benutzerdefinierte Protokoll erlaubt",
+    );
+  }
+
   match action {
     "list" => {
       let sub_path = extract_query_param(query, "subPath");
@@ -275,45 +307,6 @@ fn handle_api_request(
             b"false".to_vec()
           },
         ),
-        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
-      }
-    }
-    "write" => {
-      let sub_path = extract_query_param(query, "subPath");
-      let data = request.body().clone();
-      match tauri_fs_write_file(sub_path, data) {
-        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
-        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
-      }
-    }
-    "mkdir" => {
-      let sub_path = extract_query_param(query, "subPath");
-      match tauri_fs_create_dir(sub_path) {
-        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
-        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
-      }
-    }
-    "rename" => {
-      let from = extract_query_param(query, "from");
-      let to = extract_query_param(query, "to");
-      match tauri_fs_rename(from, to) {
-        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
-        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
-      }
-    }
-    "remove" => {
-      let sub_path = extract_query_param(query, "subPath");
-      let recursive = extract_query_param(query, "recursive") == "true";
-      match tauri_fs_remove_entry(sub_path, recursive) {
-        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
-        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
-      }
-    }
-    "copy" => {
-      let from = extract_query_param(query, "from");
-      let to = extract_query_param(query, "to");
-      match tauri_fs_copy(from, to) {
-        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
         Err(e) => text_response(StatusCode::BAD_REQUEST, e),
       }
     }
@@ -524,8 +517,12 @@ fn tauri_fs_remove_entry(sub_path: String, is_directory: bool) -> Result<(), Str
   if !path.exists() {
     return Ok(());
   }
-  if is_directory {
-    fs::remove_dir_all(&path).map_err(|e| format!("Fehler beim Löschen des Verzeichnisses: {e}"))?;
+  if path.is_dir() {
+    if is_directory {
+      fs::remove_dir_all(&path).map_err(|e| format!("Fehler beim Löschen des Verzeichnisses: {e}"))?;
+    } else {
+      fs::remove_dir(&path).map_err(|e| format!("Fehler beim Löschen des Verzeichnisses: {e}"))?;
+    }
   } else {
     fs::remove_file(&path).map_err(|e| format!("Fehler beim Löschen der Datei: {e}"))?;
   }
@@ -685,6 +682,8 @@ mod tests {
     let body_str = std::str::from_utf8(res_api.body()).unwrap();
     assert!(!body_str.contains("__TAURI_INTERNALS__"));
     assert!(body_str.contains("/__pwaislands_api__"));
+    assert!(!body_str.contains("method: \"POST\""));
+    assert!(body_str.contains("pwaislands:ipc"));
   }
 
   #[test]
@@ -692,16 +691,19 @@ mod tests {
     let root = PathBuf::from(STORAGE_ROOT);
     fs::create_dir_all(&root).unwrap();
 
-    // Write file via API
-    let write_req = Request::builder()
+    // POST over custom protocol is rejected
+    let post_req = Request::builder()
       .method("POST")
       .uri("pwaislands://localhost/__pwaislands_api__/write?subPath=api_test.txt")
       .body(b"Test Content".to_vec())
       .unwrap();
-    let write_res = handle_pwaislands_request(&write_req);
-    assert_eq!(write_res.status(), StatusCode::OK);
+    let post_res = handle_pwaislands_request(&post_req);
+    assert_eq!(post_res.status(), StatusCode::METHOD_NOT_ALLOWED);
 
-    // Exists via API
+    // Write file via Tauri IPC command
+    tauri_fs_write_file("api_test.txt".to_string(), b"Test Content".to_vec()).unwrap();
+
+    // Exists via GET API
     let exists_req = Request::builder()
       .uri("pwaislands://localhost/__pwaislands_api__/exists?subPath=api_test.txt")
       .body(Vec::new())
@@ -710,7 +712,7 @@ mod tests {
     assert_eq!(exists_res.status(), StatusCode::OK);
     assert_eq!(exists_res.body().as_ref(), b"true");
 
-    // Read via API
+    // Read via GET API
     let read_req = Request::builder()
       .uri("pwaislands://localhost/__pwaislands_api__/read?subPath=api_test.txt")
       .body(Vec::new())
@@ -719,14 +721,8 @@ mod tests {
     assert_eq!(read_res.status(), StatusCode::OK);
     assert_eq!(read_res.body().as_ref(), b"Test Content");
 
-    // Remove via API
-    let rm_req = Request::builder()
-      .method("POST")
-      .uri("pwaislands://localhost/__pwaislands_api__/remove?subPath=api_test.txt&recursive=false")
-      .body(Vec::new())
-      .unwrap();
-    let rm_res = handle_pwaislands_request(&rm_req);
-    assert_eq!(rm_res.status(), StatusCode::OK);
+    // Remove via Tauri IPC command
+    tauri_fs_remove_entry("api_test.txt".to_string(), false).unwrap();
 
     // Verify removed
     let exists_after = handle_pwaislands_request(&exists_req);

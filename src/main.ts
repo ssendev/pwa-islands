@@ -1,4 +1,4 @@
-import { convertFileSrc } from "@tauri-apps/api/core"
+import { convertFileSrc, invoke } from "@tauri-apps/api/core"
 import { Array, Effect, Match, Option, Schema, Stream, pipe } from "effect"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
@@ -196,6 +196,29 @@ export const InstallPrompt = defineTaggedUnion({
 })
 export type InstallPrompt = typeof InstallPrompt.Type
 
+export const IslandIpcAction = defineTaggedUnion({
+  Write: {
+    subPath: Schema.String,
+    data: Schema.Array(Schema.Number),
+  },
+  MakeDir: {
+    subPath: Schema.String,
+  },
+  Rename: {
+    from: Schema.String,
+    to: Schema.String,
+  },
+  Remove: {
+    subPath: Schema.String,
+    recursive: Schema.Boolean,
+  },
+  Copy: {
+    from: Schema.String,
+    to: Schema.String,
+  },
+})
+export type IslandIpcAction = typeof IslandIpcAction.Type
+
 export const Flags = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
@@ -296,6 +319,11 @@ export const Message = defineMessageUnion({
   ReceivedIslandNavigation: {
     url: Schema.String,
   },
+  ReceivedIslandIpcRequest: {
+    requestId: Schema.String,
+    action: IslandIpcAction,
+  },
+  CompletedHandleIslandIpcRequest: {},
   RequestedUrl: {
     request: UrlRequest,
   },
@@ -934,6 +962,79 @@ export const FocusIslandIframe = Command.define("FocusIslandIframe", {
   ),
 })
 
+const postIslandIpcResponse = (payload: {
+  readonly requestId: string
+  readonly ok: boolean
+  readonly error?: string
+}): void => {
+  const el = document.getElementById("island-iframe")
+  if (el instanceof HTMLIFrameElement) {
+    el.contentWindow?.postMessage(
+      {
+        type: "pwaislands:ipc-response",
+        ...payload,
+      },
+      "*",
+    )
+  }
+}
+
+export const HandleIslandIpcRequest = Command.define("HandleIslandIpcRequest", {
+  args: {
+    requestId: Schema.String,
+    action: IslandIpcAction,
+  },
+  messages: [Message.CompletedHandleIslandIpcRequest],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        await IslandIpcAction.match(args.action, {
+          Write: ({ subPath, data }) =>
+            invoke("tauri_fs_write_file", {
+              subPath,
+              data: [...data],
+            }),
+          MakeDir: ({ subPath }) =>
+            invoke("tauri_fs_create_dir", {
+              subPath,
+            }),
+          Rename: ({ from, to }) =>
+            invoke("tauri_fs_rename", {
+              fromSubPath: from,
+              toSubPath: to,
+            }),
+          Remove: ({ subPath, recursive }) =>
+            invoke("tauri_fs_remove_entry", {
+              subPath,
+              isDirectory: recursive,
+            }),
+          Copy: ({ from, to }) =>
+            invoke("tauri_fs_copy", {
+              fromSubPath: from,
+              toSubPath: to,
+            }),
+        })
+        postIslandIpcResponse({
+          requestId: args.requestId,
+          ok: true,
+        })
+        return Message.CompletedHandleIslandIpcRequest()
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.sync(() => {
+          postIslandIpcResponse({
+            requestId: args.requestId,
+            ok: false,
+            error: error.message || String(error),
+          })
+          return Message.CompletedHandleIslandIpcRequest()
+        }),
+      ),
+    ),
+})
+
 export const NavigateHistoryBack = Command.define("NavigateHistoryBack", {
   messages: [Message.CompletedNavigateHistoryBack],
   execute: Navigation.back().pipe(Effect.as(Message.CompletedNavigateHistoryBack())),
@@ -1355,6 +1456,13 @@ export const update = (
         commands: [PushUrl({ url }), RefreshEntries({ subPath })],
       }
     },
+
+    ReceivedIslandIpcRequest: ({ requestId, action }) => ({
+      model,
+      commands: [HandleIslandIpcRequest({ requestId, action })],
+    }),
+
+    CompletedHandleIslandIpcRequest: () => ({ model }),
 
     RequestedUrl: ({ request }) =>
       UrlRequest.match(request, {
@@ -1968,6 +2076,68 @@ export const update = (
 
 // SUBSCRIPTION
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null
+
+const isNumberArray = (value: unknown): value is ReadonlyArray<number> =>
+  Array.isArray(value) && Array.every(value, (item): item is number => typeof item === "number")
+
+const parseIslandIpcAction = (data: Record<string, unknown>): Option.Option<IslandIpcAction> => {
+  const action = data.action
+  if (action === "write" && typeof data.subPath === "string" && isNumberArray(data.data)) {
+    return Option.some(
+      IslandIpcAction.Write({
+        subPath: data.subPath,
+        data: data.data,
+      }),
+    )
+  }
+  if (action === "mkdir" && typeof data.subPath === "string") {
+    return Option.some(IslandIpcAction.MakeDir({ subPath: data.subPath }))
+  }
+  if (action === "rename" && typeof data.from === "string" && typeof data.to === "string") {
+    return Option.some(IslandIpcAction.Rename({ from: data.from, to: data.to }))
+  }
+  if (
+    action === "remove" &&
+    typeof data.subPath === "string" &&
+    typeof data.recursive === "boolean"
+  ) {
+    return Option.some(
+      IslandIpcAction.Remove({
+        subPath: data.subPath,
+        recursive: data.recursive,
+      }),
+    )
+  }
+  if (action === "copy" && typeof data.from === "string" && typeof data.to === "string") {
+    return Option.some(IslandIpcAction.Copy({ from: data.from, to: data.to }))
+  }
+  return Option.none()
+}
+
+export const parseIslandWindowMessage = (event: Event): Option.Option<Message> => {
+  if (!(event instanceof MessageEvent)) {
+    return Option.none()
+  }
+  const data: unknown = event.data
+  if (!isRecord(data)) {
+    return Option.none()
+  }
+  if (data.type === "pwaislands:navigate" && typeof data.url === "string") {
+    return Option.some(Message.ReceivedIslandNavigation({ url: data.url }))
+  }
+  const requestId = data.requestId
+  if (data.type === "pwaislands:ipc" && typeof requestId === "string") {
+    return Option.map(parseIslandIpcAction(data), (action) =>
+      Message.ReceivedIslandIpcRequest({
+        requestId,
+        action,
+      }),
+    )
+  }
+  return Option.none()
+}
 const isBeforeInstallPromptEvent = (event: Event): event is BeforeInstallPromptEvent =>
   "prompt" in event && typeof event.prompt === "function" && "userChoice" in event
 
@@ -2033,23 +2203,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           Dom.streamFromEventFilterMap({
             target: window,
             type: "message",
-            filterMapEvent: (event) => {
-              if (!(event instanceof MessageEvent)) {
-                return Option.none()
-              }
-              const data: unknown = event.data
-              if (
-                typeof data === "object" &&
-                data !== null &&
-                "type" in data &&
-                data.type === "pwaislands:navigate" &&
-                "url" in data &&
-                typeof data.url === "string"
-              ) {
-                return Option.some(Message.ReceivedIslandNavigation({ url: data.url }))
-              }
-              return Option.none()
-            },
+            filterMapEvent: parseIslandWindowMessage,
           }),
           Effect.sync(() => isIslandOpen),
         ),

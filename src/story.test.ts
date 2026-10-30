@@ -17,7 +17,9 @@ import {
   DisconnectStorage,
   EntriesState,
   FocusIslandIframe,
+  HandleIslandIpcRequest,
   InstallPrompt,
+  IslandIpcAction,
   Message,
   type Model,
   NavigateHistoryBack,
@@ -33,6 +35,7 @@ import {
   SaveStorageTypePreference,
   StorageState,
   init,
+  parseIslandWindowMessage,
   update,
 } from "./main"
 import * as Modal from "./modal"
@@ -277,6 +280,25 @@ describe("PWA Islands Story Tests", () => {
         message(Message.LoadedIslandIframe()),
         Command.expectExact(FocusIslandIframe()),
         Command.resolve(FocusIslandIframe, Message.CompletedFocusIslandIframe()),
+        message(
+          Message.ReceivedIslandIpcRequest({
+            requestId: "req-1",
+            action: IslandIpcAction.Write({
+              subPath: "unterordner/notiz.txt",
+              data: [65, 66, 67],
+            }),
+          }),
+        ),
+        Command.expectExact(
+          HandleIslandIpcRequest({
+            requestId: "req-1",
+            action: IslandIpcAction.Write({
+              subPath: "unterordner/notiz.txt",
+              data: [65, 66, 67],
+            }),
+          }),
+        ),
+        Command.resolve(HandleIslandIpcRequest, Message.CompletedHandleIslandIpcRequest()),
         message(Message.ReceivedIslandNavigation({ url: "/?pwaislands" })),
         Command.expectExact(
           PushUrl({ url: "/?pwaislands" }),
@@ -361,6 +383,111 @@ describe("PWA Islands Story Tests", () => {
           }),
         ),
         Command.resolve(OpenFileInBrowser, Message.CompletedOpenFileInBrowser()),
+      )
+    })
+
+    it("parses island window postMessage events for navigation and IPC mutations", () => {
+      const writeEvent = new MessageEvent("message", {
+        data: {
+          type: "pwaislands:ipc",
+          requestId: "123",
+          action: "write",
+          subPath: "ordner/test.txt",
+          data: [104, 105],
+        },
+      })
+      expect(parseIslandWindowMessage(writeEvent)).toEqual(
+        Option.some(
+          Message.ReceivedIslandIpcRequest({
+            requestId: "123",
+            action: IslandIpcAction.Write({
+              subPath: "ordner/test.txt",
+              data: [104, 105],
+            }),
+          }),
+        ),
+      )
+
+      const mkdirEvent = new MessageEvent("message", {
+        data: {
+          type: "pwaislands:ipc",
+          requestId: "124",
+          action: "mkdir",
+          subPath: "neuer-ordner",
+        },
+      })
+      expect(parseIslandWindowMessage(mkdirEvent)).toEqual(
+        Option.some(
+          Message.ReceivedIslandIpcRequest({
+            requestId: "124",
+            action: IslandIpcAction.MakeDir({
+              subPath: "neuer-ordner",
+            }),
+          }),
+        ),
+      )
+
+      const renameEvent = new MessageEvent("message", {
+        data: {
+          type: "pwaislands:ipc",
+          requestId: "125",
+          action: "rename",
+          from: "alt.txt",
+          to: "neu.txt",
+        },
+      })
+      expect(parseIslandWindowMessage(renameEvent)).toEqual(
+        Option.some(
+          Message.ReceivedIslandIpcRequest({
+            requestId: "125",
+            action: IslandIpcAction.Rename({
+              from: "alt.txt",
+              to: "neu.txt",
+            }),
+          }),
+        ),
+      )
+
+      const removeEvent = new MessageEvent("message", {
+        data: {
+          type: "pwaislands:ipc",
+          requestId: "126",
+          action: "remove",
+          subPath: "alt.txt",
+          recursive: false,
+        },
+      })
+      expect(parseIslandWindowMessage(removeEvent)).toEqual(
+        Option.some(
+          Message.ReceivedIslandIpcRequest({
+            requestId: "126",
+            action: IslandIpcAction.Remove({
+              subPath: "alt.txt",
+              recursive: false,
+            }),
+          }),
+        ),
+      )
+
+      const copyEvent = new MessageEvent("message", {
+        data: {
+          type: "pwaislands:ipc",
+          requestId: "127",
+          action: "copy",
+          from: "quelle.txt",
+          to: "ziel.txt",
+        },
+      })
+      expect(parseIslandWindowMessage(copyEvent)).toEqual(
+        Option.some(
+          Message.ReceivedIslandIpcRequest({
+            requestId: "127",
+            action: IslandIpcAction.Copy({
+              from: "quelle.txt",
+              to: "ziel.txt",
+            }),
+          }),
+        ),
       )
     })
 
