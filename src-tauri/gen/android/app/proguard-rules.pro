@@ -1,4 +1,5 @@
-# Add project specific ProGuard rules here.
+# Tauri Plugins
+-keep class dev.ssen.pwaislands.FolderPickerPlugin { *; }
 # You can control the set of applied configuration files using the
 # proguardFiles setting in build.gradle.
 #

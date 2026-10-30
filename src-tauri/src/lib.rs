@@ -5,6 +5,7 @@ use std::sync::{OnceLock, RwLock};
 use tauri::http::{header, Response as HttpResponse, StatusCode};
 use tauri::ipc::Response;
 use tauri::Manager;
+#[cfg(desktop)]
 use tauri_plugin_dialog::DialogExt;
 use url::Url;
 
@@ -667,6 +668,16 @@ fn tauri_fs_clear_root() -> Result<(), String> {
   set_storage_root(None)
 }
 
+#[cfg(target_os = "android")]
+struct AndroidFolderPicker<R: tauri::Runtime>(tauri::plugin::PluginHandle<R>);
+
+#[cfg(target_os = "android")]
+#[derive(serde::Deserialize)]
+struct AndroidPickFolderResponse {
+  path: Option<String>,
+}
+
+#[cfg(desktop)]
 #[tauri::command]
 async fn tauri_fs_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
   let maybe_folder = app
@@ -687,10 +698,70 @@ async fn tauri_fs_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, S
   }
 }
 
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn tauri_fs_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+  let picker = app
+    .try_state::<AndroidFolderPicker<tauri::Wry>>()
+    .ok_or_else(|| "Ordnerauswahl-Plugin nicht initialisiert.".to_string())?;
+
+  let res = picker
+    .0
+    .run_mobile_plugin_async::<AndroidPickFolderResponse>("pickFolder", ())
+    .await
+    .map_err(|e| format!("Fehler bei der Ordnerauswahl: {e}"))?;
+
+  match res.path {
+    Some(path_str) => {
+      let trimmed = path_str.trim().to_string();
+      if trimmed.is_empty() {
+        return Ok(None);
+      }
+      let folder = PathBuf::from(&trimmed);
+      if !folder.is_dir() {
+        fs::create_dir_all(&folder).map_err(|e| {
+          format!("Konnte Ordner nicht erstellen oder darauf zugreifen: {e}")
+        })?;
+      }
+      set_storage_root(Some(folder.clone()))?;
+      Ok(Some(folder.to_string_lossy().to_string()))
+    }
+    None => Ok(None),
+  }
+}
+
+#[cfg(all(not(desktop), not(target_os = "android")))]
+#[tauri::command]
+async fn tauri_fs_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+  let base_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| format!("Konnte App-Datenordner nicht ermitteln: {e}"))?;
+  let folder = base_dir.join("islands");
+  fs::create_dir_all(&folder).map_err(|e| format!("Konnte Ordner nicht erstellen: {e}"))?;
+  set_storage_root(Some(folder.clone()))?;
+  Ok(Some(folder.to_string_lossy().to_string()))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
-    .plugin(tauri_plugin_dialog::init())
+  #[allow(unused_mut)]
+  let mut builder = tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init());
+
+  #[cfg(target_os = "android")]
+  {
+    let folder_picker_plugin = tauri::plugin::Builder::<tauri::Wry, ()>::new("folderpicker")
+      .setup(|app, api| {
+        let handle = api.register_android_plugin("dev.ssen.pwaislands", "FolderPickerPlugin")?;
+        app.manage(AndroidFolderPicker(handle));
+        Ok(())
+      })
+      .build();
+    builder = builder.plugin(folder_picker_plugin);
+  }
+
+  builder
     .register_uri_scheme_protocol("pwaislands", |_ctx, request| {
       handle_pwaislands_request(&request)
     })
