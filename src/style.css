@@ -103,6 +103,33 @@ code {
   background: var(--code-bg);
 }
 
+/* SVG Icons (from icons.svg sprite) */
+.svg-icon {
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.file-icon,
+.empty-icon,
+.icon-label-btn-icon,
+.btn-icon-only > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-icon .svg-icon,
+.empty-icon .svg-icon,
+.icon-label-btn-icon .svg-icon,
+.btn-icon-only > span .svg-icon,
+.modal-close-btn .svg-icon,
+.btn-icon .svg-icon {
+  vertical-align: middle;
+}
+
 /* Button Component Styles */
 .btn {
   font-family: var(--sans);
@@ -1301,8 +1328,8 @@ code {
   /*
    * Jede Zeile wird eine Karte:
    *
-   *   [ ✏️ ] [ 📄 Dateiname ... ]   <- Zeile 1: Button, dann Name
-   *          [ Größe ] [ Geändert ]  <- Zeile 2: Metadaten
+   *   [ Stift ] [ Datei-Icon Dateiname ... ]   <- Zeile 1: Button, dann Name
+   *             [ Größe ] [ Geändert ]         <- Zeile 2: Metadaten
    *
    * Die Zeile ist ein Flex-Container mit Umbruch. Button und Name stehen
    * beide in Zeile 1; der Button hat `flex: 0 0 auto` und behaelt seine

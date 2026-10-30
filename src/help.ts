@@ -6,6 +6,7 @@ import type * as Html from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
+import { viewIcon } from "./icons"
 import { HelpTopic, buildHelpUrl } from "./route"
 import { OPFS_APP_FOLDER } from "./storage"
 
@@ -226,7 +227,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               [
                 h.h3(
                   [h.Id("help-modal-title"), h.Class("modal-title")],
-                  [h.span([h.Class("help-title-icon"), h.AriaHidden(true)], ["❓"]), " Hilfe"],
+                  [h.span([h.Class("help-title-icon")], [viewIcon("help", h)]), " Hilfe"],
                 ),
                 h.button(
                   [
@@ -235,7 +236,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                     h.AriaLabel("Schließen"),
                     h.OnClick(Message.ClickedClose()),
                   ],
-                  ["×"],
+                  [viewIcon("close", h)],
                 ),
               ],
             ),
@@ -257,7 +258,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                         h.summary(
                           [h.Class("help-topic-summary")],
                           [
-                            h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["🧩"]),
+                            h.span(
+                              [h.Class("help-topic-marker"), h.AriaHidden(true)],
+                              [viewIcon("puzzle", h)],
+                            ),
                             h.span([h.Class("help-topic-title")], ["PWA Islands bauen"]),
                           ],
                         ),
@@ -468,7 +472,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                         h.summary(
                           [h.Class("help-topic-summary")],
                           [
-                            h.span([h.Class("help-topic-marker"), h.AriaHidden(true)], ["💾"]),
+                            h.span(
+                              [h.Class("help-topic-marker"), h.AriaHidden(true)],
+                              [viewIcon("save", h)],
+                            ),
                             h.span([h.Class("help-topic-title")], ["Speicher: FS API und OPFS"]),
                           ],
                         ),
@@ -493,7 +500,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                             h.div(
                               [h.Class("help-section")],
                               [
-                                h.h4([h.Class("help-heading")], ["📁 Lokaler Ordner (FS API)"]),
+                                h.h4(
+                                  [h.Class("help-heading")],
+                                  [viewIcon("folder", h), " Lokaler Ordner (FS API)"],
+                                ),
                                 h.p(
                                   [h.Class("help-text")],
                                   [
@@ -534,7 +544,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                             h.div(
                               [h.Class("help-section")],
                               [
-                                h.h4([h.Class("help-heading")], ["📦 App-Speicher (OPFS)"]),
+                                h.h4(
+                                  [h.Class("help-heading")],
+                                  [viewIcon("package", h), " App-Speicher (OPFS)"],
+                                ),
                                 h.p(
                                   [h.Class("help-text")],
                                   [
@@ -605,8 +618,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [],
                                               [
                                                 h.th([]),
-                                                h.th([], ["📁 Lokaler Ordner"]),
-                                                h.th([], ["📦 App-Speicher"]),
+                                                h.th(
+                                                  [],
+                                                  [viewIcon("folder", h), " Lokaler Ordner"],
+                                                ),
+                                                h.th([], [viewIcon("package", h), " App-Speicher"]),
                                               ],
                                             ),
                                           ],
@@ -670,9 +686,15 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                                         ),
                                                       ],
                                                       [
+                                                        viewIcon(
+                                                          context.hasDirectoryPicker
+                                                            ? "check"
+                                                            : "cross",
+                                                          h,
+                                                        ),
                                                         context.hasDirectoryPicker
-                                                          ? "✅ verfügbar"
-                                                          : "❌ nicht verfügbar",
+                                                          ? " verfügbar"
+                                                          : " nicht verfügbar",
                                                       ],
                                                     ),
                                                   ],
@@ -689,9 +711,13 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                                         ),
                                                       ],
                                                       [
+                                                        viewIcon(
+                                                          context.hasOPFS ? "check" : "cross",
+                                                          h,
+                                                        ),
                                                         context.hasOPFS
-                                                          ? "✅ verfügbar"
-                                                          : "❌ nicht verfügbar",
+                                                          ? " verfügbar"
+                                                          : " nicht verfügbar",
                                                       ],
                                                     ),
                                                   ],
@@ -707,7 +733,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                 h.p(
                                   [h.Class("help-hint")],
                                   [
-                                    "Wechseln lässt sich die Art jederzeit über das Zahnrad ⚙️. Die Wahl wird gemerkt, die Dateien der jeweils anderen Art bleiben dabei unangetastet.",
+                                    "Wechseln lässt sich die Art jederzeit über das Zahnrad ",
+                                    viewIcon("settings", h),
+                                    ". Die Wahl wird gemerkt, die Dateien der jeweils anderen Art bleiben dabei unangetastet.",
                                   ],
                                 ),
                               ],
@@ -757,7 +785,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                         h.OnClick(Message.ClickedCopyDts()),
                       ],
                       [
-                        h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["📋"]),
+                        h.span(
+                          [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                          [viewIcon("clipboard", h)],
+                        ),
                         CopyDtsState.match(model.copyDtsState, {
                           Idle: () =>
                             h.span(
@@ -766,7 +797,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                             ),
                           Copying: () =>
                             h.span([h.Class("icon-label-btn-text")], ["Wird kopiert …"]),
-                          Copied: () => h.span([h.Class("icon-label-btn-text")], ["✅ Kopiert!"]),
+                          Copied: () =>
+                            h.span(
+                              [h.Class("icon-label-btn-text")],
+                              [viewIcon("check", h), " Kopiert!"],
+                            ),
                           Error: () =>
                             h.span(
                               [h.Class("icon-label-btn-text")],
@@ -785,7 +820,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                         h.OnClick(Message.ClickedClose()),
                       ],
                       [
-                        h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                        h.span(
+                          [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                          [viewIcon("close", h)],
+                        ),
                         h.span([h.Class("icon-label-btn-text")], ["Schließen"]),
                       ],
                     ),

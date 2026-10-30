@@ -11,6 +11,7 @@ import { modifyFields } from "foldkit/struct"
 import * as Subscription from "foldkit/subscription"
 import { Url, toString as urlToString } from "foldkit/url"
 import rootIconUrl from "./assets/pwa-islands.svg"
+import { type IconId, viewIcon } from "./icons"
 import {
   FileSystemHandleStorage,
   TauriStorage,
@@ -2398,59 +2399,59 @@ const PDF_EXTENSIONS = new Set(["pdf"])
 
 const FILE_ICON_GROUPS: ReadonlyArray<{
   readonly extensions: ReadonlySet<string>
-  readonly icon: string
+  readonly icon: IconId
 }> = [
-  { extensions: PREVIEWABLE_IMAGE_EXTENSIONS, icon: "🖼️" },
-  { extensions: PDF_EXTENSIONS, icon: "📕" },
+  { extensions: PREVIEWABLE_IMAGE_EXTENSIONS, icon: "file-image" },
+  { extensions: PDF_EXTENSIONS, icon: "file-pdf" },
   {
     extensions: new Set(["html", "htm", "xhtml"]),
-    icon: "🌐",
+    icon: "file-html",
   },
   {
     extensions: new Set(["js", "mjs", "cjs", "jsx", "ts", "tsx"]),
-    icon: "📜",
+    icon: "file-code",
   },
-  { extensions: new Set(["css"]), icon: "🎨" },
+  { extensions: new Set(["css"]), icon: "file-css" },
   {
     extensions: new Set(["json", "webmanifest", "yml", "yaml", "toml", "ini", "xml"]),
-    icon: "⚙️",
+    icon: "file-config",
   },
   {
     extensions: new Set(["md", "txt"]),
-    icon: "📝",
+    icon: "file-text",
   },
   {
     extensions: new Set(["csv"]),
-    icon: "📊",
+    icon: "file-csv",
   },
   {
     extensions: new Set(["mp3", "wav", "ogg", "m4a", "flac", "aac"]),
-    icon: "🎵",
+    icon: "file-audio",
   },
   {
     extensions: new Set(["mp4", "webm", "mov", "mkv", "avi"]),
-    icon: "🎬",
+    icon: "file-video",
   },
   {
     extensions: new Set(["zip", "gz", "tar", "rar", "7z", "bz2"]),
-    icon: "🗜️",
+    icon: "file-archive",
   },
   {
     extensions: new Set(["ttf", "otf", "woff", "woff2"]),
-    icon: "🔤",
+    icon: "file-font",
   },
 ]
 
-export const fileIconFor = (name: string, isDirectory: boolean): string => {
+export const fileIconFor = (name: string, isDirectory: boolean): IconId => {
   if (isDirectory) {
-    return "📁"
+    return "folder"
   }
   const ext = getFileExtension(name)
   return pipe(
     FILE_ICON_GROUPS,
     Array.findFirst((group) => group.extensions.has(ext)),
     Option.match({
-      onNone: () => "📄",
+      onNone: () => "file",
       onSome: (group) => group.icon,
     }),
   )
@@ -2595,7 +2596,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
             propagation: "Stop",
           }),
         ],
-        ["⚙️"],
+        [viewIcon("settings", h)],
       ),
       h.div(
         [
@@ -2613,7 +2614,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
               h.Role("menuitem"),
               h.OnClick(Message.ClickedOpenHelp()),
             ],
-            ["❓ Hilfe"],
+            [viewIcon("help", h), " Hilfe"],
           ),
           isReady
             ? h.button(
@@ -2624,7 +2625,10 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Role("menuitem"),
                   h.OnClick(Message.ClickedToggleFileInfo()),
                 ],
-                [model.showFileInfo ? "🔢 Datei-Infos ausblenden" : "🔢 Datei-Infos einblenden"],
+                [
+                  viewIcon("file-info", h),
+                  model.showFileInfo ? " Datei-Infos ausblenden" : " Datei-Infos einblenden",
+                ],
               )
             : h.empty,
           canSwitchToOpfs
@@ -2637,7 +2641,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Title("Internen Browser-Speicher (OPFS) verwenden"),
                   h.OnClick(Message.ClickedUseOpfs()),
                 ],
-                ["📦 Zu App-Speicher wechseln"],
+                [viewIcon("package", h), " Zu App-Speicher wechseln"],
               )
             : h.empty,
           canSwitchToFsa
@@ -2649,7 +2653,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Role("menuitem"),
                   h.OnClick(Message.ClickedUseFsa()),
                 ],
-                ["📁 Zu lokalem Ordner wechseln"],
+                [viewIcon("folder", h), " Zu lokalem Ordner wechseln"],
               )
             : h.empty,
           isFsaNoFolder
@@ -2662,7 +2666,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Title("Ordner wählen"),
                   h.OnClick(Message.ClickedSelectFolder()),
                 ],
-                ["📂 Ordner wählen"],
+                [viewIcon("folder-open", h), " Ordner wählen"],
               )
             : h.empty,
           isFsaReady || isFsaPermissionRequired
@@ -2675,7 +2679,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Title("Anderen Ordner wählen"),
                   h.OnClick(Message.ClickedChangeFolder()),
                 ],
-                ["📂 Ordner wechseln"],
+                [viewIcon("folder-open", h), " Ordner wechseln"],
               )
             : h.empty,
           isFsaReady
@@ -2688,7 +2692,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Title("Ordner trennen"),
                   h.OnClick(Message.ClickedDisconnectFolder()),
                 ],
-                ["🔌 Trennen"],
+                [viewIcon("plug", h), " Trennen"],
               )
             : h.empty,
           isInstallAvailable
@@ -2701,7 +2705,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Title("PWA Islands als App installieren"),
                   h.OnClick(Message.ClickedInstallApp()),
                 ],
-                ["📲 App installieren"],
+                [viewIcon("install", h), " App installieren"],
               )
             : h.empty,
         ],
@@ -2743,8 +2747,8 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.span(
                     [h.Class("btn-icon-only"), h.AriaHidden(true)],
                     [
-                      h.span([h.Class("btn-icon-sub")], ["📄"]),
-                      h.span([h.Class("btn-icon-main")], ["➕"]),
+                      h.span([h.Class("btn-icon-sub")], [viewIcon("file", h)]),
+                      h.span([h.Class("btn-icon-main")], [viewIcon("plus", h)]),
                     ],
                   ),
                   h.span([h.Class("btn-label")], ["Datei"]),
@@ -2765,8 +2769,8 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.span(
                     [h.Class("btn-icon-only"), h.AriaHidden(true)],
                     [
-                      h.span([h.Class("btn-icon-sub")], ["📁"]),
-                      h.span([h.Class("btn-icon-main")], ["➕"]),
+                      h.span([h.Class("btn-icon-sub")], [viewIcon("folder", h)]),
+                      h.span([h.Class("btn-icon-main")], [viewIcon("plus", h)]),
                     ],
                   ),
                   h.span([h.Class("btn-label")], ["Ordner"]),
@@ -2784,7 +2788,7 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.OnClick(Message.ClickedImportFiles()),
                 ],
                 [
-                  h.span([h.Class("btn-icon-only"), h.AriaHidden(true)], ["📥"]),
+                  h.span([h.Class("btn-icon-only"), h.AriaHidden(true)], [viewIcon("upload", h)]),
                   h.span([h.Class("btn-label")], ["Hochladen"]),
                 ],
               )
@@ -2841,7 +2845,7 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
           h.span(
             [h.Class("file-name-inner")],
             [
-              h.span([h.Class("file-icon"), h.AriaHidden(true)], [icon]),
+              h.span([h.Class("file-icon"), h.AriaHidden(true)], [viewIcon(icon, h)]),
               h.span([h.Class("file-name"), h.Title(entry.name)], [entry.name]),
             ],
           ),
@@ -2877,7 +2881,7 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
                     propagation: "Stop",
                   }),
                 ],
-                ["✏️ ", h.span([h.Class("btn-label")], ["Bearbeiten"])],
+                [viewIcon("edit", h), h.span([h.Class("btn-label")], ["Bearbeiten"])],
               ),
             ],
           ),
@@ -2896,7 +2900,10 @@ const viewFilesTable = (
     onEmpty: () =>
       h.div(
         [h.Class("empty-state")],
-        [h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📁"]), h.h3([], ["Ordner ist leer"])],
+        [
+          h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("folder", h)]),
+          h.h3([], ["Ordner ist leer"]),
+        ],
       ),
     onNonEmpty: (entries) => viewFilesTableContent(entries, showFileInfo, h),
   })
@@ -2981,7 +2988,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
           h.div(
             [h.Class("empty-state")],
             [
-              h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["📂"]),
+              h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("folder-open", h)]),
               h.h3([], ["Kein Ordner ausgewählt"]),
               h.p([], ["Wähle einen lokalen Ordner, in dem deine Projekte gespeichert werden."]),
               h.div(
@@ -2994,7 +3001,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
                       h.Class("btn btn-primary"),
                       h.OnClick(Message.ClickedSelectFolder()),
                     ],
-                    ["📂 Ordner wählen"],
+                    [viewIcon("folder-open", h), " Ordner wählen"],
                   ),
                 ],
               ),
@@ -3005,7 +3012,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
           h.div(
             [h.Class("empty-state")],
             [
-              h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["🔒"]),
+              h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("lock", h)]),
               h.h3([], ["Zugriff erforderlich"]),
               h.p(
                 [],
@@ -3042,7 +3049,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
               h.div(
                 [h.Class("empty-state")],
                 [
-                  h.div([h.Class("empty-icon"), h.AriaHidden(true)], ["⚠️"]),
+                  h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("warning", h)]),
                   h.h3([], ["Fehler beim Lesen der Dateien"]),
                   h.p([], [message]),
                   h.button(

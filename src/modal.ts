@@ -22,6 +22,7 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
+import { viewIcon } from "./icons"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
 import { StarterTemplate } from "./templates"
 import { getStoredUserTemplates } from "./storage"
@@ -823,7 +824,7 @@ const viewImportConflictModal = (
                   h.AriaLabel("Schließen"),
                   h.OnClick(Message.ClickedCancelImportConflict()),
                 ],
-                ["×"],
+                [viewIcon("close", h)],
               ),
             ],
           ),

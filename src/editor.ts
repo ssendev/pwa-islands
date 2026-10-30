@@ -17,6 +17,7 @@ import {
   requireActiveStorage,
   revokeActivePreviewUrl,
 } from "./files"
+import { viewIcon } from "./icons"
 import {
   deleteUserTemplate,
   getStoredUserTemplates,
@@ -1215,7 +1216,7 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
                   h.AriaLabel("Aktuellen Inhalt als eigene Vorlage speichern"),
                   h.OnClick(Message.ClickedOpenSaveTemplate()),
                 ],
-                [h.span([h.AriaHidden(true)], ["💾"])],
+                [viewIcon("save", h)],
               )
             : h.empty,
           isCustomSelected && !state.isSavingTemplate && !state.isDeletingTemplate
@@ -1228,7 +1229,7 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
                   h.AriaLabel("Ausgewählte eigene Vorlage löschen"),
                   h.OnClick(Message.ClickedOpenDeleteTemplate()),
                 ],
-                [h.span([h.AriaHidden(true)], ["🗑️"])],
+                [viewIcon("trash", h)],
               )
             : h.empty,
         ],
@@ -1255,7 +1256,10 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
                   h.OnClick(Message.ClickedCancelSaveTemplate()),
                 ],
                 [
-                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                  h.span(
+                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                    [viewIcon("close", h)],
+                  ),
                   h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
                 ],
               ),
@@ -1269,7 +1273,10 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
                   h.OnClick(Message.ClickedConfirmSaveTemplate()),
                 ],
                 [
-                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["💾"]),
+                  h.span(
+                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                    [viewIcon("save", h)],
+                  ),
                   h.span([h.Class("icon-label-btn-text")], ["Speichern"]),
                 ],
               ),
@@ -1294,7 +1301,10 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
                   h.OnClick(Message.ClickedCancelDeleteTemplate()),
                 ],
                 [
-                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                  h.span(
+                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                    [viewIcon("close", h)],
+                  ),
                   h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
                 ],
               ),
@@ -1308,7 +1318,10 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
                   h.OnClick(Message.ClickedConfirmDeleteTemplate()),
                 ],
                 [
-                  h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["🗑️"]),
+                  h.span(
+                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                    [viewIcon("trash", h)],
+                  ),
                   h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
                 ],
               ),
@@ -1487,7 +1500,7 @@ const viewEditorModal = (
                   h.AriaLabel("Schließen"),
                   h.OnClick(Message.ClickedClose()),
                 ],
-                ["×"],
+                [viewIcon("close", h)],
               ),
             ],
           ),
@@ -1538,7 +1551,10 @@ const viewEditorModal = (
                               h.OnClick(Message.ClickedDelete()),
                             ],
                             [
-                              h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["🗑️"]),
+                              h.span(
+                                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                [viewIcon("trash", h)],
+                              ),
                               h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
                             ],
                           )
@@ -1559,7 +1575,10 @@ const viewEditorModal = (
                               h.OnClick(Message.ClickedCopyDts()),
                             ],
                             [
-                              h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["📋"]),
+                              h.span(
+                                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                [viewIcon("clipboard", h)],
+                              ),
                               h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
                             ],
                           )
@@ -1574,7 +1593,10 @@ const viewEditorModal = (
                           h.OnClick(Message.ClickedClose()),
                         ],
                         [
-                          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["✕"]),
+                          h.span(
+                            [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                            [viewIcon("close", h)],
+                          ),
                           h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
                         ],
                       ),
@@ -1588,7 +1610,10 @@ const viewEditorModal = (
                           h.OnClick(Message.ClickedSave(), { defaultAction: "Prevent" }),
                         ],
                         [
-                          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], ["💾"]),
+                          h.span(
+                            [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                            [viewIcon("save", h)],
+                          ),
                           h.span([h.Class("icon-label-btn-text")], [saveLabel]),
                         ],
                       ),
@@ -1633,7 +1658,7 @@ const viewConfirmDeleteModal = (
                   h.AriaLabel("Schließen"),
                   h.OnClick(Message.ClickedCancelDelete()),
                 ],
-                ["×"],
+                [viewIcon("close", h)],
               ),
             ],
           ),
@@ -1706,7 +1731,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
                   h.AriaLabel("Schließen"),
                   h.OnClick(Message.ClickedCancelOverwrite()),
                 ],
-                ["×"],
+                [viewIcon("close", h)],
               ),
             ],
           ),
