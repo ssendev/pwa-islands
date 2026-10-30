@@ -8,6 +8,7 @@ import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { maskableIcon } from "./tools/maskable-icon.ts"
+import { notoEmoji } from "./tools/noto-emoji.ts"
 
 const root = fileURLToPath(new URL(".", import.meta.url))
 const apiTypesEntry = join(root, "src", "api-types.ts")
@@ -214,6 +215,7 @@ export default defineConfig({
     foldkit(),
     ...islandsApiPlugin(),
     maskableIcon(),
+    notoEmoji(),
     VitePWA({
       strategies: "injectManifest",
       srcDir: "src",

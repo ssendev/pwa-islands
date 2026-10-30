@@ -103,7 +103,7 @@ code {
   background: var(--code-bg);
 }
 
-/* SVG Icons (@svgmoji/noto) */
+/* SVG Icons (Google Noto Emoji) */
 .svg-icon {
   width: 1em;
   height: 1em;

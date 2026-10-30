@@ -16,13 +16,11 @@
     "lint": "oxlint src && npm run -s patch:effect && oxlint --config .oxlintrc.effect.json --deny-warnings src",
     "patch:effect": "effect-tsgo patch --no-typescript --oxlint &>/dev/null || effect-tsgo patch --no-typescript --oxlint",
     "fix": "npm run -s format && npm run -s lint && npm run -s typecheck",
-    "update:icons": "node scripts/extract-noto.js",
     "update:vendored-foldkit": "scripts/update-vendored-foldkit.sh"
   },
   "dependencies": {
     "@effect/platform-browser": "^4.0.0",
     "@foldkit/ui": "^0.169.0",
-    "@svgmoji/noto": "^3.2.0",
     "@tauri-apps/api": "^2.12.4",
     "effect": "^4.0.0",
     "foldkit": "^0.169.0"
