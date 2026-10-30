@@ -16,9 +16,12 @@ import {
   ActivateOpfsBackend,
   DisconnectStorage,
   EntriesState,
+  FocusIslandIframe,
   InstallPrompt,
   Message,
   type Model,
+  NavigateHistoryBack,
+  NavigateHistoryForward,
   NavigateToSubfolder,
   OpenFileInBrowser,
   PickLocalDirectory,
@@ -264,11 +267,16 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(tauriReadyModel),
         message(Message.ClickedEntryRow({ entry: sampleEntries[1] })),
+        Command.expectExact(PushUrl({ url: "/unterordner/index.html" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
         model((m) => {
           expect(m.maybeActiveIslandUrl).toEqual(
             Option.some("pwaislands://localhost/unterordner/index.html"),
           )
         }),
+        message(Message.LoadedIslandIframe()),
+        Command.expectExact(FocusIslandIframe()),
+        Command.resolve(FocusIslandIframe, Message.CompletedFocusIslandIframe()),
         message(Message.ReceivedIslandNavigation({ url: "/?pwaislands" })),
         Command.expectExact(
           PushUrl({ url: "/?pwaislands" }),
@@ -283,6 +291,57 @@ describe("PWA Islands Story Tests", () => {
               entries: sampleEntries,
             }),
           ],
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.none())
+        }),
+      )
+    })
+
+    it("supports browser history back/forward and URL sync for Tauri island iframe", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: ["unterordner"],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      story(
+        update,
+        given(tauriReadyModel),
+        message(Message.PressedNavigateBack()),
+        Command.expectExact(NavigateHistoryBack()),
+        Command.resolve(NavigateHistoryBack, Message.CompletedNavigateHistoryBack()),
+        message(Message.PressedNavigateForward()),
+        Command.expectExact(NavigateHistoryForward()),
+        Command.resolve(NavigateHistoryForward, Message.CompletedNavigateHistoryForward()),
+        message(
+          Message.ChangedUrl({
+            url: Option.getOrThrow(fromString("http://localhost:5173/unterordner/index.html")),
+          }),
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(
+            Option.some("pwaislands://localhost/unterordner/index.html"),
+          )
+        }),
+        message(
+          Message.ChangedUrl({
+            url: Option.getOrThrow(fromString("http://localhost:5173/unterordner?pwaislands")),
+          }),
+        ),
+        Command.expectExact(RefreshEntries({ subPath: ["unterordner"] })),
+        Command.resolve(
+          RefreshEntries,
+          Message.SucceededRefreshEntries({
+            subPath: ["unterordner"],
+            entries: sampleEntries,
+          }),
         ),
         model((m) => {
           expect(m.maybeActiveIslandUrl).toEqual(Option.none())

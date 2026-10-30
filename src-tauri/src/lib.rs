@@ -415,12 +415,7 @@ fn handle_pwaislands_request(
   };
 
   let actual_path = if file_path.is_dir() {
-    let index = file_path.join("index.html");
-    if index.is_file() {
-      index
-    } else {
-      file_path
-    }
+    file_path.join("index.html")
   } else {
     file_path
   };
@@ -749,5 +744,39 @@ mod tests {
     let body_str = std::str::from_utf8(res.body()).unwrap();
     assert!(body_str.contains("pwaislands:navigate"));
     assert!(body_str.contains("\"/?pwaislands\""));
+  }
+
+  #[test]
+  fn test_handle_pwaislands_directory_index_fallback() {
+    let root = PathBuf::from(STORAGE_ROOT);
+    let subfolder = root.join("test_dir_fallback");
+    let _ = fs::remove_dir_all(&subfolder);
+    fs::create_dir_all(&subfolder).unwrap();
+
+    // Directory without index.html should return 404 Not Found (not 500 Is a directory)
+    let req_empty_dir = Request::builder()
+      .uri("pwaislands://localhost/test_dir_fallback/")
+      .body(Vec::new())
+      .unwrap();
+    let res_empty = handle_pwaislands_request(&req_empty_dir);
+    assert_eq!(res_empty.status(), StatusCode::NOT_FOUND);
+
+    // Directory with index.html should return 200 OK with index.html content
+    let index_file = subfolder.join("index.html");
+    fs::write(&index_file, b"<h1>Subfolder Index</h1>").unwrap();
+
+    let req_with_index = Request::builder()
+      .uri("pwaislands://localhost/test_dir_fallback/")
+      .body(Vec::new())
+      .unwrap();
+    let res_with_index = handle_pwaislands_request(&req_with_index);
+    assert_eq!(res_with_index.status(), StatusCode::OK);
+    assert_eq!(
+      res_with_index.headers().get(header::CONTENT_TYPE).unwrap(),
+      "text/html"
+    );
+    assert_eq!(res_with_index.body().as_ref(), b"<h1>Subfolder Index</h1>");
+
+    let _ = fs::remove_dir_all(&subfolder);
   }
 }

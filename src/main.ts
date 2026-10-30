@@ -291,6 +291,8 @@ export const Message = defineMessageUnion({
     entry: FileEntry,
   },
   CompletedOpenFileInBrowser: {},
+  LoadedIslandIframe: {},
+  CompletedFocusIslandIframe: {},
   ReceivedIslandNavigation: {
     url: Schema.String,
   },
@@ -303,6 +305,10 @@ export const Message = defineMessageUnion({
   CompletedPushUrl: {},
   CompletedReplaceUrl: {},
   CompletedLoadUrl: {},
+  PressedNavigateBack: {},
+  PressedNavigateForward: {},
+  CompletedNavigateHistoryBack: {},
+  CompletedNavigateHistoryForward: {},
   FailedNavigateToSubfolder: {
     message: Schema.String,
   },
@@ -912,6 +918,32 @@ export const LoadUrl = Command.define("LoadUrl", {
   execute: (args) => Navigation.load(args.url).pipe(Effect.as(Message.CompletedLoadUrl())),
 })
 
+export const FocusIslandIframe = Command.define("FocusIslandIframe", {
+  messages: [Message.CompletedFocusIslandIframe],
+  execute: Dom.focus("#island-iframe").pipe(
+    Effect.tap(() =>
+      Effect.sync(() => {
+        const el = document.getElementById("island-iframe")
+        if (el instanceof HTMLIFrameElement) {
+          el.contentWindow?.focus()
+        }
+      }),
+    ),
+    Effect.as(Message.CompletedFocusIslandIframe()),
+    Effect.catch(() => Effect.succeed(Message.CompletedFocusIslandIframe())),
+  ),
+})
+
+export const NavigateHistoryBack = Command.define("NavigateHistoryBack", {
+  messages: [Message.CompletedNavigateHistoryBack],
+  execute: Navigation.back().pipe(Effect.as(Message.CompletedNavigateHistoryBack())),
+})
+
+export const NavigateHistoryForward = Command.define("NavigateHistoryForward", {
+  messages: [Message.CompletedNavigateHistoryForward],
+  execute: Navigation.forward().pipe(Effect.as(Message.CompletedNavigateHistoryForward())),
+})
+
 export const TriggerInstallAppPrompt = Command.define("TriggerInstallAppPrompt", {
   messages: [Message.CompletedTriggerInstallAppPrompt],
   execute: Effect.tryPromise({
@@ -1285,10 +1317,13 @@ export const update = (
         }
       }
       if (isTauriStorageState(model.storageState)) {
+        const islandUrl = buildTauriIslandUrl(subPath, entry.name)
+        const fileUrl = `/${encodeSubPath([...subPath, entry.name])}`
         return {
           model: modifyFields(model, {
-            maybeActiveIslandUrl: () => Option.some(buildTauriIslandUrl(subPath, entry.name)),
+            maybeActiveIslandUrl: () => Option.some(islandUrl),
           }),
+          commands: [PushUrl({ url: fileUrl })],
         }
       }
       return {
@@ -1303,6 +1338,13 @@ export const update = (
     },
 
     CompletedOpenFileInBrowser: () => ({ model }),
+
+    LoadedIslandIframe: () => ({
+      model,
+      commands: [FocusIslandIframe()],
+    }),
+
+    CompletedFocusIslandIframe: () => ({ model }),
 
     ReceivedIslandNavigation: ({ url }) => {
       const subPath = currentSubPathFromStorageState(model.storageState)
@@ -1327,6 +1369,34 @@ export const update = (
       }),
 
     ChangedUrl: ({ url }) => {
+      const wasIslandOpen = Option.isSome(model.maybeActiveIslandUrl)
+      const searchStr = Option.getOrElse(url.search, () => "")
+      const searchParams = new URLSearchParams(
+        searchStr.startsWith("?") ? searchStr : `?${searchStr}`,
+      )
+      if (isTauriStorageState(model.storageState) && !searchParams.has("pwaislands")) {
+        const segments = pipe(
+          url.pathname.split("/"),
+          Array.filter((s) => s !== ""),
+          Array.map((s) => {
+            try {
+              return decodeURIComponent(s)
+            } catch {
+              return s
+            }
+          }),
+        )
+        if (Array.isReadonlyArrayNonEmpty(segments)) {
+          const fileName = Array.lastNonEmpty(segments)
+          const subPath = Array.dropRight(segments, 1)
+          return {
+            model: modifyFields(model, {
+              maybeActiveIslandUrl: () => Option.some(buildTauriIslandUrl(subPath, fileName)),
+            }),
+          }
+        }
+      }
+
       const route = parseUrlToRoute(url)
       const modelWithRoute = modifyFields(model, {
         maybeActiveIslandUrl: () => Option.none(),
@@ -1351,6 +1421,7 @@ export const update = (
                     isSettingsOpen: () => false,
                     modalState: () => nextModalState,
                   }),
+                  ...(wasIslandOpen ? { commands: [RefreshEntries({ subPath })] } : {}),
                 }
               }
               return {
@@ -1455,6 +1526,19 @@ export const update = (
     CompletedPushUrl: () => ({ model }),
     CompletedReplaceUrl: () => ({ model }),
     CompletedLoadUrl: () => ({ model }),
+
+    PressedNavigateBack: () => ({
+      model,
+      commands: [NavigateHistoryBack()],
+    }),
+
+    PressedNavigateForward: () => ({
+      model,
+      commands: [NavigateHistoryForward()],
+    }),
+
+    CompletedNavigateHistoryBack: () => ({ model }),
+    CompletedNavigateHistoryForward: () => ({ model }),
 
     // Settings & Storage Actions
     ClickedToggleSettings: () => ({
@@ -1724,7 +1808,7 @@ export const update = (
           model: modifyFields(model, {
             maybeActiveIslandUrl: () => Option.none(),
           }),
-          commands: [RefreshEntries({ subPath })],
+          commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RefreshEntries({ subPath })],
         }
       }
       if (!Modal.isOpen(model.modalState)) {
@@ -1911,6 +1995,29 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           ],
         }),
     },
+  ),
+
+  historyShortcuts: Subscription.persistentEntry(
+    Dom.streamFromKeyBindings<Message>({
+      bindings: [
+        {
+          keys: "Alt+ArrowLeft",
+          mapEvent: () => Message.PressedNavigateBack(),
+        },
+        {
+          keys: "Meta+[",
+          mapEvent: () => Message.PressedNavigateBack(),
+        },
+        {
+          keys: "Alt+ArrowRight",
+          mapEvent: () => Message.PressedNavigateForward(),
+        },
+        {
+          keys: "Meta+]",
+          mapEvent: () => Message.PressedNavigateForward(),
+        },
+      ],
+    }),
   ),
 
   islandNavigation: entry(
@@ -2696,12 +2803,17 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
 
 // VIEW DOCUMENT
 
+const ISLAND_IFRAME_SANDBOX =
+  "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
+
 const viewIslandIframe = (islandUrl: string, h: HtmlBuilder): Html.Html =>
   h.iframe([
     h.Id("island-iframe"),
     h.Class("island-iframe"),
     h.Src(islandUrl),
+    h.Sandbox(ISLAND_IFRAME_SANDBOX),
     h.Title("PWA Island"),
+    h.OnLoad(Message.LoadedIslandIframe()),
   ])
 
 const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html =>

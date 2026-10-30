@@ -310,10 +310,16 @@ describe("PWA Islands Scene Tests", () => {
       given(tauriReadyModel),
       sceneExpect(selector("#island-iframe")).toBeAbsent(),
       click(text("index.html")),
+      Command.expectExact(PushUrl({ url: "/unterordner/index.html" })),
+      Command.resolve(PushUrl, Message.CompletedPushUrl()),
       sceneExpect(selector("#island-iframe")).toExist(),
       sceneExpect(selector("#island-iframe")).toHaveAttr(
         "src",
         "pwaislands://localhost/unterordner/index.html",
+      ),
+      sceneExpect(selector("#island-iframe")).toHaveAttr(
+        "sandbox",
+        "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads",
       ),
     )
   })
