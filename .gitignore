@@ -31,3 +31,6 @@ dev-dist
 
 # Agent environments
 .gemini
+
+# Kotlin / Gradle
+.kotlin
