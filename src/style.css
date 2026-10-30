@@ -103,13 +103,16 @@ code {
   background: var(--code-bg);
 }
 
-/* SVG Icons (from icons.svg sprite) */
+/* SVG Icons (@fluentui-emoji/svg) */
 .svg-icon {
   width: 1em;
   height: 1em;
   vertical-align: -0.125em;
   flex-shrink: 0;
   display: inline-block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .file-icon,
