@@ -8,27 +8,50 @@ use url::Url;
 const STORAGE_ROOT: &str = "/tmp/PWA-Islands";
 
 const ISLANDS_APP_JS: &str = r#"// PWA Islands API for Tauri custom protocol
-const invoke = (cmd, args) => {
-  if (typeof window !== "undefined" && window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
-    return window.__TAURI_INTERNALS__.invoke(cmd, args);
+const API_BASE = "/__pwaislands_api__";
+
+async function apiRequest(endpoint, options = {}) {
+  const res = await fetch(`${API_BASE}/${endpoint}`, options);
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    throw new Error(errText || `HTTP ${res.status}`);
   }
-  return Promise.reject(new Error("Tauri IPC ist nicht verfügbar."));
-};
+  return res;
+}
 
 function normalizePath(path) {
   if (!path) return "";
   return path.replace(/^\/+/g, "").replace(/\/+$/g, "").replace(/\/+/g, "/");
 }
 
-function splitEntryPath(path) {
-  const parts = normalizePath(path).split("/").filter(Boolean);
-  if (parts.length === 0) {
-    throw new Error("Ungültiger Pfad: Datei- oder Ordnername fehlt.");
+function checkTextBytes(bytes) {
+  if (bytes.byteLength === 0) {
+    return { kind: "empty" };
   }
-  return {
-    dirs: parts.slice(0, -1),
-    name: parts[parts.length - 1],
-  };
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return { kind: "binary", reason: "ungültiges UTF-8" };
+  }
+  const roundTrip = new TextEncoder().encode(text);
+  if (roundTrip.byteLength !== bytes.byteLength) {
+    return {
+      kind: "binary",
+      reason: `${bytes.byteLength} Bytes gelesen, ${roundTrip.byteLength} Bytes beim Zurückschreiben`,
+    };
+  }
+  for (let i = 0; i < bytes.byteLength; i++) {
+    if (bytes[i] !== roundTrip[i]) {
+      const hexFound = `0x${bytes[i].toString(16).padStart(2, "0")}`;
+      const hexRound = `0x${roundTrip[i].toString(16).padStart(2, "0")}`;
+      return {
+        kind: "binary",
+        reason: `Abweichung an Byte ${i} (gelesen ${hexFound}, zurückgeschrieben ${hexRound})`,
+      };
+    }
+  }
+  return { kind: "text", text };
 }
 
 const islandEntrySort = (a, b) => {
@@ -42,7 +65,8 @@ const islandEntrySort = (a, b) => {
 const islands = {
   async list(path = "") {
     const cleanPath = normalizePath(path);
-    const raw = await invoke("tauri_fs_list_entries", { subPath: cleanPath });
+    const res = await apiRequest(`list?subPath=${encodeURIComponent(cleanPath)}`);
+    const raw = await res.json();
     const entries = (raw || []).map((entry) => {
       const entryPath = cleanPath ? `${cleanPath}/${entry.name}` : entry.name;
       if (entry.isDirectory) {
@@ -61,25 +85,30 @@ const islands = {
 
   async read(path, options) {
     const cleanPath = normalizePath(path);
-    const buffer = await invoke("tauri_fs_read_file", { subPath: cleanPath });
+    const res = await apiRequest(`read?subPath=${encodeURIComponent(cleanPath)}`);
+    const buffer = await res.arrayBuffer();
     const bytes = new Uint8Array(buffer);
-    const decoder = new TextDecoder("utf-8", { fatal: options?.ensureText ?? false });
-    try {
-      return decoder.decode(bytes);
-    } catch {
-      throw new Error(`Datei ist kein gültiger UTF-8-Text: (${path}).`);
+    if (options?.ensureText) {
+      const check = checkTextBytes(bytes);
+      if (check.kind === "binary") {
+        throw new Error(`Datei ist kein gültiger UTF-8-Text: ${check.reason} (${path}).`);
+      }
+      return check.kind === "text" ? check.text : "";
     }
+    return new TextDecoder("utf-8").decode(bytes);
   },
 
   async readBlob(path) {
     const cleanPath = normalizePath(path);
-    const buffer = await invoke("tauri_fs_read_file", { subPath: cleanPath });
+    const res = await apiRequest(`read?subPath=${encodeURIComponent(cleanPath)}`);
+    const buffer = await res.arrayBuffer();
     return new Blob([buffer]);
   },
 
   async exists(path) {
     const cleanPath = normalizePath(path);
-    return await invoke("tauri_fs_exists", { subPath: cleanPath });
+    const res = await apiRequest(`exists?subPath=${encodeURIComponent(cleanPath)}`);
+    return await res.json();
   },
 
   async write(path, content, options) {
@@ -102,37 +131,45 @@ const islands = {
       bytes = new Uint8Array(content);
     }
 
-    await invoke("tauri_fs_write_file", {
-      subPath: cleanPath,
-      data: Array.from(bytes),
+    await apiRequest(`write?subPath=${encodeURIComponent(cleanPath)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: bytes,
     });
   },
 
   async makeDir(path) {
     const cleanPath = normalizePath(path);
-    await invoke("tauri_fs_create_dir", { subPath: cleanPath });
+    await apiRequest(`mkdir?subPath=${encodeURIComponent(cleanPath)}`, {
+      method: "POST",
+    });
   },
 
   async rename(from, to) {
-    await invoke("tauri_fs_rename", {
-      fromSubPath: normalizePath(from),
-      toSubPath: normalizePath(to),
-    });
+    const cleanFrom = normalizePath(from);
+    const cleanTo = normalizePath(to);
+    await apiRequest(
+      `rename?from=${encodeURIComponent(cleanFrom)}&to=${encodeURIComponent(cleanTo)}`,
+      { method: "POST" }
+    );
   },
 
   async remove(path, options) {
     const recursive = options?.recursive ?? false;
-    await invoke("tauri_fs_remove_entry", {
-      subPath: normalizePath(path),
-      isDirectory: recursive,
-    });
+    const cleanPath = normalizePath(path);
+    await apiRequest(
+      `remove?subPath=${encodeURIComponent(cleanPath)}&recursive=${recursive ? "true" : "false"}`,
+      { method: "POST" }
+    );
   },
 
   async copy(from, to) {
-    await invoke("tauri_fs_copy", {
-      fromSubPath: normalizePath(from),
-      toSubPath: normalizePath(to),
-    });
+    const cleanFrom = normalizePath(from);
+    const cleanTo = normalizePath(to);
+    await apiRequest(
+      `copy?from=${encodeURIComponent(cleanFrom)}&to=${encodeURIComponent(cleanTo)}`,
+      { method: "POST" }
+    );
   },
 };
 
@@ -162,11 +199,133 @@ fn resolve_path(rel_path: &str) -> Result<PathBuf, String> {
   Ok(resolved)
 }
 
+fn extract_query_param(query: &str, key: &str) -> String {
+  for pair in query.split('&') {
+    if let Some((k, v)) = pair.split_once('=') {
+      if k == key {
+        return urlencoding::decode(v)
+          .map(|c| c.into_owned())
+          .unwrap_or_else(|_| v.to_string());
+      }
+    }
+  }
+  String::new()
+}
+
+fn json_response(status: StatusCode, body: Vec<u8>) -> HttpResponse<Cow<'static, [u8]>> {
+  HttpResponse::builder()
+    .status(status)
+    .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+    .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+    .body(Cow::Owned(body))
+    .unwrap_or_else(|_| HttpResponse::default())
+}
+
+fn text_response(status: StatusCode, msg: impl Into<String>) -> HttpResponse<Cow<'static, [u8]>> {
+  HttpResponse::builder()
+    .status(status)
+    .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+    .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+    .body(Cow::Owned(msg.into().into_bytes()))
+    .unwrap_or_else(|_| HttpResponse::default())
+}
+
+fn handle_api_request(
+  action: &str,
+  query: &str,
+  request: &tauri::http::Request<Vec<u8>>,
+) -> HttpResponse<Cow<'static, [u8]>> {
+  match action {
+    "list" => {
+      let sub_path = extract_query_param(query, "subPath");
+      match tauri_fs_list_entries(sub_path) {
+        Ok(entries) => match serde_json::to_vec(&entries) {
+          Ok(json) => json_response(StatusCode::OK, json),
+          Err(e) => text_response(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()),
+        },
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    "read" => {
+      let sub_path = extract_query_param(query, "subPath");
+      match resolve_path(&sub_path) {
+        Ok(path) => match fs::read(&path) {
+          Ok(data) => HttpResponse::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/octet-stream")
+            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+            .body(Cow::Owned(data))
+            .unwrap_or_else(|_| HttpResponse::default()),
+          Err(e) => text_response(
+            StatusCode::NOT_FOUND,
+            format!("Fehler beim Lesen der Datei: {e}"),
+          ),
+        },
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    "exists" => {
+      let sub_path = extract_query_param(query, "subPath");
+      match tauri_fs_exists(sub_path) {
+        Ok(exists) => json_response(
+          StatusCode::OK,
+          if exists {
+            b"true".to_vec()
+          } else {
+            b"false".to_vec()
+          },
+        ),
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    "write" => {
+      let sub_path = extract_query_param(query, "subPath");
+      let data = request.body().clone();
+      match tauri_fs_write_file(sub_path, data) {
+        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    "mkdir" => {
+      let sub_path = extract_query_param(query, "subPath");
+      match tauri_fs_create_dir(sub_path) {
+        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    "rename" => {
+      let from = extract_query_param(query, "from");
+      let to = extract_query_param(query, "to");
+      match tauri_fs_rename(from, to) {
+        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    "remove" => {
+      let sub_path = extract_query_param(query, "subPath");
+      let recursive = extract_query_param(query, "recursive") == "true";
+      match tauri_fs_remove_entry(sub_path, recursive) {
+        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    "copy" => {
+      let from = extract_query_param(query, "from");
+      let to = extract_query_param(query, "to");
+      match tauri_fs_copy(from, to) {
+        Ok(()) => json_response(StatusCode::OK, b"true".to_vec()),
+        Err(e) => text_response(StatusCode::BAD_REQUEST, e),
+      }
+    }
+    _ => text_response(StatusCode::NOT_FOUND, "Unbekannter API-Endpunkt"),
+  }
+}
+
 fn handle_pwaislands_request(
   request: &tauri::http::Request<Vec<u8>>,
 ) -> HttpResponse<Cow<'static, [u8]>> {
   let uri = request.uri().to_string();
-  let decoded_path = match Url::parse(&uri) {
+  let (decoded_path, query) = match Url::parse(&uri) {
     Ok(parsed_url) => {
       let raw_path = match (parsed_url.host_str(), parsed_url.path()) {
         (Some("localhost") | None, path) => path.to_string(),
@@ -178,19 +337,27 @@ fn handle_pwaislands_request(
           }
         }
       };
-      urlencoding::decode(&raw_path)
+      let decoded = urlencoding::decode(&raw_path)
         .map(|c| c.into_owned())
-        .unwrap_or(raw_path)
+        .unwrap_or(raw_path);
+      let q = parsed_url.query().unwrap_or("").to_string();
+      (decoded, q)
     }
     Err(_) => {
       let raw_path = request.uri().path();
-      urlencoding::decode(raw_path)
+      let decoded = urlencoding::decode(raw_path)
         .map(|c| c.into_owned())
-        .unwrap_or_else(|_| raw_path.to_string())
+        .unwrap_or_else(|_| raw_path.to_string());
+      let q = request.uri().query().unwrap_or("").to_string();
+      (decoded, q)
     }
   };
 
   let sub_path = decoded_path.trim_start_matches('/');
+
+  if let Some(action) = sub_path.strip_prefix("__pwaislands_api__/") {
+    return handle_api_request(action, &query, request);
+  }
 
   if sub_path == "app.js" || sub_path == "api.js" {
     return HttpResponse::builder()
@@ -389,12 +556,41 @@ fn tauri_fs_init_root() -> Result<String, String> {
   Ok(root.to_string_lossy().to_string())
 }
 
+const ISOLATE_TAURI_SCRIPT: &str = r#"const __isCustomProtocol = window.location.protocol === "pwaislands:" || window.location.hostname === "pwaislands.localhost";
+if (__isCustomProtocol) {
+  const __denyTauriInternals = () => {
+    try {
+      delete window.__TAURI_INTERNALS__;
+      delete window.__TAURI__;
+      delete window.__TAURI_IPC__;
+      Object.defineProperty(window, "__TAURI_INTERNALS__", {
+        value: undefined,
+        writable: false,
+        configurable: false,
+      });
+      Object.defineProperty(window, "__TAURI__", {
+        value: undefined,
+        writable: false,
+        configurable: false,
+      });
+      Object.defineProperty(window, "__TAURI_IPC__", {
+        value: undefined,
+        writable: false,
+        configurable: false,
+      });
+    } catch {}
+  };
+  __denyTauriInternals();
+}
+"#;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .register_uri_scheme_protocol("pwaislands", |_ctx, request| {
       handle_pwaislands_request(&request)
     })
+    .append_invoke_initialization_script(ISOLATE_TAURI_SCRIPT)
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -486,5 +682,54 @@ mod tests {
       res_api.headers().get(header::CONTENT_TYPE).unwrap(),
       "text/javascript; charset=utf-8"
     );
+    let body_str = std::str::from_utf8(res_api.body()).unwrap();
+    assert!(!body_str.contains("__TAURI_INTERNALS__"));
+    assert!(body_str.contains("/__pwaislands_api__"));
+  }
+
+  #[test]
+  fn test_handle_pwaislands_api_endpoints() {
+    let root = PathBuf::from(STORAGE_ROOT);
+    fs::create_dir_all(&root).unwrap();
+
+    // Write file via API
+    let write_req = Request::builder()
+      .method("POST")
+      .uri("pwaislands://localhost/__pwaislands_api__/write?subPath=api_test.txt")
+      .body(b"Test Content".to_vec())
+      .unwrap();
+    let write_res = handle_pwaislands_request(&write_req);
+    assert_eq!(write_res.status(), StatusCode::OK);
+
+    // Exists via API
+    let exists_req = Request::builder()
+      .uri("pwaislands://localhost/__pwaislands_api__/exists?subPath=api_test.txt")
+      .body(Vec::new())
+      .unwrap();
+    let exists_res = handle_pwaislands_request(&exists_req);
+    assert_eq!(exists_res.status(), StatusCode::OK);
+    assert_eq!(exists_res.body().as_ref(), b"true");
+
+    // Read via API
+    let read_req = Request::builder()
+      .uri("pwaislands://localhost/__pwaislands_api__/read?subPath=api_test.txt")
+      .body(Vec::new())
+      .unwrap();
+    let read_res = handle_pwaislands_request(&read_req);
+    assert_eq!(read_res.status(), StatusCode::OK);
+    assert_eq!(read_res.body().as_ref(), b"Test Content");
+
+    // Remove via API
+    let rm_req = Request::builder()
+      .method("POST")
+      .uri("pwaislands://localhost/__pwaislands_api__/remove?subPath=api_test.txt&recursive=false")
+      .body(Vec::new())
+      .unwrap();
+    let rm_res = handle_pwaislands_request(&rm_req);
+    assert_eq!(rm_res.status(), StatusCode::OK);
+
+    // Verify removed
+    let exists_after = handle_pwaislands_request(&exists_req);
+    assert_eq!(exists_after.body().as_ref(), b"false");
   }
 }
