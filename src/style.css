@@ -1771,3 +1771,13 @@ code {
     height: 38px;
   }
 }
+
+.island-iframe {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  border: none;
+  display: block;
+  background: var(--bg);
+}

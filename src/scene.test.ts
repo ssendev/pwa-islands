@@ -65,6 +65,7 @@ const readyModel: Model = {
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
+  maybeActiveIslandUrl: Option.none(),
 }
 
 describe("PWA Islands Scene Tests", () => {
@@ -288,6 +289,32 @@ describe("PWA Islands Scene Tests", () => {
       ]),
       sceneExpect(selector("#folder-name-display")).toContainText("PWA Islands"),
       sceneExpect(text("index.html")).toExist(),
+    )
+  })
+
+  it("renders full-window iframe for pwaislands:// when clicking a file in Tauri mode", () => {
+    const tauriReadyModel: Model = {
+      ...readyModel,
+      hasTauri: true,
+      storageState: StorageState.Ready({
+        storageType: "tauri",
+        rootName: "PWA Islands",
+        subPath: ["unterordner"],
+        entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+        otherBackend: SavedBackend.Unsupported(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(tauriReadyModel),
+      sceneExpect(selector("#island-iframe")).toBeAbsent(),
+      click(text("index.html")),
+      sceneExpect(selector("#island-iframe")).toExist(),
+      sceneExpect(selector("#island-iframe")).toHaveAttr(
+        "src",
+        "pwaislands://localhost/unterordner/index.html",
+      ),
     )
   })
 })

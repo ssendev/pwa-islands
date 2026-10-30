@@ -321,6 +321,16 @@ fn handle_api_request(
   }
 }
 
+fn has_pwaislands_param(query: &str) -> bool {
+  query
+    .split('&')
+    .filter(|part| !part.is_empty())
+    .any(|part| {
+      let key = part.split('=').next().unwrap_or("");
+      key == "pwaislands"
+    })
+}
+
 fn handle_pwaislands_request(
   request: &tauri::http::Request<Vec<u8>>,
 ) -> HttpResponse<Cow<'static, [u8]>> {
@@ -357,6 +367,30 @@ fn handle_pwaislands_request(
 
   if let Some(action) = sub_path.strip_prefix("__pwaislands_api__/") {
     return handle_api_request(action, &query, request);
+  }
+
+  if has_pwaislands_param(&query) {
+    let clean_path = if decoded_path.starts_with('/') {
+      decoded_path
+    } else {
+      format!("/{decoded_path}")
+    };
+    let target_url = if query.is_empty() {
+      clean_path
+    } else {
+      format!("{clean_path}?{query}")
+    };
+    let serialized_url =
+      serde_json::to_string(&target_url).unwrap_or_else(|_| "\"/?pwaislands\"".to_string());
+    let html = format!(
+      "<!doctype html><html lang=\"de\"><head><meta charset=\"utf-8\"></head><body><script>window.parent.postMessage({{type:\"pwaislands:navigate\",url:{serialized_url}}},\"*\");</script></body></html>"
+    );
+    return HttpResponse::builder()
+      .status(StatusCode::OK)
+      .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+      .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+      .body(Cow::Owned(html.into_bytes()))
+      .unwrap_or_else(|_| HttpResponse::default());
   }
 
   if sub_path == "app.js" || sub_path == "api.js" {
@@ -556,41 +590,12 @@ fn tauri_fs_init_root() -> Result<String, String> {
   Ok(root.to_string_lossy().to_string())
 }
 
-const ISOLATE_TAURI_SCRIPT: &str = r#"const __isCustomProtocol = window.location.protocol === "pwaislands:" || window.location.hostname === "pwaislands.localhost";
-if (__isCustomProtocol) {
-  const __denyTauriInternals = () => {
-    try {
-      delete window.__TAURI_INTERNALS__;
-      delete window.__TAURI__;
-      delete window.__TAURI_IPC__;
-      Object.defineProperty(window, "__TAURI_INTERNALS__", {
-        value: undefined,
-        writable: false,
-        configurable: false,
-      });
-      Object.defineProperty(window, "__TAURI__", {
-        value: undefined,
-        writable: false,
-        configurable: false,
-      });
-      Object.defineProperty(window, "__TAURI_IPC__", {
-        value: undefined,
-        writable: false,
-        configurable: false,
-      });
-    } catch {}
-  };
-  __denyTauriInternals();
-}
-"#;
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
     .register_uri_scheme_protocol("pwaislands", |_ctx, request| {
       handle_pwaislands_request(&request)
     })
-    .append_invoke_initialization_script(ISOLATE_TAURI_SCRIPT)
     .setup(|app| {
       if cfg!(debug_assertions) {
         app.handle().plugin(
@@ -731,5 +736,18 @@ mod tests {
     // Verify removed
     let exists_after = handle_pwaislands_request(&exists_req);
     assert_eq!(exists_after.body().as_ref(), b"false");
+  }
+
+  #[test]
+  fn test_handle_pwaislands_navigation_param() {
+    let req = Request::builder()
+      .uri("pwaislands://localhost/?pwaislands")
+      .body(Vec::new())
+      .unwrap();
+    let res = handle_pwaislands_request(&req);
+    assert_eq!(res.status(), StatusCode::OK);
+    let body_str = std::str::from_utf8(res.body()).unwrap();
+    assert!(body_str.contains("pwaislands:navigate"));
+    assert!(body_str.contains("\"/?pwaislands\""));
   }
 }

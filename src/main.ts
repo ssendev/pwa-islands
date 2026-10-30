@@ -165,6 +165,18 @@ export const currentStorageTypeFromStorageState = (
 export const isTauriStorageState = (storageState: StorageState): boolean =>
   Option.exists(currentStorageTypeFromStorageState(storageState), (t) => t === "tauri")
 
+export const buildTauriIslandUrl = (subPath: ReadonlyArray<string>, fileName: string): string => {
+  const encodedPath = encodeSubPath([...subPath, fileName])
+  try {
+    const protocolRoot = convertFileSrc("", "pwaislands")
+    return protocolRoot.endsWith("/")
+      ? `${protocolRoot}${encodedPath}`
+      : `${protocolRoot}/${encodedPath}`
+  } catch {
+    return `pwaislands://localhost/${encodedPath}`
+  }
+}
+
 export const pendingRouteFromStorageState = (
   storageState: StorageState,
   fallbackSubPath: ReadonlyArray<string> = [],
@@ -203,6 +215,7 @@ export const Model = Schema.Struct({
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
   maybeAlertBanner: Schema.Option(AlertBanner),
+  maybeActiveIslandUrl: Schema.Option(Schema.String),
 })
 export type Model = typeof Model.Type
 
@@ -278,6 +291,9 @@ export const Message = defineMessageUnion({
     entry: FileEntry,
   },
   CompletedOpenFileInBrowser: {},
+  ReceivedIslandNavigation: {
+    url: Schema.String,
+  },
   RequestedUrl: {
     request: UrlRequest,
   },
@@ -864,23 +880,11 @@ export const OpenFileInBrowser = Command.define("OpenFileInBrowser", {
   args: {
     subPath: Schema.Array(Schema.String),
     fileName: Schema.String,
-    isTauri: Schema.Boolean,
   },
   messages: [Message.CompletedOpenFileInBrowser],
   execute: (args) => {
     const encodedPath = encodeSubPath([...args.subPath, args.fileName])
-    let targetUrl = `/${encodedPath}`
-    if (args.isTauri) {
-      try {
-        const protocolRoot = convertFileSrc("", "pwaislands")
-        targetUrl = protocolRoot.endsWith("/")
-          ? `${protocolRoot}${encodedPath}`
-          : `${protocolRoot}/${encodedPath}`
-      } catch {
-        targetUrl = `pwaislands://localhost/${encodedPath}`
-      }
-    }
-    return Navigation.load(targetUrl).pipe(Effect.as(Message.CompletedOpenFileInBrowser()))
+    return Navigation.load(`/${encodedPath}`).pipe(Effect.as(Message.CompletedOpenFileInBrowser()))
   },
 })
 
@@ -962,6 +966,7 @@ export const init = (
             "Ihr Browser unterstützt weder die File System Access API noch das Origin Private File System (OPFS).",
           variant: "warning",
         }),
+        maybeActiveIslandUrl: Option.none(),
       },
     }
   }
@@ -978,6 +983,7 @@ export const init = (
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
       maybeAlertBanner: Option.none(),
+      maybeActiveIslandUrl: Option.none(),
     },
     commands: [
       InitializeStorage({
@@ -1278,19 +1284,35 @@ export const update = (
           commands: [PushUrl({ url: buildFolderUrl(targetSubPath) })],
         }
       }
+      if (isTauriStorageState(model.storageState)) {
+        return {
+          model: modifyFields(model, {
+            maybeActiveIslandUrl: () => Option.some(buildTauriIslandUrl(subPath, entry.name)),
+          }),
+        }
+      }
       return {
         model,
         commands: [
           OpenFileInBrowser({
             subPath,
             fileName: entry.name,
-            isTauri: isTauriStorageState(model.storageState),
           }),
         ],
       }
     },
 
     CompletedOpenFileInBrowser: () => ({ model }),
+
+    ReceivedIslandNavigation: ({ url }) => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model: modifyFields(model, {
+          maybeActiveIslandUrl: () => Option.none(),
+        }),
+        commands: [PushUrl({ url }), RefreshEntries({ subPath })],
+      }
+    },
 
     RequestedUrl: ({ request }) =>
       UrlRequest.match(request, {
@@ -1307,6 +1329,7 @@ export const update = (
     ChangedUrl: ({ url }) => {
       const route = parseUrlToRoute(url)
       const modelWithRoute = modifyFields(model, {
+        maybeActiveIslandUrl: () => Option.none(),
         storageState: (state) =>
           StorageState.match(state, {
             Initializing: () => state,
@@ -1695,6 +1718,15 @@ export const update = (
     },
 
     PressedEscape: () => {
+      if (Option.isSome(model.maybeActiveIslandUrl)) {
+        const subPath = currentSubPathFromStorageState(model.storageState)
+        return {
+          model: modifyFields(model, {
+            maybeActiveIslandUrl: () => Option.none(),
+          }),
+          commands: [RefreshEntries({ subPath })],
+        }
+      }
       if (!Modal.isOpen(model.modalState)) {
         if (model.isSettingsOpen) {
           return {
@@ -1862,7 +1894,10 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
     },
     {
       modelToDependencies: (model) => ({
-        isActive: model.isSettingsOpen || Modal.isOpen(model.modalState),
+        isActive:
+          model.isSettingsOpen ||
+          Modal.isOpen(model.modalState) ||
+          Option.isSome(model.maybeActiveIslandUrl),
       }),
       dependenciesToStream: ({ isActive }) =>
         Dom.streamFromKeyBindings<Message>({
@@ -1875,6 +1910,42 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
             },
           ],
         }),
+    },
+  ),
+
+  islandNavigation: entry(
+    {
+      isIslandOpen: Schema.Boolean,
+    },
+    {
+      modelToDependencies: (model) => ({
+        isIslandOpen: Option.isSome(model.maybeActiveIslandUrl),
+      }),
+      dependenciesToStream: ({ isIslandOpen }) =>
+        Stream.when(
+          Dom.streamFromEventFilterMap({
+            target: window,
+            type: "message",
+            filterMapEvent: (event) => {
+              if (!(event instanceof MessageEvent)) {
+                return Option.none()
+              }
+              const data: unknown = event.data
+              if (
+                typeof data === "object" &&
+                data !== null &&
+                "type" in data &&
+                data.type === "pwaislands:navigate" &&
+                "url" in data &&
+                typeof data.url === "string"
+              ) {
+                return Option.some(Message.ReceivedIslandNavigation({ url: data.url }))
+              }
+              return Option.none()
+            },
+          }),
+          Effect.sync(() => isIslandOpen),
+        ),
     },
   ),
 
@@ -2625,25 +2696,39 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
 
 // VIEW DOCUMENT
 
+const viewIslandIframe = (islandUrl: string, h: HtmlBuilder): Html.Html =>
+  h.iframe([
+    h.Id("island-iframe"),
+    h.Class("island-iframe"),
+    h.Src(islandUrl),
+    h.Title("PWA Island"),
+  ])
+
+const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html =>
+  h.main(
+    [h.Id("router-view"), h.Class("router-view")],
+    [
+      h.div(
+        [h.Class("files-page")],
+        [
+          viewToolbar(model, h),
+          viewAlertContainer(model, h),
+          viewContentSection(model, h),
+          viewModalContainer(model, h),
+        ],
+      ),
+    ],
+  )
+
 export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
   title: computeDocumentTitle(model),
   body: h.div(
     [h.Id("app")],
     [
-      h.main(
-        [h.Id("router-view"), h.Class("router-view")],
-        [
-          h.div(
-            [h.Class("files-page")],
-            [
-              viewToolbar(model, h),
-              viewAlertContainer(model, h),
-              viewContentSection(model, h),
-              viewModalContainer(model, h),
-            ],
-          ),
-        ],
-      ),
+      Option.match(model.maybeActiveIslandUrl, {
+        onNone: () => viewManagerMain(model, h),
+        onSome: (islandUrl) => viewIslandIframe(islandUrl, h),
+      }),
     ],
   ),
 })

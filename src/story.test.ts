@@ -23,6 +23,7 @@ import {
   OpenFileInBrowser,
   PickLocalDirectory,
   PushUrl,
+  RefreshEntries,
   ReplaceUrl,
   SavedBackend,
   SaveFileInfoPreference,
@@ -82,6 +83,7 @@ const readyModel: Model = {
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
+  maybeActiveIslandUrl: Option.none(),
 }
 
 const rootUrl = Option.getOrThrow(fromString("http://localhost:5173/"))
@@ -245,7 +247,7 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
-    it("opens file with pwaislands:// protocol when storage is tauri", () => {
+    it("opens file with pwaislands:// protocol in iframe when storage is tauri", () => {
       const tauriReadyModel: Model = {
         ...readyModel,
         hasTauri: true,
@@ -262,14 +264,29 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(tauriReadyModel),
         message(Message.ClickedEntryRow({ entry: sampleEntries[1] })),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(
+            Option.some("pwaislands://localhost/unterordner/index.html"),
+          )
+        }),
+        message(Message.ReceivedIslandNavigation({ url: "/?pwaislands" })),
         Command.expectExact(
-          OpenFileInBrowser({
-            subPath: ["unterordner"],
-            fileName: "index.html",
-            isTauri: true,
-          }),
+          PushUrl({ url: "/?pwaislands" }),
+          RefreshEntries({ subPath: ["unterordner"] }),
         ),
-        Command.resolve(OpenFileInBrowser, Message.CompletedOpenFileInBrowser()),
+        Command.resolveAll(
+          [PushUrl, Message.CompletedPushUrl()],
+          [
+            RefreshEntries,
+            Message.SucceededRefreshEntries({
+              subPath: ["unterordner"],
+              entries: sampleEntries,
+            }),
+          ],
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.none())
+        }),
       )
     })
 
@@ -282,7 +299,6 @@ describe("PWA Islands Story Tests", () => {
           OpenFileInBrowser({
             subPath: [],
             fileName: "index.html",
-            isTauri: false,
           }),
         ),
         Command.resolve(OpenFileInBrowser, Message.CompletedOpenFileInBrowser()),
