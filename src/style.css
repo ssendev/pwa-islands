@@ -103,7 +103,7 @@ code {
   background: var(--code-bg);
 }
 
-/* SVG Icons (@fluentui-emoji/svg) */
+/* SVG Icons (@svgmoji/noto) */
 .svg-icon {
   width: 1em;
   height: 1em;
