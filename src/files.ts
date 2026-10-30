@@ -2,7 +2,6 @@ import { Array, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
 import {
   OPFS_APP_FOLDER,
-  TAURI_APP_FOLDER,
   checkTextBytes,
   clearStoredDirectoryHandle,
   collectDirectoryHandles,
@@ -12,6 +11,7 @@ import {
   getStoredDirectoryHandle,
   getStoredFileInfoVisible,
   getStoredStorageType,
+  invalidateRootCache,
   storeDirectoryHandle,
   storeFileInfoVisible,
   storeStorageType,
@@ -113,6 +113,61 @@ export const clearSavedDirectoryHandle = async (): Promise<void> => {
   runtimeBridge.savedFsaHandle = Option.none()
   runtimeBridge.pendingHandle = Option.none()
   await clearStoredDirectoryHandle()
+}
+
+export const folderNameFromPath = (folderPath: string): string => {
+  const cleaned = folderPath.replace(/[\\/]+$/, "")
+  const parts = Array.filter(cleaned.split(/[\\/]/), Boolean)
+  return Array.isReadonlyArrayNonEmpty(parts) ? Array.lastNonEmpty(parts) : "Lokaler Ordner"
+}
+
+export const pickTauriDirectory = async (): Promise<Option.Option<string>> => {
+  const { invoke } = await import("@tauri-apps/api/core")
+  const picked = await invoke<string | null>("tauri_fs_pick_folder")
+  return Option.fromNullishOr(picked)
+}
+
+export const setTauriRootDirectory = async (folderPath: string): Promise<boolean> => {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke<string>("tauri_fs_set_root", { path: folderPath })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const clearTauriRootDirectory = async (): Promise<void> => {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    await invoke("tauri_fs_clear_root")
+  } catch {
+    // Ignore when not running in Tauri
+  }
+}
+
+export const getSavedTauriFolder = async (): Promise<Option.Option<string>> => {
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    const root = await invoke<string | null>("tauri_fs_get_root")
+    return Option.fromNullishOr(root)
+  } catch {
+    return Option.none()
+  }
+}
+
+export const saveTauriFolder = async (folderPath: string): Promise<void> => {
+  invalidateRootCache()
+  const { invoke } = await import("@tauri-apps/api/core")
+  await invoke<string>("tauri_fs_set_root", { path: folderPath })
+  runtimeBridge.savedTauriFolder = Option.some(folderPath)
+  await storeStorageType("tauri")
+}
+
+export const clearSavedTauriFolder = async (): Promise<void> => {
+  invalidateRootCache()
+  runtimeBridge.savedTauriFolder = Option.none()
+  await clearTauriRootDirectory()
 }
 
 export const getSavedDirectoryHandle = getStoredDirectoryHandle
@@ -360,9 +415,14 @@ export class FileSystemHandleStorage {
 export class TauriStorage {
   readonly type: StorageType = "tauri"
   readonly rootHandle = null
+  readonly folderPath: string
+
+  constructor(folderPath = "") {
+    this.folderPath = folderPath
+  }
 
   get name(): string {
-    return TAURI_APP_FOLDER
+    return folderNameFromPath(this.folderPath)
   }
 
   private joinSubPath(subPath: ReadonlyArray<string>, name?: string): string {
@@ -502,7 +562,7 @@ export class TauriStorage {
   }
 
   async disconnect(): Promise<void> {
-    // Tauri app folder is persistent local storage
+    await clearSavedTauriFolder()
   }
 }
 
@@ -514,6 +574,7 @@ const runtimeBridge: {
   activeStorage: Option.Option<StorageBackend>
   pendingHandle: Option.Option<FileSystemDirectoryHandle>
   savedFsaHandle: Option.Option<FileSystemDirectoryHandle>
+  savedTauriFolder: Option.Option<string>
   maybeActivePreviewObjectUrl: Option.Option<string>
   deferredInstallPrompt: Option.Option<BeforeInstallPromptEvent>
   pendingImportFiles: ReadonlyArray<globalThis.File>
@@ -521,6 +582,7 @@ const runtimeBridge: {
   activeStorage: Option.none(),
   pendingHandle: Option.none(),
   savedFsaHandle: Option.none(),
+  savedTauriFolder: Option.none(),
   maybeActivePreviewObjectUrl: Option.none(),
   deferredInstallPrompt: Option.none(),
   pendingImportFiles: [],
@@ -531,6 +593,12 @@ export const getSavedFsaHandle = (): Option.Option<FileSystemDirectoryHandle> =>
 
 export const setSavedFsaHandle = (handle: Option.Option<FileSystemDirectoryHandle>): void => {
   runtimeBridge.savedFsaHandle = handle
+}
+
+export const getSavedTauriFolderCached = (): Option.Option<string> => runtimeBridge.savedTauriFolder
+
+export const setSavedTauriFolder = (folderPath: Option.Option<string>): void => {
+  runtimeBridge.savedTauriFolder = folderPath
 }
 
 export const getPendingImportFiles = (): ReadonlyArray<globalThis.File> =>

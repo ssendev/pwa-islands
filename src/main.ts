@@ -19,6 +19,8 @@ import {
   PREVIEWABLE_IMAGE_EXTENSIONS,
   StorageType,
   clearSavedDirectoryHandle,
+  clearSavedTauriFolder,
+  folderNameFromPath,
   getActiveStorage,
   getDeferredInstallPrompt,
   getOPFSRootDirectory,
@@ -27,6 +29,9 @@ import {
   getSavedFileInfoVisible,
   getSavedFsaHandle,
   getSavedStorageType,
+  getSavedTauriFolder,
+  getSavedTauriFolderCached,
+  pickTauriDirectory,
   queryDirectoryPermission,
   requestDirectoryPermission,
   requireActiveStorage,
@@ -34,11 +39,15 @@ import {
   saveDirectoryHandle,
   saveFileInfoVisible,
   saveStorageType,
+  saveTauriFolder,
   setActiveStorage,
   setDeferredInstallPrompt,
   setPendingHandle,
   setSavedFsaHandle,
+  setSavedTauriFolder,
+  setTauriRootDirectory,
   showDirectoryPicker,
+  supportsTauri,
 } from "./files"
 import * as Modal from "./modal"
 import { AlertBanner } from "./modal"
@@ -473,18 +482,15 @@ const resolveRouteDeepLink = async (
 }
 
 const activateStorageBackend = async (
-  handle: FileSystemDirectoryHandle | null,
+  handle: FileSystemDirectoryHandle,
   type: StorageType,
   route: AppRoute,
   otherBackend: SavedBackend,
 ): Promise<Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">> => {
   await saveDirectoryHandle(handle, type)
-  const storage: StorageBackend =
-    type === "tauri"
-      ? new TauriStorage()
-      : new FileSystemHandleStorage(handle as FileSystemDirectoryHandle, type)
+  const storage: StorageBackend = new FileSystemHandleStorage(handle, type)
   setActiveStorage(Option.some(storage))
-  if (type === "fsa" && handle) {
+  if (type === "fsa") {
     setSavedFsaHandle(Option.some(handle))
     setPendingHandle(Option.none())
   }
@@ -493,6 +499,29 @@ const activateStorageBackend = async (
 
   return {
     storageType: type,
+    rootName: storage.name,
+    subPath: resolved.subPath,
+    entries: resolved.entries,
+    otherBackend,
+    maybeModalState: resolved.maybeModalState,
+    maybeAlertBanner: resolved.maybeAlertBanner,
+  }
+}
+
+const activateTauriStorageBackend = async (
+  folderPath: string,
+  route: AppRoute,
+  otherBackend: SavedBackend,
+): Promise<Omit<typeof Message.SucceededInitializeStorage.Type, "_tag">> => {
+  await saveTauriFolder(folderPath)
+  const storage: StorageBackend = new TauriStorage(folderPath)
+  setActiveStorage(Option.some(storage))
+  setSavedTauriFolder(Option.some(folderPath))
+
+  const resolved = await resolveRouteDeepLink(storage, route)
+
+  return {
+    storageType: "tauri",
     rootName: storage.name,
     subPath: resolved.subPath,
     entries: resolved.entries,
@@ -572,23 +601,59 @@ export const InitializeStorage = Command.define("InitializeStorage", {
           })
         }
 
-        if (args.hasTauri) {
-          const fsaSavedBackend = await determineFsaSavedBackend()
-          const otherBackend =
-            Option.exists(maybeSavedType, (t) => t === "opfs") && args.hasOPFS
-              ? opfsSavedBackend
-              : fsaSavedBackend
-          return Message.SucceededInitializeStorage(
-            await activateStorageBackend(null, "tauri", args.route, otherBackend),
-          )
+        const determineTauriSavedBackend = async (): Promise<SavedBackend> => {
+          if (!args.hasTauri) {
+            return SavedBackend.Unsupported()
+          }
+          return await Option.match(await getSavedTauriFolder(), {
+            onNone: async () => SavedBackend.NoFolderSelected(),
+            onSome: async (savedFolderPath): Promise<SavedBackend> => {
+              const isValid = await setTauriRootDirectory(savedFolderPath)
+              if (isValid) {
+                setSavedTauriFolder(Option.some(savedFolderPath))
+                return SavedBackend.Granted({
+                  rootName: folderNameFromPath(savedFolderPath),
+                })
+              }
+              await clearSavedTauriFolder()
+              return SavedBackend.NoFolderSelected()
+            },
+          })
         }
 
         if (Option.exists(maybeSavedType, (savedType) => savedType === "opfs") && args.hasOPFS) {
-          const fsaSavedBackend = await determineFsaSavedBackend()
+          const localSavedBackend = args.hasTauri
+            ? await determineTauriSavedBackend()
+            : await determineFsaSavedBackend()
           const opfsRoot = await getOPFSRootDirectory()
           return Message.SucceededInitializeStorage(
-            await activateStorageBackend(opfsRoot, "opfs", args.route, fsaSavedBackend),
+            await activateStorageBackend(opfsRoot, "opfs", args.route, localSavedBackend),
           )
+        }
+
+        if (args.hasTauri) {
+          return await Option.match(await getSavedTauriFolder(), {
+            onNone: async () =>
+              Message.CompletedInitializeStorageNoFolderSelected({
+                storageType: "tauri",
+                otherBackend: opfsSavedBackend,
+                pendingRoute: args.route,
+              }),
+            onSome: async (savedFolderPath) => {
+              const isValid = await setTauriRootDirectory(savedFolderPath)
+              if (isValid) {
+                return Message.SucceededInitializeStorage(
+                  await activateTauriStorageBackend(savedFolderPath, args.route, opfsSavedBackend),
+                )
+              }
+              await clearSavedTauriFolder()
+              return Message.CompletedInitializeStorageNoFolderSelected({
+                storageType: "tauri",
+                otherBackend: opfsSavedBackend,
+                pendingRoute: args.route,
+              })
+            },
+          })
         }
 
         if (args.hasDirectoryPicker) {
@@ -668,6 +733,16 @@ export const PickLocalDirectory = Command.define("PickLocalDirectory", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
+        if (supportsTauri()) {
+          const maybeFolderPath = await pickTauriDirectory()
+          return await Option.match(maybeFolderPath, {
+            onNone: () => Promise.resolve(Message.CancelledPickLocalDirectory()),
+            onSome: async (folderPath) =>
+              Message.SucceededPickLocalDirectory(
+                await activateTauriStorageBackend(folderPath, args.route, args.otherBackend),
+              ),
+          })
+        }
         try {
           const handle = await showDirectoryPicker({ mode: "readwrite" })
           return Message.SucceededPickLocalDirectory(
@@ -779,6 +854,34 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
+        if (supportsTauri()) {
+          const maybeCached = getSavedTauriFolderCached()
+          const maybeFolderPath = Option.isSome(maybeCached)
+            ? maybeCached
+            : await getSavedTauriFolder()
+          return await Option.match(maybeFolderPath, {
+            onNone: async () =>
+              Message.CompletedActivateFsaBackendNoFolderSelected({
+                storageType: "tauri",
+                otherBackend: args.otherBackend,
+                pendingRoute: args.route,
+              }),
+            onSome: async (folderPath) => {
+              const isValid = await setTauriRootDirectory(folderPath)
+              if (isValid) {
+                return Message.SucceededActivateFsaBackend(
+                  await activateTauriStorageBackend(folderPath, args.route, args.otherBackend),
+                )
+              }
+              await clearSavedTauriFolder()
+              return Message.CompletedActivateFsaBackendNoFolderSelected({
+                storageType: "tauri",
+                otherBackend: args.otherBackend,
+                pendingRoute: args.route,
+              })
+            },
+          })
+        }
         return await Option.match(await findCachedHandle({ includePending: false }), {
           onNone: async () => {
             return Message.CompletedActivateFsaBackendNoFolderSelected({
@@ -824,22 +927,31 @@ export const DisconnectStorage = Command.define("DisconnectStorage", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
+        const disconnectedStorageType: StorageType = Option.match(getActiveStorage(), {
+          onNone: () => (supportsTauri() ? "tauri" : "fsa"),
+          onSome: (active) => (active.type === "tauri" ? "tauri" : "fsa"),
+        })
         revokeActivePreviewUrl()
         await Option.match(getActiveStorage(), {
           onNone: () => Promise.resolve(),
           onSome: (active) => active.disconnect(),
         })
-        await clearSavedDirectoryHandle()
+        if (disconnectedStorageType === "tauri") {
+          await clearSavedTauriFolder()
+        } else {
+          await clearSavedDirectoryHandle()
+        }
         setActiveStorage(Option.none())
         setPendingHandle(Option.none())
         setSavedFsaHandle(Option.none())
+        setSavedTauriFolder(Option.none())
 
         const opfsSavedBackend: SavedBackend = args.hasOPFS
           ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
           : SavedBackend.Unsupported()
 
         return Message.SucceededDisconnectStorage({
-          storageType: "fsa",
+          storageType: disconnectedStorageType,
           otherBackend: opfsSavedBackend,
           pendingRoute: AppRoute.Folder({ subPath: [] }),
         })
@@ -1258,12 +1370,16 @@ const getOtherBackend = (storageState: StorageState): SavedBackend =>
     Ready: (s) => s.otherBackend,
   })
 
+const isLocalFolderStorage = (storageType: StorageType): boolean =>
+  storageType === "fsa" || storageType === "tauri"
+
 const handleUseFsa = (
   model: Model,
 ): {
   readonly model: Model
   readonly commands?: ReadonlyArray<Command.Command<Message>>
 } => {
+  const localStorageType: StorageType = model.hasTauri ? "tauri" : "fsa"
   const opfsSavedBackend: SavedBackend = model.hasOPFS
     ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
     : SavedBackend.Unsupported()
@@ -1286,7 +1402,7 @@ const handleUseFsa = (
       model: modifyFields(model, {
         storageState: () =>
           StorageState.PermissionRequired({
-            storageType: "fsa",
+            storageType: localStorageType,
             folderName,
             otherBackend: opfsSavedBackend,
             pendingRoute: AppRoute.Folder({ subPath: [] }),
@@ -1294,7 +1410,7 @@ const handleUseFsa = (
         isSettingsOpen: () => false,
       }),
       commands: [
-        SaveStorageTypePreference({ storageType: "fsa" }),
+        SaveStorageTypePreference({ storageType: localStorageType }),
         PushUrl({ url: buildFolderUrl([]) }),
       ],
     }),
@@ -1733,11 +1849,15 @@ export const update = (
     ClickedUseOpfs: () => {
       const otherBackend = StorageState.match(model.storageState, {
         Ready: ({ storageType, rootName }) =>
-          storageType === "fsa" ? SavedBackend.Granted({ rootName }) : SavedBackend.Unsupported(),
+          isLocalFolderStorage(storageType)
+            ? SavedBackend.Granted({ rootName })
+            : SavedBackend.Unsupported(),
         NoFolderSelected: ({ storageType }) =>
-          storageType === "fsa" ? SavedBackend.NoFolderSelected() : SavedBackend.Unsupported(),
+          isLocalFolderStorage(storageType)
+            ? SavedBackend.NoFolderSelected()
+            : SavedBackend.Unsupported(),
         PermissionRequired: ({ storageType, folderName }) =>
-          storageType === "fsa"
+          isLocalFolderStorage(storageType)
             ? SavedBackend.PermissionRequired({ folderName })
             : SavedBackend.Unsupported(),
         Initializing: () => SavedBackend.Unsupported(),
@@ -2407,6 +2527,7 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
   })
 
 const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
+  const hasLocalFolderSupport = model.hasTauri || model.hasDirectoryPicker
   const {
     isReady,
     isFsaReady,
@@ -2434,26 +2555,26 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
     NoFolderSelected: ({ storageType }) => ({
       isReady: false,
       isFsaReady: false,
-      isFsaNoFolder: storageType === "fsa",
+      isFsaNoFolder: isLocalFolderStorage(storageType),
       isFsaPermissionRequired: false,
       canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
-      canSwitchToFsa: model.hasDirectoryPicker && storageType !== "fsa",
+      canSwitchToFsa: hasLocalFolderSupport && !isLocalFolderStorage(storageType),
     }),
     PermissionRequired: ({ storageType }) => ({
       isReady: false,
       isFsaReady: false,
       isFsaNoFolder: false,
-      isFsaPermissionRequired: storageType === "fsa",
+      isFsaPermissionRequired: isLocalFolderStorage(storageType),
       canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
-      canSwitchToFsa: model.hasDirectoryPicker && storageType !== "fsa",
+      canSwitchToFsa: hasLocalFolderSupport && !isLocalFolderStorage(storageType),
     }),
     Ready: ({ storageType }) => ({
       isReady: true,
-      isFsaReady: storageType === "fsa",
+      isFsaReady: isLocalFolderStorage(storageType),
       isFsaNoFolder: false,
       isFsaPermissionRequired: false,
       canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
-      canSwitchToFsa: model.hasDirectoryPicker && storageType !== "fsa",
+      canSwitchToFsa: hasLocalFolderSupport && !isLocalFolderStorage(storageType),
     }),
   })
   const isInstallAvailable = InstallPrompt.match(model.installPrompt, INSTALL_AVAILABLE)
@@ -2948,7 +3069,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
     model: model.modalState,
     viewInputs: {
       origin: model.origin,
-      hasDirectoryPicker: model.hasDirectoryPicker,
+      hasDirectoryPicker: model.hasDirectoryPicker || model.hasTauri,
       hasOPFS: model.hasOPFS,
     },
     view: Modal.view,

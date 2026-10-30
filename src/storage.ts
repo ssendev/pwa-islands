@@ -101,8 +101,6 @@ export async function clearStoredDirectoryHandle(): Promise<void> {
   })
 }
 
-export const TAURI_APP_FOLDER = "/tmp/PWA-Islands"
-
 const isStoredStorageType = (value: unknown): value is "fsa" | "opfs" | "tauri" =>
   value === "fsa" || value === "opfs" || value === "tauri"
 

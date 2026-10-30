@@ -1270,6 +1270,121 @@ describe("PWA Islands Story Tests", () => {
           }),
         )
       })
+
+      it("picks, switches, and disconnects folder in Tauri mode similar to FSA", () => {
+        const tauriNoFolderModel: Model = {
+          ...readyModel,
+          hasDirectoryPicker: false,
+          hasTauri: true,
+          storageState: StorageState.NoFolderSelected({
+            storageType: "tauri",
+            otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+            pendingRoute: AppRoute.Folder({ subPath: [] }),
+          }),
+        }
+
+        story(
+          update,
+          given(tauriNoFolderModel),
+          message(Message.ClickedSelectFolder()),
+          Command.expectExact(
+            PickLocalDirectory({
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              route: AppRoute.Folder({ subPath: [] }),
+            }),
+          ),
+          Command.resolve(
+            PickLocalDirectory,
+            Message.SucceededPickLocalDirectory({
+              storageType: "tauri",
+              rootName: "Tauri-Projekte",
+              subPath: [],
+              entries: sampleEntries,
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.none(),
+            }),
+          ),
+          model((m) => {
+            expect(m.storageState).toEqual(
+              StorageState.Ready({
+                storageType: "tauri",
+                rootName: "Tauri-Projekte",
+                subPath: [],
+                entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+                otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              }),
+            )
+          }),
+          message(Message.ClickedUseOpfs()),
+          Command.expectExact(
+            ActivateOpfsBackend({
+              otherBackend: SavedBackend.Granted({ rootName: "Tauri-Projekte" }),
+              route: AppRoute.Folder({ subPath: [] }),
+            }),
+            PushUrl({ url: "/?pwaislands" }),
+          ),
+          Command.resolve(
+            ActivateOpfsBackend,
+            Message.SucceededActivateOpfsBackend({
+              storageType: "opfs",
+              rootName: OPFS_APP_FOLDER,
+              subPath: [],
+              entries: [],
+              otherBackend: SavedBackend.Granted({ rootName: "Tauri-Projekte" }),
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.none(),
+            }),
+          ),
+          Command.resolve(PushUrl, Message.CompletedPushUrl()),
+          message(Message.ClickedUseFsa()),
+          Command.expectExact(
+            ActivateFsaBackend({
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              route: AppRoute.Folder({ subPath: [] }),
+            }),
+            PushUrl({ url: "/?pwaislands" }),
+          ),
+          Command.resolve(
+            ActivateFsaBackend,
+            Message.SucceededActivateFsaBackend({
+              storageType: "tauri",
+              rootName: "Tauri-Projekte",
+              subPath: [],
+              entries: sampleEntries,
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              maybeModalState: Option.none(),
+              maybeAlertBanner: Option.none(),
+            }),
+          ),
+          Command.resolve(PushUrl, Message.CompletedPushUrl()),
+          message(Message.ClickedDisconnectFolder()),
+          Command.expectExact(
+            DisconnectStorage({
+              hasOPFS: true,
+            }),
+            PushUrl({ url: "/?pwaislands" }),
+          ),
+          Command.resolve(
+            DisconnectStorage,
+            Message.SucceededDisconnectStorage({
+              storageType: "tauri",
+              otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+              pendingRoute: AppRoute.Folder({ subPath: [] }),
+            }),
+          ),
+          Command.resolve(PushUrl, Message.CompletedPushUrl()),
+          model((m) => {
+            expect(m.storageState).toEqual(
+              StorageState.NoFolderSelected({
+                storageType: "tauri",
+                otherBackend: SavedBackend.Granted({ rootName: OPFS_APP_FOLDER }),
+                pendingRoute: AppRoute.Folder({ subPath: [] }),
+              }),
+            )
+          }),
+        )
+      })
     })
   })
 })

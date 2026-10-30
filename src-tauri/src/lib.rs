@@ -1,11 +1,63 @@
 use std::borrow::Cow;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{OnceLock, RwLock};
 use tauri::http::{header, Response as HttpResponse, StatusCode};
 use tauri::ipc::Response;
+use tauri::Manager;
+use tauri_plugin_dialog::DialogExt;
 use url::Url;
 
-const STORAGE_ROOT: &str = "/tmp/PWA-Islands";
+static STORAGE_ROOT: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
+static CONFIG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PersistedStorageConfig {
+  root_path: Option<String>,
+}
+
+fn storage_root_lock() -> &'static RwLock<Option<PathBuf>> {
+  STORAGE_ROOT.get_or_init(|| RwLock::new(None))
+}
+
+fn persist_storage_root(root: Option<&Path>) -> Result<(), String> {
+  let Some(config_path) = CONFIG_FILE_PATH.get() else {
+    return Ok(());
+  };
+  if let Some(parent) = config_path.parent() {
+    fs::create_dir_all(parent)
+      .map_err(|e| format!("Konnte Konfigurationsordner nicht erstellen: {e}"))?;
+  }
+  let config = PersistedStorageConfig {
+    root_path: root.map(|p| p.to_string_lossy().to_string()),
+  };
+  let json = serde_json::to_vec_pretty(&config)
+    .map_err(|e| format!("Konnte Konfiguration nicht serialisieren: {e}"))?;
+  fs::write(config_path, json)
+    .map_err(|e| format!("Konnte Konfiguration nicht speichern: {e}"))?;
+  Ok(())
+}
+
+fn load_persisted_storage_root(config_path: &Path) -> Option<PathBuf> {
+  let bytes = fs::read(config_path).ok()?;
+  let config: PersistedStorageConfig = serde_json::from_slice(&bytes).ok()?;
+  let path_str = config.root_path?;
+  let path = PathBuf::from(path_str.trim());
+  if path.is_dir() {
+    Some(path)
+  } else {
+    None
+  }
+}
+
+fn set_storage_root(root: Option<PathBuf>) -> Result<(), String> {
+  persist_storage_root(root.as_deref())?;
+  let mut guard = storage_root_lock()
+    .write()
+    .map_err(|_| "Interner Fehler beim Sperren des Speicherpfads.".to_string())?;
+  *guard = root;
+  Ok(())
+}
 
 const ISLANDS_APP_JS: &str = r#"// PWA Islands API for Tauri custom protocol
 const API_BASE = "/__pwaislands_api__";
@@ -202,9 +254,18 @@ export default islands;
 "#;
 
 fn get_storage_root() -> Result<PathBuf, String> {
-  let root = PathBuf::from(STORAGE_ROOT);
-  fs::create_dir_all(&root).map_err(|e| format!("Konnte Speicherordner nicht erstellen: {e}"))?;
-  Ok(root)
+  let guard = storage_root_lock()
+    .read()
+    .map_err(|_| "Interner Fehler beim Lesen des Speicherpfads.".to_string())?;
+  match guard.as_ref() {
+    Some(root) => {
+      if !root.is_dir() {
+        return Err("Der ausgewählte Speicherordner existiert nicht mehr.".to_string());
+      }
+      Ok(root.clone())
+    }
+    None => Err("Kein Speicher ausgewählt. Bitte zuerst einen Ordner auswählen.".to_string()),
+  }
 }
 
 fn resolve_path(rel_path: &str) -> Result<PathBuf, String> {
@@ -577,18 +638,70 @@ fn tauri_fs_exists(sub_path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn tauri_fs_init_root() -> Result<String, String> {
-  let root = get_storage_root()?;
+fn tauri_fs_get_root() -> Result<Option<String>, String> {
+  let guard = storage_root_lock()
+    .read()
+    .map_err(|_| "Interner Fehler beim Lesen des Speicherpfads.".to_string())?;
+  match guard.as_ref() {
+    Some(root) if root.is_dir() => Ok(Some(root.to_string_lossy().to_string())),
+    _ => Ok(None),
+  }
+}
+
+#[tauri::command]
+fn tauri_fs_set_root(path: String) -> Result<String, String> {
+  let trimmed = path.trim();
+  if trimmed.is_empty() {
+    return Err("Ungültiger Ordnerpfad.".to_string());
+  }
+  let root = PathBuf::from(trimmed);
+  if !root.is_dir() {
+    return Err("Der angegebene Ordner existiert nicht.".to_string());
+  }
+  set_storage_root(Some(root.clone()))?;
   Ok(root.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn tauri_fs_clear_root() -> Result<(), String> {
+  set_storage_root(None)
+}
+
+#[tauri::command]
+async fn tauri_fs_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+  let maybe_folder = app
+    .dialog()
+    .file()
+    .set_title("Ordner wählen")
+    .blocking_pick_folder();
+
+  match maybe_folder {
+    Some(file_path) => {
+      let folder = file_path
+        .into_path()
+        .map_err(|e| format!("Ungültiger Ordnerpfad: {e}"))?;
+      set_storage_root(Some(folder.clone()))?;
+      Ok(Some(folder.to_string_lossy().to_string()))
+    }
+    None => Ok(None),
+  }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .plugin(tauri_plugin_dialog::init())
     .register_uri_scheme_protocol("pwaislands", |_ctx, request| {
       handle_pwaislands_request(&request)
     })
     .setup(|app| {
+      if let Ok(config_dir) = app.path().app_config_dir() {
+        let config_path = config_dir.join("storage-root.json");
+        if let Some(saved_root) = load_persisted_storage_root(&config_path) {
+          let _ = set_storage_root(Some(saved_root));
+        }
+        let _ = CONFIG_FILE_PATH.set(config_path);
+      }
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
@@ -599,7 +712,10 @@ pub fn run() {
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![
-      tauri_fs_init_root,
+      tauri_fs_get_root,
+      tauri_fs_set_root,
+      tauri_fs_clear_root,
+      tauri_fs_pick_folder,
       tauri_fs_list_entries,
       tauri_fs_read_file,
       tauri_fs_write_file,
@@ -617,12 +733,22 @@ pub fn run() {
 mod tests {
   use super::*;
   use std::fs;
+  use std::sync::Mutex;
   use tauri::http::Request;
+
+  static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
+  fn setup_test_root() -> PathBuf {
+    let root = std::env::temp_dir().join("pwa-islands-rust-tests");
+    fs::create_dir_all(&root).unwrap();
+    tauri_fs_set_root(root.to_string_lossy().to_string()).unwrap();
+    root
+  }
 
   #[test]
   fn test_handle_pwaislands_request() {
-    let root = PathBuf::from(STORAGE_ROOT);
-    fs::create_dir_all(&root).unwrap();
+    let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let root = setup_test_root();
     let test_file = root.join("test_protocol.html");
     fs::write(&test_file, b"<h1>Hello Island</h1>").unwrap();
 
@@ -644,6 +770,8 @@ mod tests {
 
   #[test]
   fn test_handle_pwaislands_request_not_found() {
+    let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _root = setup_test_root();
     let req = Request::builder()
       .uri("pwaislands://localhost/non_existent_file.xyz")
       .body(Vec::new())
@@ -654,7 +782,23 @@ mod tests {
   }
 
   #[test]
+  fn test_handle_pwaislands_request_without_root() {
+    let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    tauri_fs_clear_root().unwrap();
+    assert_eq!(tauri_fs_get_root().unwrap(), None);
+
+    let req = Request::builder()
+      .uri("pwaislands://localhost/test_protocol.html")
+      .body(Vec::new())
+      .unwrap();
+
+    let res = handle_pwaislands_request(&req);
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+  }
+
+  #[test]
   fn test_handle_pwaislands_request_app_js() {
+    let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let req = Request::builder()
       .uri("pwaislands://localhost/app.js")
       .body(Vec::new())
@@ -688,8 +832,8 @@ mod tests {
 
   #[test]
   fn test_handle_pwaislands_api_endpoints() {
-    let root = PathBuf::from(STORAGE_ROOT);
-    fs::create_dir_all(&root).unwrap();
+    let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _root = setup_test_root();
 
     // POST over custom protocol is rejected
     let post_req = Request::builder()
@@ -731,6 +875,7 @@ mod tests {
 
   #[test]
   fn test_handle_pwaislands_navigation_param() {
+    let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let req = Request::builder()
       .uri("pwaislands://localhost/?pwaislands")
       .body(Vec::new())
@@ -744,7 +889,8 @@ mod tests {
 
   #[test]
   fn test_handle_pwaislands_directory_index_fallback() {
-    let root = PathBuf::from(STORAGE_ROOT);
+    let _lock = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let root = setup_test_root();
     let subfolder = root.join("test_dir_fallback");
     let _ = fs::remove_dir_all(&subfolder);
     fs::create_dir_all(&subfolder).unwrap();

@@ -323,4 +323,29 @@ describe("PWA Islands Scene Tests", () => {
       ),
     )
   })
+
+  it("shows folder change and disconnect options in settings menu when Tauri folder is ready", () => {
+    const tauriReadyModel: Model = {
+      ...readyModel,
+      hasDirectoryPicker: false,
+      hasTauri: true,
+      storageState: StorageState.Ready({
+        storageType: "tauri",
+        rootName: "Tauri-Projekte",
+        subPath: [],
+        entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+        otherBackend: SavedBackend.Granted({ rootName: "PWA Islands" }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(tauriReadyModel),
+      click(selector("#btn-settings")),
+      sceneExpect(selector("#btn-change-folder")).toExist(),
+      sceneExpect(selector("#btn-change-folder")).toContainText("Ordner wechseln"),
+      sceneExpect(selector("#btn-disconnect-folder")).toExist(),
+      sceneExpect(selector("#btn-use-opfs")).toExist(),
+    )
+  })
 })
