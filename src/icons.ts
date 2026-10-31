@@ -9,6 +9,7 @@ import iconConfig from "./emoji/🔧.svg"
 import iconCross from "./emoji/❌.svg"
 import iconCss from "./emoji/🎨.svg"
 import iconCsv from "./emoji/📊.svg"
+import iconDesktop from "./emoji/💻.svg"
 import iconEdit from "./emoji/✏️.svg"
 import iconFile from "./emoji/📄.svg"
 import iconFolder from "./emoji/📁.svg"
@@ -46,6 +47,7 @@ export const ICONS = {
   "file-config": iconConfig,
   "file-text": iconText,
   "file-csv": iconCsv,
+  desktop: iconDesktop,
   "file-audio": iconAudio,
   "file-video": iconVideo,
   "file-archive": iconArchive,

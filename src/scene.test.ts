@@ -26,6 +26,7 @@ import {
   view,
 } from "./main"
 import * as Editor from "./editor"
+import * as Help from "./help"
 import * as Modal from "./modal"
 import { BinaryEdit, EditorFileMode, ModalState, PreviewContent } from "./modal"
 import { AppRoute } from "./route"
@@ -346,6 +347,55 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#btn-change-folder")).toContainText("Ordner wechseln"),
       sceneExpect(selector("#btn-disconnect-folder")).toExist(),
       sceneExpect(selector("#btn-use-opfs")).toExist(),
+    )
+  })
+
+  it("renders help-fs with app (tauri native fs) option and shows support status depending on runtime", () => {
+    const browserHelpModel: Model = {
+      ...readyModel,
+      modalState: ModalState.Help({ help: Help.init(Option.some("fs")) }),
+    }
+
+    scene(
+      { update, view },
+      given(browserHelpModel),
+      sceneExpect(selector('.help-topic[data-topic="fs"]')).toExist(),
+      sceneExpect(selector('.help-topic[data-topic="fs"]')).toContainText(
+        "App (Tauri natives Dateisystem)",
+      ),
+      sceneExpect(selector('.help-topic[data-topic="fs"]')).toContainText("App (Tauri)"),
+      sceneExpect(selector('[data-support="tauri"] .help-supported')).toHaveAttr(
+        "data-supported",
+        "no",
+      ),
+      sceneExpect(selector('[data-support="fsa"] .help-supported')).toHaveAttr(
+        "data-supported",
+        "yes",
+      ),
+      sceneExpect(selector('[data-support="opfs"] .help-supported')).toHaveAttr(
+        "data-supported",
+        "yes",
+      ),
+    )
+
+    const tauriHelpModel: Model = {
+      ...readyModel,
+      hasDirectoryPicker: false,
+      hasTauri: true,
+      modalState: ModalState.Help({ help: Help.init(Option.some("fs")) }),
+    }
+
+    scene(
+      { update, view },
+      given(tauriHelpModel),
+      sceneExpect(selector('[data-support="tauri"] .help-supported')).toHaveAttr(
+        "data-supported",
+        "yes",
+      ),
+      sceneExpect(selector('[data-support="fsa"] .help-supported')).toHaveAttr(
+        "data-supported",
+        "no",
+      ),
     )
   })
 })

@@ -3076,8 +3076,9 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
     model: model.modalState,
     viewInputs: {
       origin: model.origin,
-      hasDirectoryPicker: model.hasDirectoryPicker || model.hasTauri,
+      hasDirectoryPicker: model.hasDirectoryPicker,
       hasOPFS: model.hasOPFS,
+      hasTauri: model.hasTauri,
     },
     view: Modal.view,
     toParentMessage: (msg) => Message.GotModalMessage({ message: msg }),

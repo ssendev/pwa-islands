@@ -80,7 +80,7 @@ export const close = (): ModalState => ModalState.Closed()
 
 const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
   api: "PWA Islands bauen",
-  fs: "Speicher: FS API und OPFS",
+  fs: "Speicher: App (Tauri), FS API und OPFS",
 }
 
 export const formatDocumentTitle = (state: ModalState, folderTitle: string): string =>
@@ -791,6 +791,7 @@ export type ViewInputs = {
   readonly origin: string
   readonly hasDirectoryPicker: boolean
   readonly hasOPFS: boolean
+  readonly hasTauri: boolean
 }
 
 const viewImportConflictModal = (

@@ -205,6 +205,7 @@ export type ViewInputs = {
   readonly origin: string
   readonly hasDirectoryPicker: boolean
   readonly hasOPFS: boolean
+  readonly hasTauri: boolean
 }
 
 export const view = Submodel.defineView<Model, Message, ViewInputs>(
@@ -480,7 +481,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                               [h.Class("help-topic-marker"), h.AriaHidden(true)],
                               [viewIcon("save", h)],
                             ),
-                            h.span([h.Class("help-topic-title")], ["Speicher: FS API und OPFS"]),
+                            h.span(
+                              [h.Class("help-topic-title")],
+                              ["Speicher: App (Tauri), FS API und OPFS"],
+                            ),
                           ],
                         ),
                         h.div(
@@ -492,11 +496,52 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                 h.p(
                                   [h.Class("help-text")],
                                   [
-                                    "Beide Speicherarten beruhen auf derselben Browser-Schnittstelle, der ",
-                                    h.code([h.Class("help-path")], ["File System Access API"]),
-                                    ". Sie liefern dasselbe ",
-                                    h.code([h.Class("help-path")], ["FileSystemDirectoryHandle"]),
-                                    " — die Islands-API arbeitet in beiden Fällen ausschließlich mit Pfaden relativ zur Wurzel.",
+                                    "PWA Islands unterstützt je nach Umgebung (Web-Browser oder native Desktop-App) verschiedene Speicherarten. In allen Fällen arbeitet die Islands-API einheitlich mit Pfaden relativ zur Wurzel des ausgewählten Projektordners.",
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("help-section")],
+                              [
+                                h.h4(
+                                  [h.Class("help-heading")],
+                                  [viewIcon("desktop", h), " App (Tauri natives Dateisystem)"],
+                                ),
+                                h.p(
+                                  [h.Class("help-text")],
+                                  [
+                                    "In der nativen Desktop-App greift PWA Islands direkt über Tauri auf das Dateisystem zu. Der Projektordner wird über den System-Dateidialog gewählt.",
+                                  ],
+                                ),
+                                h.ul(
+                                  [h.Class("help-list")],
+                                  [
+                                    h.li(
+                                      [],
+                                      [
+                                        h.strong([], ["Dauerhafter Zugriff"]),
+                                        ": Nach dem ersten Auswählen bleibt der Ordner gemerkt und steht nach jedem App-Start sofort ohne erneute Berechtigungsabfrage zur Verfügung.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Die Dateien liegen als normale Dateien im Dateisystem und lassen sich jederzeit mit externen Editoren, IDEs oder Tools bearbeiten.",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Einfache Sicherung über reguläre Dateisystem-Backups (z. B. Time Machine, rsync oder Cloud-Sync).",
+                                      ],
+                                    ),
+                                    h.li(
+                                      [],
+                                      [
+                                        "Nur in der installierten Desktop-App (Tauri) verfügbar, nicht im Web-Browser.",
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ],
@@ -622,6 +667,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [],
                                               [
                                                 h.th([]),
+                                                h.th([], [viewIcon("desktop", h), " App (Tauri)"]),
                                                 h.th(
                                                   [],
                                                   [viewIcon("folder", h), " Lokaler Ordner"],
@@ -638,6 +684,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [],
                                               [
                                                 h.td([], ["Berechtigung nötig"]),
+                                                h.td([], ["nein (dauerhafter Zugriff)"]),
                                                 h.td([], ["ja, bei jedem Start"]),
                                                 h.td([], ["nein"]),
                                               ],
@@ -647,6 +694,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [
                                                 h.td([], ["Andere Programme"]),
                                                 h.td([], ["ja"]),
+                                                h.td([], ["ja"]),
                                                 h.td([], ["nein"]),
                                               ],
                                             ),
@@ -654,6 +702,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [],
                                               [
                                                 h.td([], ["Anderer Browser"]),
+                                                h.td([], ["ja, Ordner erneut wählen"]),
                                                 h.td([], ["ja, Ordner erneut wählen"]),
                                                 h.td([], ["nein"]),
                                               ],
@@ -663,6 +712,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [
                                                 h.td([], ["Sicherung"]),
                                                 h.td([], ["Dateisystem-Backup"]),
+                                                h.td([], ["Dateisystem-Backup"]),
                                                 h.td([], ["von Hand"]),
                                               ],
                                             ),
@@ -670,6 +720,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [],
                                               [
                                                 h.td([], ["Verfügbar in"]),
+                                                h.td([], ["Desktop-App (Tauri)"]),
                                                 h.td([], ["nur Chromium"]),
                                                 h.td([], ["allen modernen Browsern"]),
                                               ],
@@ -677,7 +728,30 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                             h.tr(
                                               [h.Class("help-supported-row")],
                                               [
-                                                h.td([], ["In diesem Browser"]),
+                                                h.td([], ["In dieser Umgebung"]),
+                                                h.td(
+                                                  [h.DataAttribute("support", "tauri")],
+                                                  [
+                                                    h.span(
+                                                      [
+                                                        h.Class("help-supported"),
+                                                        h.DataAttribute(
+                                                          "supported",
+                                                          context.hasTauri ? "yes" : "no",
+                                                        ),
+                                                      ],
+                                                      [
+                                                        viewIcon(
+                                                          context.hasTauri ? "check" : "cross",
+                                                          h,
+                                                        ),
+                                                        context.hasTauri
+                                                          ? " verfügbar"
+                                                          : " nicht verfügbar",
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
                                                 h.td(
                                                   [h.DataAttribute("support", "fsa")],
                                                   [
