@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
 import type { Plugin } from "vite"
 
@@ -18,6 +18,7 @@ export interface DownloadItem {
   description: string
   command?: string
   hint?: string
+  hintHtml?: string
   sourcePath?: string
 }
 
@@ -230,6 +231,30 @@ export function scanAvailableDownloads(
     if (fmt === "apk" && (targetList.includes("apk") || targetList.includes("android"))) {
       return true
     }
+    if (
+      (fmt === "exe" || fmt === "nsis" || fmt === "windows") &&
+      (targetList.includes("exe") || targetList.includes("nsis") || targetList.includes("windows"))
+    ) {
+      return true
+    }
+    if (
+      (fmt === "dmg" || fmt === "macos" || fmt === "mac") &&
+      (targetList.includes("dmg") || targetList.includes("macos") || targetList.includes("mac"))
+    ) {
+      return true
+    }
+    if (
+      (fmt === "deb" || fmt === "debian" || fmt === "ubuntu") &&
+      (targetList.includes("deb") || targetList.includes("debian") || targetList.includes("ubuntu"))
+    ) {
+      return true
+    }
+    if (
+      (fmt === "rpm" || fmt === "fedora") &&
+      (targetList.includes("rpm") || targetList.includes("fedora"))
+    ) {
+      return true
+    }
     return targetList.includes(fmt)
   }
 
@@ -350,49 +375,96 @@ export function scanAvailableDownloads(
 
   // 5. Windows / macOS (falls vorhanden)
   if (isTargetAllowed("exe") || isTargetAllowed("nsis") || isTargetAllowed("windows")) {
-    const exes = findFiles(join(rootDir, "src-tauri", "target", "release", "bundle", "nsis"), (f) =>
-      f.endsWith(".exe"),
-    )
+    const nsisDirs = [
+      join(rootDir, "src-tauri", "target", "release", "bundle", "nsis"),
+      join(rootDir, "src-tauri", "target", "x86_64-pc-windows-msvc", "release", "bundle", "nsis"),
+    ]
+    const targetBase = join(rootDir, "src-tauri", "target")
+    if (existsSync(targetBase)) {
+      try {
+        for (const entry of readdirSync(targetBase, { withFileTypes: true })) {
+          if (entry.isDirectory()) {
+            const candidate = join(targetBase, entry.name, "release", "bundle", "nsis")
+            if (existsSync(candidate) && !nsisDirs.includes(candidate)) {
+              nsisDirs.push(candidate)
+            }
+          }
+        }
+      } catch {
+        // Fallback
+      }
+    }
+
+    const exes = nsisDirs.flatMap((dir) => findFiles(dir, (f) => f.endsWith(".exe")))
     for (const src of exes) {
       const stat = statSync(src)
+      const fname = basename(src)
+      const arch =
+        fname.toLowerCase().includes("arm64") || fname.toLowerCase().includes("aarch64")
+          ? "arm64"
+          : fname.toLowerCase().includes("x86") || fname.toLowerCase().includes("i686")
+            ? "x86"
+            : "x64"
       downloads.push({
         id: "windows-exe",
         platform: "Windows",
         title: "Windows Installer (.exe)",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
+        filename: fname,
+        url: `/downloads/${encodeURI(fname)}`,
         size: formatSize(stat.size),
         bytes: stat.size,
         sha256: computeSha256(src),
-        arch: "x64",
+        arch,
         format: "exe",
         description: "Installationsprogramm für Windows 10/11.",
-        command: `.\\${basename(src)}`,
-        hint: "Setup-Datei per Doppelklick öffnen und den Schritten des Assistenten folgen.",
+        command: fname.includes(" ") ? `& ".\\${fname}"` : `.\\${fname}`,
+        hint: "Setup-Datei per Doppelklick öffnen und den Schritten des Assistenten folgen. WebView2 wird bei Bedarf automatisch heruntergeladen (für PCs ohne Internet: Eigenständiges Evergreen-Installationsprogramm).",
+        hintHtml:
+          'Setup per Doppelklick öffnen. WebView2 wird bei Bedarf automatisch heruntergeladen (für PCs ohne Internetverbindung: <a href="https://developer.microsoft.com/de-de/microsoft-edge/webview2" target="_blank" rel="noopener noreferrer">Eigenständiges Evergreen-Installationsprogramm</a>).',
         sourcePath: src,
       })
     }
   }
 
   if (isTargetAllowed("dmg") || isTargetAllowed("macos")) {
-    const dmgs = findFiles(join(rootDir, "src-tauri", "target", "release", "bundle", "dmg"), (f) =>
-      f.endsWith(".dmg"),
-    )
+    const dmgDirs = [
+      join(rootDir, "src-tauri", "target", "release", "bundle", "dmg"),
+      join(rootDir, "src-tauri", "target", "universal-apple-darwin", "release", "bundle", "dmg"),
+      join(rootDir, "src-tauri", "target", "aarch64-apple-darwin", "release", "bundle", "dmg"),
+      join(rootDir, "src-tauri", "target", "x86_64-apple-darwin", "release", "bundle", "dmg"),
+    ]
+    const targetBase = join(rootDir, "src-tauri", "target")
+    if (existsSync(targetBase)) {
+      try {
+        for (const entry of readdirSync(targetBase, { withFileTypes: true })) {
+          if (entry.isDirectory()) {
+            const candidate = join(targetBase, entry.name, "release", "bundle", "dmg")
+            if (existsSync(candidate) && !dmgDirs.includes(candidate)) {
+              dmgDirs.push(candidate)
+            }
+          }
+        }
+      } catch {
+        // Fallback
+      }
+    }
+    const dmgs = dmgDirs.flatMap((dir) => findFiles(dir, (f) => f.endsWith(".dmg")))
     for (const src of dmgs) {
       const stat = statSync(src)
+      const fname = basename(src)
       downloads.push({
         id: "macos-dmg",
         platform: "macOS",
         title: "macOS (.dmg)",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
+        filename: fname,
+        url: `/downloads/${encodeURI(fname)}`,
         size: formatSize(stat.size),
         bytes: stat.size,
         sha256: computeSha256(src),
         arch: "universal",
         format: "dmg",
         description: "Apple Disk Image für macOS.",
-        command: `open ${basename(src)}`,
+        command: `open "${fname}"`,
         hint: "DMG-Datei öffnen und das Symbol in den Programme-Ordner ziehen.",
         sourcePath: src,
       })
@@ -435,8 +507,7 @@ export function renderDownloadsHtml(manifest: DownloadsManifest): string {
     manifest.downloads.length === 0
       ? `
       <div class="empty-state">
-        <p>Aktuell sind noch keine Build-Pakete gebaut.</p>
-        <p class="empty-state-hint">Führen Sie <code>npm run tauri:build</code> aus, um die Desktop- und Mobilpakete zu erstellen.</p>
+        <p>Aktuell sind keine Pakete verfügbar.</p>
       </div>
     `
       : manifest.downloads
@@ -453,11 +524,15 @@ export function renderDownloadsHtml(manifest: DownloadsManifest): string {
       `
               : ""
 
-            const hintBlock = item.hint
+            const hintBlock = item.hintHtml
               ? `
+        <p class="card-hint"><span class="hint-label">Hinweis:</span> ${item.hintHtml}</p>
+      `
+              : item.hint
+                ? `
         <p class="card-hint"><span class="hint-label">Hinweis:</span> ${escapeHtml(item.hint)}</p>
       `
-              : ""
+                : ""
 
             const shaBlock = item.sha256
               ? `
@@ -509,7 +584,7 @@ export function renderDownloadsHtml(manifest: DownloadsManifest): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Downloads — PWA Islands</title>
-  <meta name="description" content="Offizielle Downloads für PWA Islands: Native Versionen für Linux (AppImage, deb, rpm) und Android (APK) mit Dateisystem-Integration." />
+  <meta name="description" content="Offizielle Downloads für PWA Islands: Native Versionen für Linux (AppImage, deb, rpm), Windows (.exe) und Android (APK) mit Dateisystem-Integration." />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     :root {
@@ -926,7 +1001,7 @@ export function renderDownloadsHtml(manifest: DownloadsManifest): string {
     <section class="hero">
       <span class="hero-badge">Version ${escapeHtml(manifest.version)}</span>
       <h1>Downloads</h1>
-      <p>PWA Islands als native Anwendung für Linux und Android. Genießen Sie dauerhaften Offline-Zugriff und direkte Dateisystem-Integration.</p>
+      <p>PWA Islands als native Anwendung für Linux, Windows und Android. Genießen Sie dauerhaften Offline-Zugriff und direkte Dateisystem-Integration.</p>
     </section>
 
     <section class="downloads-grid">
@@ -1023,6 +1098,24 @@ export function downloadsPlugin(): Plugin {
           res.setHeader("Content-Type", "application/json; charset=utf-8")
           res.end(JSON.stringify(manifest, null, 2))
           return
+        }
+        if (url.startsWith("/downloads/")) {
+          const rawFilename = url.slice("/downloads/".length)
+          const decoded = decodeURIComponent(rawFilename)
+          const manifest = scanAvailableDownloads(root)
+          const item = manifest.downloads.find(
+            (d) => d.filename === decoded || d.filename === rawFilename,
+          )
+          if (item?.sourcePath && existsSync(item.sourcePath)) {
+            const stream = createReadStream(item.sourcePath)
+            res.setHeader("Content-Type", "application/octet-stream")
+            res.setHeader(
+              "Content-Disposition",
+              `attachment; filename="${encodeURIComponent(item.filename)}"`,
+            )
+            stream.pipe(res)
+            return
+          }
         }
         next()
       })

@@ -3,6 +3,8 @@ import {
   compareParsedVersions,
   filterHighestVersionPerKind,
   parseVersionString,
+  renderDownloadsHtml,
+  scanAvailableDownloads,
   type DownloadItem,
 } from "../tools/downloads-page"
 
@@ -33,6 +35,15 @@ describe("downloads-page versioning", () => {
       minor: 1,
       patch: 125,
       build: 1,
+    })
+
+    const vWin = parseVersionString("PWA Islands_0.1.131_x64-setup.exe")
+    expect(vWin).toEqual({
+      raw: "0.1.131",
+      major: 0,
+      minor: 1,
+      patch: 131,
+      build: 0,
     })
   })
 
@@ -127,16 +138,65 @@ describe("downloads-page versioning", () => {
         format: "apk",
         description: "Android",
       },
+      {
+        id: "windows-exe",
+        platform: "Windows",
+        title: "Windows Installer (.exe)",
+        filename: "PWA Islands_0.1.0_x64-setup.exe",
+        url: "/downloads/PWA%20Islands_0.1.0_x64-setup.exe",
+        size: "2.3 MB",
+        bytes: 2300000,
+        sha256: "hash7",
+        arch: "x64",
+        format: "exe",
+        description: "Windows alt",
+      },
+      {
+        id: "windows-exe",
+        platform: "Windows",
+        title: "Windows Installer (.exe)",
+        filename: "PWA Islands_0.1.131_x64-setup.exe",
+        url: "/downloads/PWA%20Islands_0.1.131_x64-setup.exe",
+        size: "2.4 MB",
+        bytes: 2400000,
+        sha256: "hash8",
+        arch: "x64",
+        format: "exe",
+        description: "Windows neu",
+      },
     ]
 
     const filtered = filterHighestVersionPerKind(items)
 
-    expect(filtered).toHaveLength(4)
+    expect(filtered).toHaveLength(5)
     expect(filtered.map((item) => item.filename)).toEqual([
       "pwa-islands_0.1.125_amd64.AppImage",
       "pwa-islands_0.1.125_amd64.deb",
       "pwa-islands-0.1.125-1.x86_64.rpm",
       "pwa-islands_0.1.125_universal.apk",
+      "PWA Islands_0.1.131_x64-setup.exe",
     ])
+  })
+
+  it("erkennt und filtert Windows-Builds in scanAvailableDownloads", () => {
+    const manifestWindows = scanAvailableDownloads(process.cwd(), { targets: ["windows"] })
+    expect(manifestWindows.downloads.some((d) => d.platform === "Windows")).toBe(true)
+    expect(manifestWindows.downloads.every((d) => d.platform === "Windows")).toBe(true)
+
+    const manifestExe = scanAvailableDownloads(process.cwd(), { targets: ["exe"] })
+    expect(manifestExe.downloads.some((d) => d.platform === "Windows")).toBe(true)
+    expect(manifestExe.downloads.every((d) => d.platform === "Windows")).toBe(true)
+
+    const manifestAll = scanAvailableDownloads(process.cwd())
+    expect(manifestAll.downloads.some((d) => d.platform === "Windows")).toBe(true)
+  })
+
+  it("enthält den WebView2 Link und erwähnt das Eigenständige Evergreen-Installationsprogramm", () => {
+    const manifest = scanAvailableDownloads(process.cwd())
+    const html = renderDownloadsHtml(manifest)
+    expect(html).toContain("https://developer.microsoft.com/de-de/microsoft-edge/webview2")
+    expect(html).toContain("Eigenständige")
+    expect(html).toContain("Evergreen-Installationsprogramm")
+    expect(html).toContain("ohne Internetverbindung")
   })
 })
