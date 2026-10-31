@@ -145,9 +145,16 @@ function readApkMetadata(apkPath: string): { versionName?: string; versionCode?:
   return {}
 }
 
+const PLATFORM_ORDER: Record<string, number> = {
+  android: 1,
+  windows: 2,
+  linux: 3,
+  macos: 4,
+}
+
 /**
  * Filtert eine Liste von Downloads, sodass von jeder Paketart (Plattform + Format + Architektur)
- * nur die höchste Version übrig bleibt.
+ * nur die höchste Version übrig bleibt, und sortiert sie nach Plattform (Android -> Windows -> Linux).
  */
 export function filterHighestVersionPerKind(items: DownloadItem[]): DownloadItem[] {
   const groups = new Map<string, DownloadItem[]>()
@@ -196,7 +203,11 @@ export function filterHighestVersionPerKind(items: DownloadItem[]): DownloadItem
     result.push(list[0])
   }
 
-  return result
+  return result.sort((a, b) => {
+    const rankA = PLATFORM_ORDER[a.platform.toLowerCase()] ?? 99
+    const rankB = PLATFORM_ORDER[b.platform.toLowerCase()] ?? 99
+    return rankA - rankB
+  })
 }
 
 export interface ScanDownloadsOptions {
@@ -258,88 +269,7 @@ export function scanAvailableDownloads(
     return targetList.includes(fmt)
   }
 
-  // 1. Linux AppImage
-  if (isTargetAllowed("appimage")) {
-    const appImages = findFiles(
-      join(rootDir, "src-tauri", "target", "release", "bundle", "appimage"),
-      (f) => f.endsWith(".AppImage"),
-    )
-    for (const src of appImages) {
-      const stat = statSync(src)
-      downloads.push({
-        id: "linux-appimage",
-        platform: "Linux",
-        title: "Linux AppImage",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
-        size: formatSize(stat.size),
-        bytes: stat.size,
-        sha256: computeSha256(src),
-        arch: "x86_64",
-        format: "AppImage",
-        description:
-          "Universelles Linux-Paket, das auf modernen Distributionen direkt ohne Installation ausgeführt werden kann.",
-        command: `chmod +x ${basename(src)} && ./${basename(src)}`,
-        hint: "Datei im Terminal ausführbar machen und ausführen, oder in den Dateieigenschaften 'Ausführen als Programm' aktivieren.",
-        sourcePath: src,
-      })
-    }
-  }
-
-  // 2. Linux Debian (.deb)
-  if (isTargetAllowed("deb")) {
-    const debs = findFiles(join(rootDir, "src-tauri", "target", "release", "bundle", "deb"), (f) =>
-      f.endsWith(".deb"),
-    )
-    for (const src of debs) {
-      const stat = statSync(src)
-      downloads.push({
-        id: "linux-deb",
-        platform: "Linux",
-        title: "Debian / Ubuntu (.deb)",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
-        size: formatSize(stat.size),
-        bytes: stat.size,
-        sha256: computeSha256(src),
-        arch: "amd64",
-        format: "deb",
-        description:
-          "Installationspaket für Debian, Ubuntu, Linux Mint, Pop!_OS und verwandte Distributionen.",
-        command: `sudo dpkg -i ${basename(src)}`,
-        hint: "Per Terminal mit dpkg oder durch Doppelklick im Software-Center installieren.",
-        sourcePath: src,
-      })
-    }
-  }
-
-  // 3. Linux RPM (.rpm)
-  if (isTargetAllowed("rpm")) {
-    const rpms = findFiles(join(rootDir, "src-tauri", "target", "release", "bundle", "rpm"), (f) =>
-      f.endsWith(".rpm"),
-    )
-    for (const src of rpms) {
-      const stat = statSync(src)
-      downloads.push({
-        id: "linux-rpm",
-        platform: "Linux",
-        title: "Fedora / openSUSE (.rpm)",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
-        size: formatSize(stat.size),
-        bytes: stat.size,
-        sha256: computeSha256(src),
-        arch: "x86_64",
-        format: "rpm",
-        description: "RPM-Paket für Fedora, RHEL, openSUSE, CentOS und kompatible Systeme.",
-        command: `sudo dnf install ./${basename(src)}`,
-        hint: "Per Terminal mit dnf oder über das Paketverwaltungsprogramm Ihrer Distribution installieren.",
-        sourcePath: src,
-      })
-    }
-  }
-
-  // 4. Android APK (.apk)
+  // 1. Android APK (.apk)
   if (isTargetAllowed("apk")) {
     const allApks = findFiles(
       join(rootDir, "src-tauri", "gen", "android", "app", "build", "outputs", "apk"),
@@ -373,7 +303,7 @@ export function scanAvailableDownloads(
     }
   }
 
-  // 5. Windows / macOS (falls vorhanden)
+  // 2. Windows (.exe)
   if (isTargetAllowed("exe") || isTargetAllowed("nsis") || isTargetAllowed("windows")) {
     const nsisDirs = [
       join(rootDir, "src-tauri", "target", "release", "bundle", "nsis"),
@@ -426,6 +356,88 @@ export function scanAvailableDownloads(
     }
   }
 
+  // 3. Linux AppImage
+  if (isTargetAllowed("appimage")) {
+    const appImages = findFiles(
+      join(rootDir, "src-tauri", "target", "release", "bundle", "appimage"),
+      (f) => f.endsWith(".AppImage"),
+    )
+    for (const src of appImages) {
+      const stat = statSync(src)
+      downloads.push({
+        id: "linux-appimage",
+        platform: "Linux",
+        title: "Linux AppImage",
+        filename: basename(src),
+        url: `/downloads/${basename(src)}`,
+        size: formatSize(stat.size),
+        bytes: stat.size,
+        sha256: computeSha256(src),
+        arch: "x86_64",
+        format: "AppImage",
+        description:
+          "Universelles Linux-Paket, das auf modernen Distributionen direkt ohne Installation ausgeführt werden kann.",
+        command: `chmod +x ${basename(src)} && ./${basename(src)}`,
+        hint: "Datei im Terminal ausführbar machen und ausführen, oder in den Dateieigenschaften 'Ausführen als Programm' aktivieren.",
+        sourcePath: src,
+      })
+    }
+  }
+
+  // 4. Linux Debian (.deb)
+  if (isTargetAllowed("deb")) {
+    const debs = findFiles(join(rootDir, "src-tauri", "target", "release", "bundle", "deb"), (f) =>
+      f.endsWith(".deb"),
+    )
+    for (const src of debs) {
+      const stat = statSync(src)
+      downloads.push({
+        id: "linux-deb",
+        platform: "Linux",
+        title: "Debian / Ubuntu (.deb)",
+        filename: basename(src),
+        url: `/downloads/${basename(src)}`,
+        size: formatSize(stat.size),
+        bytes: stat.size,
+        sha256: computeSha256(src),
+        arch: "amd64",
+        format: "deb",
+        description:
+          "Installationspaket für Debian, Ubuntu, Linux Mint, Pop!_OS und verwandte Distributionen.",
+        command: `sudo dpkg -i ${basename(src)}`,
+        hint: "Per Terminal mit dpkg oder durch Doppelklick im Software-Center installieren.",
+        sourcePath: src,
+      })
+    }
+  }
+
+  // 5. Linux RPM (.rpm)
+  if (isTargetAllowed("rpm")) {
+    const rpms = findFiles(join(rootDir, "src-tauri", "target", "release", "bundle", "rpm"), (f) =>
+      f.endsWith(".rpm"),
+    )
+    for (const src of rpms) {
+      const stat = statSync(src)
+      downloads.push({
+        id: "linux-rpm",
+        platform: "Linux",
+        title: "Fedora / openSUSE (.rpm)",
+        filename: basename(src),
+        url: `/downloads/${basename(src)}`,
+        size: formatSize(stat.size),
+        bytes: stat.size,
+        sha256: computeSha256(src),
+        arch: "x86_64",
+        format: "rpm",
+        description: "RPM-Paket für Fedora, RHEL, openSUSE, CentOS und kompatible Systeme.",
+        command: `sudo dnf install ./${basename(src)}`,
+        hint: "Per Terminal mit dnf oder über das Paketverwaltungsprogramm Ihrer Distribution installieren.",
+        sourcePath: src,
+      })
+    }
+  }
+
+  // 6. macOS (falls vorhanden)
   if (isTargetAllowed("dmg") || isTargetAllowed("macos")) {
     const dmgDirs = [
       join(rootDir, "src-tauri", "target", "release", "bundle", "dmg"),
@@ -584,7 +596,7 @@ export function renderDownloadsHtml(manifest: DownloadsManifest): string {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Downloads — PWA Islands</title>
-  <meta name="description" content="Offizielle Downloads für PWA Islands: Native Versionen für Linux (AppImage, deb, rpm), Windows (.exe) und Android (APK) mit Dateisystem-Integration." />
+  <meta name="description" content="Offizielle Downloads für PWA Islands: Native Versionen für Android (APK), Windows (.exe) und Linux (AppImage, deb, rpm) mit Dateisystem-Integration." />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
     :root {
@@ -1001,7 +1013,7 @@ export function renderDownloadsHtml(manifest: DownloadsManifest): string {
     <section class="hero">
       <span class="hero-badge">Version ${escapeHtml(manifest.version)}</span>
       <h1>Downloads</h1>
-      <p>PWA Islands als native Anwendung für Linux, Windows und Android. Genießen Sie dauerhaften Offline-Zugriff und direkte Dateisystem-Integration.</p>
+      <p>PWA Islands als native Anwendung für Android, Windows und Linux. Genießen Sie dauerhaften Offline-Zugriff und direkte Dateisystem-Integration.</p>
     </section>
 
     <section class="downloads-grid">

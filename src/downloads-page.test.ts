@@ -170,11 +170,11 @@ describe("downloads-page versioning", () => {
 
     expect(filtered).toHaveLength(5)
     expect(filtered.map((item) => item.filename)).toEqual([
+      "pwa-islands_0.1.125_universal.apk",
+      "PWA Islands_0.1.131_x64-setup.exe",
       "pwa-islands_0.1.125_amd64.AppImage",
       "pwa-islands_0.1.125_amd64.deb",
       "pwa-islands-0.1.125-1.x86_64.rpm",
-      "pwa-islands_0.1.125_universal.apk",
-      "PWA Islands_0.1.131_x64-setup.exe",
     ])
   })
 
