@@ -154,3 +154,10 @@ window.addEventListener("message", async (event) => {
     await toggleFullscreenWindow()
   }
 })
+
+window.addEventListener("keydown", async (event) => {
+  if (event.key === "F11" && !event.defaultPrevented) {
+    event.preventDefault()
+    await toggleFullscreenWindow()
+  }
+})

@@ -784,13 +784,11 @@ pub fn run() {
       {
         let init_script = r#"
           window.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape') {
-              if (window !== window.top) {
+            if (window !== window.top) {
+              if (e.key === 'Escape') {
                 window.top.postMessage({ type: 'TAURI_EXIT_FULLSCREEN', key: e.key }, '*');
-              }
-            } else if (e.key === 'F11') {
-              e.preventDefault();
-              if (window !== window.top) {
+              } else if (e.key === 'F11') {
+                e.preventDefault();
                 window.top.postMessage({ type: 'TAURI_TOGGLE_FULLSCREEN', key: e.key }, '*');
               }
             }
@@ -833,6 +831,36 @@ pub fn run() {
             });
 
             header_bar.pack_start(&return_btn);
+
+            let fullscreen_btn =
+              gtk::Button::from_icon_name(Some("view-fullscreen"), gtk::IconSize::Button);
+            fullscreen_btn.set_tooltip_text(Some("Vollbild (F11)"));
+            let win_fs_clone = main_window.clone();
+            fullscreen_btn.connect_clicked(move |_| {
+              let _ = win_fs_clone.eval("window.postMessage({ type: 'TAURI_TOGGLE_FULLSCREEN' }, '*')");
+            });
+
+            let fs_btn_clone = fullscreen_btn.clone();
+            gtk_win.connect_window_state_event(move |_, event| {
+              let is_fullscreen =
+                event.new_window_state().contains(gtk::gdk::WindowState::FULLSCREEN);
+              if is_fullscreen {
+                fs_btn_clone.set_image(Some(&gtk::Image::from_icon_name(
+                  Some("view-restore"),
+                  gtk::IconSize::Button,
+                )));
+                fs_btn_clone.set_tooltip_text(Some("Vollbild beenden (F11)"));
+              } else {
+                fs_btn_clone.set_image(Some(&gtk::Image::from_icon_name(
+                  Some("view-fullscreen"),
+                  gtk::IconSize::Button,
+                )));
+                fs_btn_clone.set_tooltip_text(Some("Vollbild (F11)"));
+              }
+              gtk::glib::Propagation::Proceed
+            });
+
+            header_bar.pack_end(&fullscreen_btn);
             gtk_win
               .bind_property("title", &header_bar, "title")
               .flags(gtk::glib::BindingFlags::DEFAULT | gtk::glib::BindingFlags::SYNC_CREATE)
