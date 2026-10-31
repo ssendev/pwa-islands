@@ -1820,16 +1820,16 @@ code {
 
 .window-top-border {
   position: fixed;
-  top: env(titlebar-area-y, 0px);
-  left: env(titlebar-area-x, 0px);
-  height: max(32px, env(titlebar-area-height, 32px));
+  top: 0;
+  left: 0;
+  height: 32px;
   width: 100%;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  padding: 0 180px 0 0;
+  justify-content: space-between;
+  padding: 0;
   box-sizing: border-box;
   user-select: none;
   z-index: 1000;
@@ -1838,40 +1838,63 @@ code {
   transition: opacity 0.1s ease;
 }
 
-/* Decorum Titlebar & Window Controls */
-div[data-tauri-decorum-tb] {
-  z-index: 1001 !important;
-}
-
-body:has(#window-top-border) div[data-tauri-decorum-tb] > div[data-tauri-drag-region] {
-  pointer-events: none !important;
-}
-
-button.decorum-tb-btn {
-  color: var(--text-h);
-  transition:
-    background-color 0.1s ease,
-    opacity 0.1s ease;
-}
-
-@media (prefers-color-scheme: dark) {
-  button.decorum-tb-btn:hover {
-    background-color: rgba(255, 255, 255, 0.08) !important;
-  }
-}
-
-button#decorum-tb-close:hover {
-  background-color: #c42b1c !important;
-  color: #ffffff !important;
-}
-
-.window-top-border.inactive ~ div[data-tauri-decorum-tb] button.decorum-tb-btn,
-body:has(.window-top-border.inactive) div[data-tauri-decorum-tb] button.decorum-tb-btn {
-  opacity: 0.6;
-}
-
 .window-top-border.inactive {
   opacity: 0.5;
+}
+
+.titlebar-title {
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-h);
+  line-height: 32px;
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+}
+
+.titlebar-drag-spacer {
+  flex-grow: 1;
+  height: 100%;
+}
+
+.window-controls {
+  display: flex;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.win-btn {
+  width: 46px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  /* Windows 10/11 comes with this icon font pre-installed! */
+  font-family: "Segoe Fluent Icons", "Segoe MDL2 Assets";
+  font-size: 10px;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  user-select: none;
+  outline: none;
+  transition:
+    background-color 0.1s ease,
+    color 0.1s ease;
+}
+
+.win-btn:hover {
+  background: rgba(128, 128, 128, 0.2);
+}
+
+.close-btn:hover {
+  background: #e81123 !important;
+  color: white !important;
+}
+
+.files-page.has-windows-titlebar {
+  padding-top: calc(32px + 24px);
 }
 
 .window-top-border-btn {
@@ -1934,6 +1957,6 @@ body:has(.window-top-border.inactive) div[data-tauri-decorum-tb] button.decorum-
 }
 
 .island-iframe.has-top-border {
-  top: max(32px, env(titlebar-area-height, 32px));
-  height: calc(100dvh - max(32px, env(titlebar-area-height, 32px)));
+  top: 32px;
+  height: calc(100dvh - 32px);
 }

@@ -51,6 +51,9 @@ import {
   supportsTauri,
   isWindowsOrLinux,
   isWindows,
+  minimizeWindow,
+  toggleMaximizeWindow,
+  closeWindow,
   checkFileExists,
 } from "./files"
 import * as Modal from "./modal"
@@ -241,6 +244,7 @@ export const Flags = Schema.Struct({
   origin: Schema.String,
   isWindowsOrLinux: Schema.optionalKey(Schema.Boolean),
   isWindows: Schema.optionalKey(Schema.Boolean),
+  isWindowMaximized: Schema.optionalKey(Schema.Boolean),
 })
 export type Flags = typeof Flags.Type
 
@@ -251,6 +255,7 @@ export const Model = Schema.Struct({
   isWindowsOrLinux: Schema.Boolean,
   isWindows: Schema.Boolean,
   isWindowFocused: Schema.Boolean,
+  isWindowMaximized: Schema.Boolean,
   origin: Schema.String,
   storageState: StorageState,
   showFileInfo: Schema.Boolean,
@@ -345,6 +350,15 @@ export const Message = defineMessageUnion({
   },
   ChangedWindowFocus: {
     isFocused: Schema.Boolean,
+  },
+  ClickedMinimizeWindow: {},
+  CompletedMinimizeWindow: {},
+  ClickedToggleMaximizeWindow: {},
+  CompletedToggleMaximizeWindow: {},
+  ClickedCloseWindow: {},
+  CompletedCloseWindow: {},
+  ChangedWindowMaximized: {
+    isMaximized: Schema.Boolean,
   },
   CompletedResolveIslandBackNavigation: {
     targetUrl: Schema.String,
@@ -1101,6 +1115,39 @@ export const FocusIslandIframe = Command.define("FocusIslandIframe", {
   ),
 })
 
+export const MinimizeWindow = Command.define("MinimizeWindow", {
+  messages: [Message.CompletedMinimizeWindow],
+  execute: Effect.tryPromise({
+    try: () => minimizeWindow(),
+    catch: () => new Error("minimize failed"),
+  }).pipe(
+    Effect.as(Message.CompletedMinimizeWindow()),
+    Effect.catch(() => Effect.succeed(Message.CompletedMinimizeWindow())),
+  ),
+})
+
+export const ToggleMaximizeWindow = Command.define("ToggleMaximizeWindow", {
+  messages: [Message.CompletedToggleMaximizeWindow],
+  execute: Effect.tryPromise({
+    try: () => toggleMaximizeWindow(),
+    catch: () => new Error("toggleMaximize failed"),
+  }).pipe(
+    Effect.as(Message.CompletedToggleMaximizeWindow()),
+    Effect.catch(() => Effect.succeed(Message.CompletedToggleMaximizeWindow())),
+  ),
+})
+
+export const CloseWindow = Command.define("CloseWindow", {
+  messages: [Message.CompletedCloseWindow],
+  execute: Effect.tryPromise({
+    try: () => closeWindow(),
+    catch: () => new Error("close failed"),
+  }).pipe(
+    Effect.as(Message.CompletedCloseWindow()),
+    Effect.catch(() => Effect.succeed(Message.CompletedCloseWindow())),
+  ),
+})
+
 export const ScheduleReturnArrowClick = Command.define("ScheduleReturnArrowClick", {
   args: {
     clickId: Schema.Number,
@@ -1321,6 +1368,7 @@ export const init = (
         isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
         isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
         isWindowFocused: true,
+        isWindowMaximized: flags.isWindowMaximized ?? false,
         origin: flags.origin,
         storageState: StorageState.Unsupported(),
         showFileInfo: true,
@@ -1347,6 +1395,7 @@ export const init = (
       isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
       isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
       isWindowFocused: true,
+      isWindowMaximized: flags.isWindowMaximized ?? false,
       origin: flags.origin,
       storageState: StorageState.Initializing(),
       showFileInfo: true,
@@ -1771,6 +1820,39 @@ export const update = (
     ChangedWindowFocus: ({ isFocused }) => ({
       model: modifyFields(model, {
         isWindowFocused: () => isFocused,
+      }),
+    }),
+
+    ClickedMinimizeWindow: () => ({
+      model,
+      commands: [MinimizeWindow()],
+    }),
+
+    CompletedMinimizeWindow: () => ({
+      model,
+    }),
+
+    ClickedToggleMaximizeWindow: () => ({
+      model,
+      commands: [ToggleMaximizeWindow()],
+    }),
+
+    CompletedToggleMaximizeWindow: () => ({
+      model,
+    }),
+
+    ClickedCloseWindow: () => ({
+      model,
+      commands: [CloseWindow()],
+    }),
+
+    CompletedCloseWindow: () => ({
+      model,
+    }),
+
+    ChangedWindowMaximized: ({ isMaximized }) => ({
+      model: modifyFields(model, {
+        isWindowMaximized: () => isMaximized,
       }),
     }),
 
@@ -2634,6 +2716,19 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       }),
     ),
   ),
+
+  windowMaximized: Subscription.persistentEntry(
+    Dom.streamFromEvent({
+      target: window as Dom.TypedEventTarget<{
+        "pwaislands:window-maximized": CustomEvent<boolean>
+      }>,
+      type: "pwaislands:window-maximized",
+      mapEvent: (event) =>
+        Message.ChangedWindowMaximized({
+          isMaximized: Boolean(event.detail),
+        }),
+    }),
+  ),
 }))
 
 // VIEW
@@ -3338,11 +3433,56 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
 const ISLAND_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
 
-const viewWindowTopBorder = (title: string, isFocused: boolean, h: HtmlBuilder): Html.Html =>
+const viewWindowControls = (isMaximized: boolean, h: HtmlBuilder): Html.Html =>
+  h.div(
+    [h.Class("window-controls")],
+    [
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("min-btn"),
+          h.Class("win-btn"),
+          h.Title("Minimieren"),
+          h.AriaLabel("Minimieren"),
+          h.OnClick(Message.ClickedMinimizeWindow()),
+        ],
+        ["\uE921"],
+      ),
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("max-btn"),
+          h.Class("win-btn"),
+          h.Title(isMaximized ? "Wiederherstellen" : "Maximieren"),
+          h.AriaLabel(isMaximized ? "Wiederherstellen" : "Maximieren"),
+          h.OnClick(Message.ClickedToggleMaximizeWindow()),
+        ],
+        [isMaximized ? "\uE923" : "\uE922"],
+      ),
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("close-btn"),
+          h.Class("win-btn close-btn"),
+          h.Title("Schließen"),
+          h.AriaLabel("Schließen"),
+          h.OnClick(Message.ClickedCloseWindow()),
+        ],
+        ["\uE8BB"],
+      ),
+    ],
+  )
+
+const viewWindowTopBorder = (
+  title: string,
+  isFocused: boolean,
+  isMaximized: boolean,
+  h: HtmlBuilder,
+): Html.Html =>
   h.header(
     [
       h.Id("window-top-border"),
-      h.Class(isFocused ? "window-top-border" : "window-top-border inactive"),
+      h.Class(isFocused ? "window-top-border titlebar" : "window-top-border titlebar inactive"),
       h.DataAttribute("tauri-drag-region", "true"),
     ],
     [
@@ -3361,6 +3501,25 @@ const viewWindowTopBorder = (title: string, isFocused: boolean, h: HtmlBuilder):
           h.span([h.Class("window-top-border-title")], [title]),
         ],
       ),
+      h.div([h.Class("titlebar-drag-spacer"), h.DataAttribute("tauri-drag-region", "true")], []),
+      viewWindowControls(isMaximized, h),
+    ],
+  )
+
+const viewManagerTitlebar = (isFocused: boolean, isMaximized: boolean, h: HtmlBuilder): Html.Html =>
+  h.header(
+    [
+      h.Id("manager-titlebar"),
+      h.Class(isFocused ? "window-top-border titlebar" : "window-top-border titlebar inactive"),
+      h.DataAttribute("tauri-drag-region", "true"),
+    ],
+    [
+      h.div(
+        [h.Class("titlebar-title"), h.DataAttribute("tauri-drag-region", "true")],
+        ["PWA Islands"],
+      ),
+      h.div([h.Class("titlebar-drag-spacer"), h.DataAttribute("tauri-drag-region", "true")], []),
+      viewWindowControls(isMaximized, h),
     ],
   )
 
@@ -3369,12 +3528,13 @@ const viewIslandContainer = (
   showTopBorder: boolean,
   title: string,
   isFocused: boolean,
+  isMaximized: boolean,
   h: HtmlBuilder,
 ): Html.Html =>
   h.div(
     [h.Class("island-container")],
     [
-      showTopBorder ? viewWindowTopBorder(title, isFocused, h) : h.empty,
+      showTopBorder ? viewWindowTopBorder(title, isFocused, isMaximized, h) : h.empty,
       h.iframe([
         h.Id("island-iframe"),
         h.Class(showTopBorder ? "island-iframe has-top-border" : "island-iframe"),
@@ -3386,12 +3546,16 @@ const viewIslandContainer = (
     ],
   )
 
-const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html =>
-  h.main(
+const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html => {
+  const showWindowsTitlebar = model.hasTauri && model.isWindows
+  return h.main(
     [h.Id("router-view"), h.Class("router-view")],
     [
+      showWindowsTitlebar
+        ? viewManagerTitlebar(model.isWindowFocused, model.isWindowMaximized, h)
+        : h.empty,
       h.div(
-        [h.Class("files-page")],
+        [h.Class(showWindowsTitlebar ? "files-page has-windows-titlebar" : "files-page")],
         [
           viewToolbar(model, h),
           viewAlertContainer(model, h),
@@ -3401,6 +3565,7 @@ const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html =>
       ),
     ],
   )
+}
 
 export const view = (model: Model, h: HtmlBuilder): Html.Document => {
   const docTitle = computeDocumentTitle(model)
@@ -3417,6 +3582,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
               model.hasTauri && model.isWindows,
               docTitle,
               model.isWindowFocused,
+              model.isWindowMaximized,
               h,
             ),
         }),

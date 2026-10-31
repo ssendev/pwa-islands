@@ -58,6 +58,7 @@ const readyModel: Model = {
   isWindowsOrLinux: true,
   isWindows: false,
   isWindowFocused: true,
+  isWindowMaximized: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -328,6 +329,9 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#window-top-border")).toExist(),
       sceneExpect(selector("#btn-return-pwaislands")).toExist(),
       sceneExpect(selector("#btn-return-pwaislands")).toContainText("←"),
+      sceneExpect(selector("#min-btn")).toExist(),
+      sceneExpect(selector("#max-btn")).toExist(),
+      sceneExpect(selector("#close-btn")).toExist(),
       doubleClick(selector("#btn-return-pwaislands")),
       Command.expectExact(
         PushUrl({ url: "/unterordner?pwaislands" }),
@@ -371,6 +375,9 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#island-iframe")).not.toHaveClass("has-top-border"),
       sceneExpect(selector("#window-top-border")).toBeAbsent(),
       sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
+      sceneExpect(selector("#min-btn")).toBeAbsent(),
+      sceneExpect(selector("#max-btn")).toBeAbsent(),
+      sceneExpect(selector("#close-btn")).toBeAbsent(),
     )
   })
 

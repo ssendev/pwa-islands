@@ -57,11 +57,26 @@ Runtime.run(application, {
 if (supportsTauri()) {
   import("@tauri-apps/api/window")
     .then(({ getCurrentWindow }) => {
-      getCurrentWindow()
+      const win = getCurrentWindow()
+      win
         .onFocusChanged(({ payload: focused }) => {
           window.dispatchEvent(new Event(focused ? "focus" : "blur"))
         })
         .catch(() => {})
+
+      const checkMaximized = () => {
+        win
+          .isMaximized()
+          .then((maximized) => {
+            window.dispatchEvent(
+              new CustomEvent("pwaislands:window-maximized", { detail: maximized }),
+            )
+          })
+          .catch(() => {})
+      }
+
+      win.onResized(checkMaximized).catch(() => {})
+      checkMaximized()
     })
     .catch(() => {})
 }

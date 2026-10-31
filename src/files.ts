@@ -51,6 +51,33 @@ export type FileInspection = typeof FileInspection.Type
 export const supportsTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
+export const minimizeWindow = async (): Promise<void> => {
+  if (supportsTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    await getCurrentWindow()
+      .minimize()
+      .catch(() => {})
+  }
+}
+
+export const toggleMaximizeWindow = async (): Promise<void> => {
+  if (supportsTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    await getCurrentWindow()
+      .toggleMaximize()
+      .catch(() => {})
+  }
+}
+
+export const closeWindow = async (): Promise<void> => {
+  if (supportsTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    await getCurrentWindow()
+      .close()
+      .catch(() => {})
+  }
+}
+
 export const isWindows = (): boolean => {
   if (typeof navigator === "undefined") return false
   return /Windows|Win32|Win64/i.test(navigator.userAgent)

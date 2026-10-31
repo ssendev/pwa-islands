@@ -14,6 +14,7 @@ import {
 import {
   ActivateFsaBackend,
   ActivateOpfsBackend,
+  CloseWindow,
   DisconnectStorage,
   EntriesState,
   FocusIslandIframe,
@@ -21,6 +22,7 @@ import {
   InstallPrompt,
   IslandIpcAction,
   Message,
+  MinimizeWindow,
   type Model,
   NavigateHistoryBack,
   NavigateHistoryForward,
@@ -36,6 +38,7 @@ import {
   SaveStorageTypePreference,
   ScheduleReturnArrowClick,
   StorageState,
+  ToggleMaximizeWindow,
   init,
   parseIslandWindowMessage,
   update,
@@ -81,6 +84,7 @@ const readyModel: Model = {
   isWindowsOrLinux: true,
   isWindows: false,
   isWindowFocused: true,
+  isWindowMaximized: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -1704,6 +1708,29 @@ describe("PWA Islands Story Tests", () => {
           model((m) => {
             expect(m.isWindowFocused).toBe(true)
           }),
+        )
+      })
+      it("updates isWindowMaximized and handles window control messages", () => {
+        story(
+          update,
+          given(readyModel),
+          message(Message.ChangedWindowMaximized({ isMaximized: true })),
+          model((m) => {
+            expect(m.isWindowMaximized).toBe(true)
+          }),
+          message(Message.ChangedWindowMaximized({ isMaximized: false })),
+          model((m) => {
+            expect(m.isWindowMaximized).toBe(false)
+          }),
+          message(Message.ClickedMinimizeWindow()),
+          Command.expectExact(MinimizeWindow()),
+          Command.resolve(MinimizeWindow, Message.CompletedMinimizeWindow()),
+          message(Message.ClickedToggleMaximizeWindow()),
+          Command.expectExact(ToggleMaximizeWindow()),
+          Command.resolve(ToggleMaximizeWindow, Message.CompletedToggleMaximizeWindow()),
+          message(Message.ClickedCloseWindow()),
+          Command.expectExact(CloseWindow()),
+          Command.resolve(CloseWindow, Message.CompletedCloseWindow()),
         )
       })
     })
