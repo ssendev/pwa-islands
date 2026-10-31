@@ -5,7 +5,6 @@ import iconAudio from "./emoji/🎵.svg"
 import iconCheck from "./emoji/✅.svg"
 import iconClipboard from "./emoji/📋.svg"
 import iconClose from "./emoji/✖️.svg"
-import iconCode from "./emoji/💻.svg"
 import iconConfig from "./emoji/🔧.svg"
 import iconCross from "./emoji/❌.svg"
 import iconCss from "./emoji/🎨.svg"
@@ -27,6 +26,7 @@ import iconPlug from "./emoji/🔌.svg"
 import iconPlus from "./emoji/➕.svg"
 import iconPuzzle from "./emoji/🧩.svg"
 import iconSave from "./emoji/💾.svg"
+import iconScroll from "./emoji/📜.svg"
 import iconSettings from "./emoji/⚙️.svg"
 import iconText from "./emoji/📝.svg"
 import iconTrash from "./emoji/🗑️.svg"
@@ -41,7 +41,7 @@ export const ICONS = {
   "file-image": iconImage,
   "file-pdf": iconPdf,
   "file-html": iconHtml,
-  "file-code": iconCode,
+  "file-code": iconScroll,
   "file-css": iconCss,
   "file-config": iconConfig,
   "file-text": iconText,
