@@ -142,22 +142,24 @@ if (typeof document !== "undefined") {
   })
 }
 
-window.addEventListener("message", async (event) => {
-  if (event.data?.type === "TAURI_EXIT_FULLSCREEN") {
-    const isFs = await isWindowFullscreen()
-    if (isFs) {
-      await exitFullscreenWindow()
-    } else if (event.data?.key === "Escape") {
-      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+if (supportsTauri() && isWindowsOrLinux()) {
+  window.addEventListener("message", async (event) => {
+    if (event.data?.type === "TAURI_EXIT_FULLSCREEN") {
+      const isFs = await isWindowFullscreen()
+      if (isFs) {
+        await exitFullscreenWindow()
+      } else if (event.data?.key === "Escape") {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+      }
+    } else if (event.data?.type === "TAURI_TOGGLE_FULLSCREEN") {
+      await toggleFullscreenWindow()
     }
-  } else if (event.data?.type === "TAURI_TOGGLE_FULLSCREEN") {
-    await toggleFullscreenWindow()
-  }
-})
+  })
 
-window.addEventListener("keydown", async (event) => {
-  if (event.key === "F11" && !event.defaultPrevented) {
-    event.preventDefault()
-    await toggleFullscreenWindow()
-  }
-})
+  window.addEventListener("keydown", async (event) => {
+    if (event.key === "F11" && !event.defaultPrevented) {
+      event.preventDefault()
+      await toggleFullscreenWindow()
+    }
+  })
+}

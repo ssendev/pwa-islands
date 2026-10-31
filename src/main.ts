@@ -2798,16 +2798,26 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
     }),
   ),
 
-  fullscreenShortcut: Subscription.persistentEntry(
-    Dom.streamFromKeyBindings<Message>({
-      bindings: [
-        {
-          keys: "F11",
-          whileTyping: "Allow",
-          mapEvent: () => Message.ClickedToggleFullscreen(),
-        },
-      ],
-    }),
+  fullscreenShortcut: entry(
+    {
+      isEnabled: Schema.Boolean,
+    },
+    {
+      modelToDependencies: (model) => ({
+        isEnabled: model.hasTauri && model.isWindowsOrLinux,
+      }),
+      dependenciesToStream: ({ isEnabled }) =>
+        Dom.streamFromKeyBindings<Message>({
+          bindings: [
+            {
+              keys: "F11",
+              isEnabled,
+              whileTyping: "Allow",
+              mapEvent: () => Message.ClickedToggleFullscreen(),
+            },
+          ],
+        }),
+    },
   ),
 }))
 
