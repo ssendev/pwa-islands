@@ -1829,13 +1829,45 @@ code {
   display: flex;
   align-items: center;
   justify-content: flex-start;
-  padding: 0;
+  padding: 0 180px 0 0;
   box-sizing: border-box;
   user-select: none;
   z-index: 1000;
   font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   font-size: 12px;
   transition: opacity 0.1s ease;
+}
+
+/* Decorum Titlebar & Window Controls */
+div[data-tauri-decorum-tb] {
+  z-index: 1001 !important;
+}
+
+body:has(#window-top-border) div[data-tauri-decorum-tb] > div[data-tauri-drag-region] {
+  pointer-events: none !important;
+}
+
+button.decorum-tb-btn {
+  color: var(--text-h);
+  transition:
+    background-color 0.1s ease,
+    opacity 0.1s ease;
+}
+
+@media (prefers-color-scheme: dark) {
+  button.decorum-tb-btn:hover {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+  }
+}
+
+button#decorum-tb-close:hover {
+  background-color: #c42b1c !important;
+  color: #ffffff !important;
+}
+
+.window-top-border.inactive ~ div[data-tauri-decorum-tb] button.decorum-tb-btn,
+body:has(.window-top-border.inactive) div[data-tauri-decorum-tb] button.decorum-tb-btn {
+  opacity: 0.6;
 }
 
 .window-top-border.inactive {

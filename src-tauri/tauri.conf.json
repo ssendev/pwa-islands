@@ -10,6 +10,7 @@
     "beforeBuildCommand": "npm run build"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "PWA Islands",
@@ -17,9 +18,7 @@
         "height": 600,
         "resizable": true,
         "fullscreen": false,
-        "transparent": true,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true
+        "decorations": false
       }
     ],
     "security": {

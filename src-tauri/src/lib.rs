@@ -747,7 +747,8 @@ async fn tauri_fs_pick_folder(app: tauri::AppHandle) -> Result<Option<String>, S
 pub fn run() {
   #[allow(unused_mut)]
   let mut builder = tauri::Builder::default()
-    .plugin(tauri_plugin_dialog::init());
+    .plugin(tauri_plugin_dialog::init())
+    .plugin(tauri_plugin_decorum::init());
 
   #[cfg(target_os = "android")]
   {
@@ -783,18 +784,29 @@ pub fn run() {
       #[cfg(target_os = "windows")]
       {
         use tauri::window::{Effect, EffectsBuilder};
+        use tauri_plugin_decorum::WebviewWindowExt;
         if let Some(main_window) = app.get_webview_window("main") {
           let _ = main_window.set_effects(
             EffectsBuilder::new()
               .effect(Effect::Mica)
               .build(),
           );
+          let _ = main_window.create_overlay_titlebar();
+        }
+      }
+      #[cfg(target_os = "macos")]
+      {
+        use tauri_plugin_decorum::WebviewWindowExt;
+        if let Some(main_window) = app.get_webview_window("main") {
+          let _ = main_window.create_overlay_titlebar();
+          let _ = main_window.set_traffic_lights_inset(12.0, 16.0);
         }
       }
       #[cfg(target_os = "linux")]
       {
         use gtk::prelude::*;
         if let Some(main_window) = app.get_webview_window("main") {
+          let _ = main_window.set_decorations(true);
           if let Ok(gtk_win) = main_window.gtk_window() {
             let header_bar = gtk::HeaderBar::new();
             header_bar.set_show_close_button(true);
