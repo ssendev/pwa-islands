@@ -2682,24 +2682,12 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
     }),
   ),
 
-  islandNavigation: entry(
-    {
-      isIslandOpen: Schema.Boolean,
-    },
-    {
-      modelToDependencies: (model) => ({
-        isIslandOpen: Option.isSome(model.maybeActiveIslandUrl),
-      }),
-      dependenciesToStream: ({ isIslandOpen }) =>
-        Stream.when(
-          Dom.streamFromEventFilterMap({
-            target: window,
-            type: "message",
-            filterMapEvent: parseIslandWindowMessage,
-          }),
-          Effect.sync(() => isIslandOpen),
-        ),
-    },
+  islandNavigation: Subscription.persistentEntry(
+    Dom.streamFromEventFilterMap({
+      target: window,
+      type: "message",
+      filterMapEvent: parseIslandWindowMessage,
+    }),
   ),
 
   outsideSettingsClick: entry(
@@ -3613,6 +3601,8 @@ const viewWindowTopBorder = (
   )
 
 const viewManagerTitlebar = (
+  title: string,
+  canNavigateBack: boolean,
   isFocused: boolean,
   isMaximized: boolean,
   isFullscreen: boolean,
@@ -3625,10 +3615,23 @@ const viewManagerTitlebar = (
       h.DataAttribute("tauri-drag-region", "true"),
     ],
     [
-      h.div(
-        [h.Class("titlebar-title"), h.DataAttribute("tauri-drag-region", "true")],
-        ["PWA Islands"],
-      ),
+      canNavigateBack
+        ? h.button(
+            [
+              h.Type("button"),
+              h.Id("btn-return-pwaislands"),
+              h.Class("window-top-border-btn"),
+              h.Title("Zurück"),
+              h.AriaLabel("Zurück"),
+              h.OnClick(Message.ClickedReturnArrow()),
+              h.OnDoubleClick(Message.DoubleClickedReturnArrow()),
+            ],
+            [
+              h.span([h.Class("window-top-border-arrow"), h.AriaHidden(true)], ["←"]),
+              h.span([h.Class("window-top-border-title")], [title]),
+            ],
+          )
+        : h.div([h.Class("titlebar-title"), h.DataAttribute("tauri-drag-region", "true")], [title]),
       h.div([h.Class("titlebar-drag-spacer"), h.DataAttribute("tauri-drag-region", "true")], []),
       viewWindowControls(isMaximized, isFullscreen, h),
     ],
@@ -3658,13 +3661,17 @@ const viewIslandContainer = (
     ],
   )
 
-const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html => {
+const viewManagerMain = (model: Model, title: string, h: HtmlBuilder): Html.Html => {
   const showWindowsTitlebar = model.hasTauri && model.isWindows
+  const currentSubPath = currentSubPathFromStorageState(model.storageState)
+  const canNavigateBack = currentSubPath.length > 0
   return h.main(
     [h.Id("router-view"), h.Class("router-view")],
     [
       showWindowsTitlebar
         ? viewManagerTitlebar(
+            title,
+            canNavigateBack,
             model.isWindowFocused,
             model.isWindowMaximized,
             model.isWindowFullscreen,
@@ -3692,7 +3699,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
       [h.Id("app"), h.Class(model.isWindowFullscreen ? "is-fullscreen" : "")],
       [
         Option.match(model.maybeActiveIslandUrl, {
-          onNone: () => viewManagerMain(model, h),
+          onNone: () => viewManagerMain(model, docTitle, h),
           onSome: (islandUrl) =>
             viewIslandContainer(
               islandUrl,

@@ -322,7 +322,8 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(tauriWindowsModel),
       sceneExpect(selector("#island-iframe")).toBeAbsent(),
-      sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
+      sceneExpect(selector("#btn-return-pwaislands")).toExist(),
+      sceneExpect(selector("#btn-return-pwaislands")).toContainText("←"),
       click(text("index.html")),
       Command.expectExact(PushUrl({ url: "/unterordner/index.html" })),
       Command.resolve(PushUrl, Message.CompletedPushUrl()),
@@ -349,6 +350,17 @@ describe("PWA Islands Scene Tests", () => {
         }),
       ),
       sceneExpect(selector("#island-iframe")).toBeAbsent(),
+      sceneExpect(selector("#btn-return-pwaislands")).toExist(),
+      doubleClick(selector("#btn-return-pwaislands")),
+      Command.expectExact(PushUrl({ url: "/?pwaislands" }), RefreshEntries({ subPath: [] })),
+      Command.resolve(PushUrl, Message.CompletedPushUrl()),
+      Command.resolve(
+        RefreshEntries,
+        Message.SucceededRefreshEntries({
+          subPath: [],
+          entries: sampleEntries,
+        }),
+      ),
       sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
     )
   })

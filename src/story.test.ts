@@ -803,6 +803,24 @@ describe("PWA Islands Story Tests", () => {
           }),
         ),
       )
+
+      const titlebarClickEvent = new MessageEvent("message", {
+        data: {
+          type: "pwaislands:titlebar-click",
+        },
+      })
+      expect(parseIslandWindowMessage(titlebarClickEvent)).toEqual(
+        Option.some(Message.ClickedReturnArrow()),
+      )
+
+      const titlebarDoubleClickEvent = new MessageEvent("message", {
+        data: {
+          type: "pwaislands:titlebar-double-click",
+        },
+      })
+      expect(parseIslandWindowMessage(titlebarDoubleClickEvent)).toEqual(
+        Option.some(Message.DoubleClickedReturnArrow()),
+      )
     })
 
     it("handles copying /api.d.ts in the Help modal", () => {
