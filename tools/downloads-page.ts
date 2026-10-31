@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
-import { basename, join } from "node:path"
+import { basename, dirname, join } from "node:path"
 import type { Plugin } from "vite"
 
 export interface DownloadItem {
@@ -65,6 +65,120 @@ export function readTauriVersion(rootDir: string): string {
     }
   }
   return "0.1.0"
+}
+
+export interface ParsedVersion {
+  raw: string
+  major: number
+  minor: number
+  patch: number
+  build: number
+}
+
+/**
+ * Parst eine Versionsnummer aus einem Dateinamen oder String.
+ * Erkennt gängige Muster wie:
+ * - 0.1.125
+ * - 0.1.125-1 (RPM)
+ * - _0.1.125_
+ */
+export function parseVersionString(str: string): ParsedVersion | null {
+  const match = str.match(/(?:^|[-_v])(\d+)\.(\d+)(?:\.(\d+))?(?:-(\d+))?/)
+  if (!match) return null
+
+  return {
+    raw: `${match[1]}.${match[2]}${match[3] !== undefined ? `.${match[3]}` : ""}`,
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: match[3] !== undefined ? parseInt(match[3], 10) : 0,
+    build: match[4] !== undefined ? parseInt(match[4], 10) : 0,
+  }
+}
+
+/**
+ * Vergleicht zwei Versionen. Gibt > 0 zurück wenn a > b, < 0 wenn a < b, 0 wenn gleich.
+ */
+export function compareParsedVersions(a: ParsedVersion, b: ParsedVersion): number {
+  if (a.major !== b.major) return a.major - b.major
+  if (a.minor !== b.minor) return a.minor - b.minor
+  if (a.patch !== b.patch) return a.patch - b.patch
+  return a.build - b.build
+}
+
+function readApkMetadata(apkPath: string): { versionName?: string; versionCode?: number } {
+  try {
+    const dir = dirname(apkPath)
+    const metaPath = join(dir, "output-metadata.json")
+    if (existsSync(metaPath)) {
+      const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
+        elements?: Array<{ versionName?: string; versionCode?: number }>
+      }
+      const element = meta.elements?.[0]
+      if (element) {
+        return {
+          versionName: element.versionName,
+          versionCode: element.versionCode,
+        }
+      }
+    }
+  } catch {
+    // Fallback
+  }
+  return {}
+}
+
+/**
+ * Filtert eine Liste von Downloads, sodass von jeder Paketart (Plattform + Format + Architektur)
+ * nur die höchste Version übrig bleibt.
+ */
+export function filterHighestVersionPerKind(items: DownloadItem[]): DownloadItem[] {
+  const groups = new Map<string, DownloadItem[]>()
+  const order: string[] = []
+
+  for (const item of items) {
+    const key = `${item.platform}:${item.format}:${item.arch}`.toLowerCase()
+    if (!groups.has(key)) {
+      groups.set(key, [])
+      order.push(key)
+    }
+    groups.get(key)!.push(item)
+  }
+
+  const result: DownloadItem[] = []
+
+  for (const key of order) {
+    const list = groups.get(key)
+    if (!list || list.length === 0) continue
+
+    if (list.length === 1) {
+      result.push(list[0])
+      continue
+    }
+
+    list.sort((a, b) => {
+      const vA =
+        parseVersionString(a.filename) ?? (a.sourcePath ? parseVersionString(a.sourcePath) : null)
+      const vB =
+        parseVersionString(b.filename) ?? (b.sourcePath ? parseVersionString(b.sourcePath) : null)
+
+      if (vA && vB) {
+        const cmp = compareParsedVersions(vA, vB)
+        if (cmp !== 0) return -cmp // Höchste Version zuerst
+      } else if (vA && !vB) {
+        return -1
+      } else if (!vA && vB) {
+        return 1
+      }
+
+      const mtimeA = a.sourcePath && existsSync(a.sourcePath) ? statSync(a.sourcePath).mtimeMs : 0
+      const mtimeB = b.sourcePath && existsSync(b.sourcePath) ? statSync(b.sourcePath).mtimeMs : 0
+      return mtimeB - mtimeA
+    })
+
+    result.push(list[0])
+  }
+
+  return result
 }
 
 export interface ScanDownloadsOptions {
@@ -191,7 +305,9 @@ export function scanAvailableDownloads(
     )
     for (const src of apks) {
       const stat = statSync(src)
-      const targetFilename = `pwa-islands_${version}_universal.apk`
+      const apkMeta = readApkMetadata(src)
+      const targetVersion = apkMeta.versionName ?? version
+      const targetFilename = `pwa-islands_${targetVersion}_universal.apk`
       downloads.push({
         id: "android-apk",
         platform: "Android",
@@ -209,7 +325,6 @@ export function scanAvailableDownloads(
         hint: "APK auf das Smartphone laden, öffnen und Installation bestätigen (ggf. 'Unbekannte Quellen' erlauben), oder per USB-Debugging mit adb installieren.",
         sourcePath: src,
       })
-      break
     }
   }
 
@@ -264,10 +379,25 @@ export function scanAvailableDownloads(
     }
   }
 
+  const filteredDownloads = filterHighestVersionPerKind(downloads)
+
+  let manifestVersion = version
+  let parsedManifestVersion = parseVersionString(manifestVersion)
+
+  for (const item of filteredDownloads) {
+    const parsed = parseVersionString(item.filename)
+    if (parsed) {
+      if (!parsedManifestVersion || compareParsedVersions(parsed, parsedManifestVersion) > 0) {
+        parsedManifestVersion = parsed
+        manifestVersion = parsed.raw
+      }
+    }
+  }
+
   return {
-    version,
+    version: manifestVersion,
     updatedAt: new Date().toISOString(),
-    downloads,
+    downloads: filteredDownloads,
   }
 }
 
