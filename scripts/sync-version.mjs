@@ -1,21 +1,28 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process"
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { copyFileSync, existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..")
 const tauriConfPath = join(rootDir, "src-tauri", "tauri.conf.json")
+const backupPath = join(rootDir, "src-tauri", ".tauri.conf.json.backup")
 
 const args = process.argv.slice(2)
 
 if (args.includes("--restore")) {
   try {
-    execFileSync("git", ["checkout", "src-tauri/tauri.conf.json"], {
-      cwd: rootDir,
-      stdio: "ignore",
-    })
-    console.log("[sync-version] src-tauri/tauri.conf.json wurde auf den Git-Stand zurückgesetzt.")
+    if (existsSync(backupPath)) {
+      copyFileSync(backupPath, tauriConfPath)
+      unlinkSync(backupPath)
+      console.log("[sync-version] src-tauri/tauri.conf.json wurde aus Backup wiederhergestellt.")
+    } else {
+      execFileSync("git", ["checkout", "src-tauri/tauri.conf.json"], {
+        cwd: rootDir,
+        stdio: "ignore",
+      })
+      console.log("[sync-version] src-tauri/tauri.conf.json wurde auf den Git-Stand zurückgesetzt.")
+    }
   } catch (err) {
     console.warn("[sync-version] Zurücksetzen fehlgeschlagen:", err)
   }
@@ -75,6 +82,9 @@ export function syncTauriVersion() {
   }
 
   if (changed) {
+    if (!existsSync(backupPath)) {
+      writeFileSync(backupPath, raw, "utf8")
+    }
     const formatted = JSON.stringify(conf, null, 2) + "\n"
     writeFileSync(tauriConfPath, formatted, "utf8")
     console.log(

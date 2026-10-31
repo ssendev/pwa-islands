@@ -40,3 +40,5 @@ dev-dist
 *.jks
 keystore.properties
 key.properties
+
+*.backup
