@@ -3,11 +3,14 @@ import { Effect } from "effect"
 import * as Runtime from "foldkit/runtime"
 import { registerSW } from "virtual:pwa-register"
 import {
+  exitFullscreenWindow,
+  isWindowFullscreen,
   isWindows,
   isWindowsOrLinux,
   supportsDirectoryPicker,
   supportsOPFS,
   supportsTauri,
+  toggleFullscreenWindow,
 } from "./files"
 import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
 
@@ -107,8 +110,47 @@ if (supportsTauri()) {
           .catch(() => {})
       }
 
-      win.onResized(checkMaximized).catch(() => {})
+      const checkFullscreen = () => {
+        win
+          .isFullscreen()
+          .then((fullscreen) => {
+            document.body.classList.toggle("is-fullscreen", fullscreen)
+            window.dispatchEvent(
+              new CustomEvent("pwaislands:window-fullscreen", { detail: fullscreen }),
+            )
+          })
+          .catch(() => {})
+      }
+
+      win
+        .onResized(() => {
+          checkMaximized()
+          checkFullscreen()
+        })
+        .catch(() => {})
       checkMaximized()
+      checkFullscreen()
     })
     .catch(() => {})
 }
+
+if (typeof document !== "undefined") {
+  document.addEventListener("fullscreenchange", () => {
+    const isFullscreen = Boolean(document.fullscreenElement)
+    document.body.classList.toggle("is-fullscreen", isFullscreen)
+    window.dispatchEvent(new CustomEvent("pwaislands:window-fullscreen", { detail: isFullscreen }))
+  })
+}
+
+window.addEventListener("message", async (event) => {
+  if (event.data?.type === "TAURI_EXIT_FULLSCREEN") {
+    const isFs = await isWindowFullscreen()
+    if (isFs) {
+      await exitFullscreenWindow()
+    } else if (event.data?.key === "Escape") {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+    }
+  } else if (event.data?.type === "TAURI_TOGGLE_FULLSCREEN") {
+    await toggleFullscreenWindow()
+  }
+})

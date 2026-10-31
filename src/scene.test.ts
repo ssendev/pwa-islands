@@ -24,6 +24,7 @@ import {
   ReplaceUrl,
   SavedBackend,
   StorageState,
+  ToggleFullscreenWindow,
   update,
   view,
 } from "./main"
@@ -59,6 +60,7 @@ const readyModel: Model = {
   isWindows: false,
   isWindowFocused: true,
   isWindowMaximized: false,
+  isWindowFullscreen: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -329,6 +331,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#window-top-border")).toExist(),
       sceneExpect(selector("#btn-return-pwaislands")).toExist(),
       sceneExpect(selector("#btn-return-pwaislands")).toContainText("←"),
+      sceneExpect(selector("#fullscreen-btn")).toExist(),
       sceneExpect(selector("#min-btn")).toExist(),
       sceneExpect(selector("#max-btn")).toExist(),
       sceneExpect(selector("#close-btn")).toExist(),
@@ -347,6 +350,31 @@ describe("PWA Islands Scene Tests", () => {
       ),
       sceneExpect(selector("#island-iframe")).toBeAbsent(),
       sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
+    )
+  })
+
+  it("renders fullscreen button and fullscreen top sensor when in fullscreen mode", () => {
+    const tauriWindowsFullscreenModel: Model = {
+      ...readyModel,
+      hasTauri: true,
+      isWindowsOrLinux: true,
+      isWindows: true,
+      isWindowFullscreen: true,
+      maybeActiveIslandUrl: Option.some("pwaislands://localhost/unterordner/index.html"),
+      maybeActiveIslandPath: Option.some("/unterordner/index.html"),
+    }
+
+    scene(
+      { update, view },
+      given(tauriWindowsFullscreenModel),
+      sceneExpect(selector("#island-iframe")).toExist(),
+      sceneExpect(selector("#island-iframe")).toHaveClass("has-top-border"),
+      sceneExpect(selector("#island-iframe")).toHaveClass("is-fullscreen"),
+      sceneExpect(selector("#fullscreen-top-sensor")).toExist(),
+      sceneExpect(selector("#fullscreen-btn")).toExist(),
+      click(selector("#fullscreen-btn")),
+      Command.expectExact(ToggleFullscreenWindow()),
+      Command.resolve(ToggleFullscreenWindow, Message.CompletedToggleFullscreen()),
     )
   })
 
@@ -375,6 +403,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#island-iframe")).not.toHaveClass("has-top-border"),
       sceneExpect(selector("#window-top-border")).toBeAbsent(),
       sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
+      sceneExpect(selector("#fullscreen-btn")).toBeAbsent(),
       sceneExpect(selector("#min-btn")).toBeAbsent(),
       sceneExpect(selector("#max-btn")).toBeAbsent(),
       sceneExpect(selector("#close-btn")).toBeAbsent(),

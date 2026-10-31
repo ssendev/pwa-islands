@@ -780,6 +780,29 @@ pub fn run() {
             .build(),
         )?;
       }
+      #[cfg(desktop)]
+      {
+        let init_script = r#"
+          window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+              if (window !== window.top) {
+                window.top.postMessage({ type: 'TAURI_EXIT_FULLSCREEN', key: e.key }, '*');
+              }
+            } else if (e.key === 'F11') {
+              e.preventDefault();
+              if (window !== window.top) {
+                window.top.postMessage({ type: 'TAURI_TOGGLE_FULLSCREEN', key: e.key }, '*');
+              }
+            }
+          }, true);
+        "#;
+
+        if let Some(window_config) = app.config().app.windows.first() {
+          tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
+            .initialization_script_for_all_frames(init_script)
+            .build()?;
+        }
+      }
       #[cfg(target_os = "windows")]
       {
         if let Some(main_window) = app.get_webview_window("main") {

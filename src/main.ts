@@ -54,6 +54,8 @@ import {
   minimizeWindow,
   toggleMaximizeWindow,
   closeWindow,
+  toggleFullscreenWindow,
+  exitFullscreenWindow,
   checkFileExists,
 } from "./files"
 import * as Modal from "./modal"
@@ -245,6 +247,7 @@ export const Flags = Schema.Struct({
   isWindowsOrLinux: Schema.optionalKey(Schema.Boolean),
   isWindows: Schema.optionalKey(Schema.Boolean),
   isWindowMaximized: Schema.optionalKey(Schema.Boolean),
+  isWindowFullscreen: Schema.optionalKey(Schema.Boolean),
 })
 export type Flags = typeof Flags.Type
 
@@ -256,6 +259,7 @@ export const Model = Schema.Struct({
   isWindows: Schema.Boolean,
   isWindowFocused: Schema.Boolean,
   isWindowMaximized: Schema.Boolean,
+  isWindowFullscreen: Schema.Boolean,
   origin: Schema.String,
   storageState: StorageState,
   showFileInfo: Schema.Boolean,
@@ -355,10 +359,15 @@ export const Message = defineMessageUnion({
   CompletedMinimizeWindow: {},
   ClickedToggleMaximizeWindow: {},
   CompletedToggleMaximizeWindow: {},
+  ClickedToggleFullscreen: {},
+  CompletedToggleFullscreen: {},
   ClickedCloseWindow: {},
   CompletedCloseWindow: {},
   ChangedWindowMaximized: {
     isMaximized: Schema.Boolean,
+  },
+  ChangedWindowFullscreen: {
+    isFullscreen: Schema.Boolean,
   },
   CompletedResolveIslandBackNavigation: {
     targetUrl: Schema.String,
@@ -1137,6 +1146,28 @@ export const ToggleMaximizeWindow = Command.define("ToggleMaximizeWindow", {
   ),
 })
 
+export const ToggleFullscreenWindow = Command.define("ToggleFullscreenWindow", {
+  messages: [Message.CompletedToggleFullscreen],
+  execute: Effect.tryPromise({
+    try: () => toggleFullscreenWindow(),
+    catch: () => new Error("toggleFullscreen failed"),
+  }).pipe(
+    Effect.as(Message.CompletedToggleFullscreen()),
+    Effect.catch(() => Effect.succeed(Message.CompletedToggleFullscreen())),
+  ),
+})
+
+export const ExitFullscreenWindow = Command.define("ExitFullscreenWindow", {
+  messages: [Message.CompletedToggleFullscreen],
+  execute: Effect.tryPromise({
+    try: () => exitFullscreenWindow(),
+    catch: () => new Error("exitFullscreen failed"),
+  }).pipe(
+    Effect.as(Message.CompletedToggleFullscreen()),
+    Effect.catch(() => Effect.succeed(Message.CompletedToggleFullscreen())),
+  ),
+})
+
 export const CloseWindow = Command.define("CloseWindow", {
   messages: [Message.CompletedCloseWindow],
   execute: Effect.tryPromise({
@@ -1369,6 +1400,7 @@ export const init = (
         isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
         isWindowFocused: true,
         isWindowMaximized: flags.isWindowMaximized ?? false,
+        isWindowFullscreen: flags.isWindowFullscreen ?? false,
         origin: flags.origin,
         storageState: StorageState.Unsupported(),
         showFileInfo: true,
@@ -1396,6 +1428,7 @@ export const init = (
       isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
       isWindowFocused: true,
       isWindowMaximized: flags.isWindowMaximized ?? false,
+      isWindowFullscreen: flags.isWindowFullscreen ?? false,
       origin: flags.origin,
       storageState: StorageState.Initializing(),
       showFileInfo: true,
@@ -1841,6 +1874,15 @@ export const update = (
       model,
     }),
 
+    ClickedToggleFullscreen: () => ({
+      model,
+      commands: [ToggleFullscreenWindow()],
+    }),
+
+    CompletedToggleFullscreen: () => ({
+      model,
+    }),
+
     ClickedCloseWindow: () => ({
       model,
       commands: [CloseWindow()],
@@ -1853,6 +1895,12 @@ export const update = (
     ChangedWindowMaximized: ({ isMaximized }) => ({
       model: modifyFields(model, {
         isWindowMaximized: () => isMaximized,
+      }),
+    }),
+
+    ChangedWindowFullscreen: ({ isFullscreen }) => ({
+      model: modifyFields(model, {
+        isWindowFullscreen: () => isFullscreen,
       }),
     }),
 
@@ -2338,6 +2386,12 @@ export const update = (
     },
 
     PressedEscape: () => {
+      if (model.isWindowFullscreen) {
+        return {
+          model,
+          commands: [ExitFullscreenWindow()],
+        }
+      }
       if (Option.isSome(model.maybeActiveIslandUrl)) {
         const activePath = Option.getOrElse(model.maybeActiveIslandPath, () => "")
         const { folderSubPath } = parseIslandPath(activePath)
@@ -2586,6 +2640,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
     {
       modelToDependencies: (model) => ({
         isActive:
+          model.isWindowFullscreen ||
           model.isSettingsOpen ||
           Modal.isOpen(model.modalState) ||
           Option.isSome(model.maybeActiveIslandUrl),
@@ -2727,6 +2782,31 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
         Message.ChangedWindowMaximized({
           isMaximized: Boolean(event.detail),
         }),
+    }),
+  ),
+
+  windowFullscreen: Subscription.persistentEntry(
+    Dom.streamFromEvent({
+      target: window as Dom.TypedEventTarget<{
+        "pwaislands:window-fullscreen": CustomEvent<boolean>
+      }>,
+      type: "pwaislands:window-fullscreen",
+      mapEvent: (event) =>
+        Message.ChangedWindowFullscreen({
+          isFullscreen: Boolean(event.detail),
+        }),
+    }),
+  ),
+
+  fullscreenShortcut: Subscription.persistentEntry(
+    Dom.streamFromKeyBindings<Message>({
+      bindings: [
+        {
+          keys: "F11",
+          whileTyping: "Allow",
+          mapEvent: () => Message.ClickedToggleFullscreen(),
+        },
+      ],
     }),
   ),
 }))
@@ -3433,10 +3513,25 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
 const ISLAND_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
 
-const viewWindowControls = (isMaximized: boolean, h: HtmlBuilder): Html.Html =>
+const viewWindowControls = (
+  isMaximized: boolean,
+  isFullscreen: boolean,
+  h: HtmlBuilder,
+): Html.Html =>
   h.div(
     [h.Class("window-controls")],
     [
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("fullscreen-btn"),
+          h.Class("win-btn"),
+          h.Title(isFullscreen ? "Vollbild beenden (F11)" : "Vollbild (F11)"),
+          h.AriaLabel(isFullscreen ? "Vollbild beenden" : "Vollbild"),
+          h.OnClick(Message.ClickedToggleFullscreen()),
+        ],
+        [isFullscreen ? "\uE73F" : "\uE740"],
+      ),
       h.button(
         [
           h.Type("button"),
@@ -3477,6 +3572,7 @@ const viewWindowTopBorder = (
   title: string,
   isFocused: boolean,
   isMaximized: boolean,
+  isFullscreen: boolean,
   h: HtmlBuilder,
 ): Html.Html =>
   h.header(
@@ -3502,11 +3598,16 @@ const viewWindowTopBorder = (
         ],
       ),
       h.div([h.Class("titlebar-drag-spacer"), h.DataAttribute("tauri-drag-region", "true")], []),
-      viewWindowControls(isMaximized, h),
+      viewWindowControls(isMaximized, isFullscreen, h),
     ],
   )
 
-const viewManagerTitlebar = (isFocused: boolean, isMaximized: boolean, h: HtmlBuilder): Html.Html =>
+const viewManagerTitlebar = (
+  isFocused: boolean,
+  isMaximized: boolean,
+  isFullscreen: boolean,
+  h: HtmlBuilder,
+): Html.Html =>
   h.header(
     [
       h.Id("manager-titlebar"),
@@ -3519,7 +3620,7 @@ const viewManagerTitlebar = (isFocused: boolean, isMaximized: boolean, h: HtmlBu
         ["PWA Islands"],
       ),
       h.div([h.Class("titlebar-drag-spacer"), h.DataAttribute("tauri-drag-region", "true")], []),
-      viewWindowControls(isMaximized, h),
+      viewWindowControls(isMaximized, isFullscreen, h),
     ],
   )
 
@@ -3529,15 +3630,25 @@ const viewIslandContainer = (
   title: string,
   isFocused: boolean,
   isMaximized: boolean,
+  isFullscreen: boolean,
   h: HtmlBuilder,
 ): Html.Html =>
   h.div(
-    [h.Class("island-container")],
+    [h.Class(isFullscreen ? "island-container is-fullscreen" : "island-container")],
     [
-      showTopBorder ? viewWindowTopBorder(title, isFocused, isMaximized, h) : h.empty,
+      showTopBorder
+        ? h.div([h.Id("fullscreen-top-sensor"), h.Class("fullscreen-top-sensor")], [])
+        : h.empty,
+      showTopBorder ? viewWindowTopBorder(title, isFocused, isMaximized, isFullscreen, h) : h.empty,
       h.iframe([
         h.Id("island-iframe"),
-        h.Class(showTopBorder ? "island-iframe has-top-border" : "island-iframe"),
+        h.Class(
+          showTopBorder
+            ? isFullscreen
+              ? "island-iframe has-top-border is-fullscreen"
+              : "island-iframe has-top-border"
+            : "island-iframe",
+        ),
         h.Src(islandUrl),
         h.Sandbox(ISLAND_IFRAME_SANDBOX),
         h.Title("PWA Island"),
@@ -3552,10 +3663,26 @@ const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html => {
     [h.Id("router-view"), h.Class("router-view")],
     [
       showWindowsTitlebar
-        ? viewManagerTitlebar(model.isWindowFocused, model.isWindowMaximized, h)
+        ? h.div([h.Id("fullscreen-top-sensor"), h.Class("fullscreen-top-sensor")], [])
+        : h.empty,
+      showWindowsTitlebar
+        ? viewManagerTitlebar(
+            model.isWindowFocused,
+            model.isWindowMaximized,
+            model.isWindowFullscreen,
+            h,
+          )
         : h.empty,
       h.div(
-        [h.Class(showWindowsTitlebar ? "files-page has-windows-titlebar" : "files-page")],
+        [
+          h.Class(
+            showWindowsTitlebar
+              ? model.isWindowFullscreen
+                ? "files-page has-windows-titlebar is-fullscreen"
+                : "files-page has-windows-titlebar"
+              : "files-page",
+          ),
+        ],
         [
           viewToolbar(model, h),
           viewAlertContainer(model, h),
@@ -3572,7 +3699,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
   return {
     title: docTitle,
     body: h.div(
-      [h.Id("app")],
+      [h.Id("app"), h.Class(model.isWindowFullscreen ? "is-fullscreen" : "")],
       [
         Option.match(model.maybeActiveIslandUrl, {
           onNone: () => viewManagerMain(model, h),
@@ -3583,6 +3710,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
               docTitle,
               model.isWindowFocused,
               model.isWindowMaximized,
+              model.isWindowFullscreen,
               h,
             ),
         }),

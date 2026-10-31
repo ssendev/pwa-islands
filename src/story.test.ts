@@ -39,6 +39,8 @@ import {
   ScheduleReturnArrowClick,
   StorageState,
   ToggleMaximizeWindow,
+  ToggleFullscreenWindow,
+  ExitFullscreenWindow,
   init,
   parseIslandWindowMessage,
   update,
@@ -85,6 +87,7 @@ const readyModel: Model = {
   isWindows: false,
   isWindowFocused: true,
   isWindowMaximized: false,
+  isWindowFullscreen: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -1728,6 +1731,20 @@ describe("PWA Islands Story Tests", () => {
           message(Message.ClickedToggleMaximizeWindow()),
           Command.expectExact(ToggleMaximizeWindow()),
           Command.resolve(ToggleMaximizeWindow, Message.CompletedToggleMaximizeWindow()),
+          message(Message.ClickedToggleFullscreen()),
+          Command.expectExact(ToggleFullscreenWindow()),
+          Command.resolve(ToggleFullscreenWindow, Message.CompletedToggleFullscreen()),
+          message(Message.ChangedWindowFullscreen({ isFullscreen: true })),
+          model((m) => {
+            expect(m.isWindowFullscreen).toBe(true)
+          }),
+          message(Message.PressedEscape()),
+          Command.expectExact(ExitFullscreenWindow()),
+          Command.resolve(ExitFullscreenWindow, Message.CompletedToggleFullscreen()),
+          message(Message.ChangedWindowFullscreen({ isFullscreen: false })),
+          model((m) => {
+            expect(m.isWindowFullscreen).toBe(false)
+          }),
           message(Message.ClickedCloseWindow()),
           Command.expectExact(CloseWindow()),
           Command.resolve(CloseWindow, Message.CompletedCloseWindow()),

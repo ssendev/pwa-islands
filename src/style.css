@@ -1835,7 +1835,9 @@ code {
   z-index: 1000;
   font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
   font-size: 12px;
-  transition: opacity 0.1s ease;
+  transition:
+    opacity 0.1s ease,
+    transform 0.2s ease-in-out;
 }
 
 .window-top-border.inactive {
@@ -1959,4 +1961,43 @@ code {
 .island-iframe.has-top-border {
   top: 32px;
   height: calc(100dvh - 32px);
+}
+
+.fullscreen-top-sensor {
+  display: none;
+}
+
+body.is-fullscreen .fullscreen-top-sensor,
+#app.is-fullscreen .fullscreen-top-sensor {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 6px;
+  z-index: 9999;
+}
+
+body.is-fullscreen .window-top-border,
+#app.is-fullscreen .window-top-border {
+  z-index: 10000;
+  transform: translateY(-100%);
+}
+
+body.is-fullscreen .fullscreen-top-sensor:hover ~ .window-top-border,
+body.is-fullscreen .window-top-border:hover,
+#app.is-fullscreen .fullscreen-top-sensor:hover ~ .window-top-border,
+#app.is-fullscreen .window-top-border:hover {
+  transform: translateY(0);
+}
+
+body.is-fullscreen .island-iframe.has-top-border,
+#app.is-fullscreen .island-iframe.has-top-border {
+  top: 0;
+  height: 100dvh;
+}
+
+body.is-fullscreen .files-page.has-windows-titlebar,
+#app.is-fullscreen .files-page.has-windows-titlebar {
+  padding-top: 24px;
 }

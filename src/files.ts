@@ -78,6 +78,44 @@ export const closeWindow = async (): Promise<void> => {
   }
 }
 
+export const isWindowFullscreen = async (): Promise<boolean> => {
+  if (supportsTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    return await getCurrentWindow()
+      .isFullscreen()
+      .catch(() => false)
+  }
+  return typeof document !== "undefined" && Boolean(document.fullscreenElement)
+}
+
+export const toggleFullscreenWindow = async (): Promise<void> => {
+  if (supportsTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    const win = getCurrentWindow()
+    const current = await win.isFullscreen().catch(() => false)
+    await win.setFullscreen(!current).catch(() => {})
+  } else if (typeof document !== "undefined") {
+    if (!document.fullscreenElement) {
+      await document.documentElement.requestFullscreen().catch(() => {})
+    } else {
+      await document.exitFullscreen().catch(() => {})
+    }
+  }
+}
+
+export const exitFullscreenWindow = async (): Promise<void> => {
+  if (supportsTauri()) {
+    const { getCurrentWindow } = await import("@tauri-apps/api/window")
+    const win = getCurrentWindow()
+    const current = await win.isFullscreen().catch(() => false)
+    if (current) {
+      await win.setFullscreen(false).catch(() => {})
+    }
+  } else if (typeof document !== "undefined" && Boolean(document.fullscreenElement)) {
+    await document.exitFullscreen().catch(() => {})
+  }
+}
+
 export const isWindows = (): boolean => {
   if (typeof navigator === "undefined") return false
   return /Windows|Win32|Win64/i.test(navigator.userAgent)
