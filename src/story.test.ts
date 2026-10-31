@@ -1,4 +1,5 @@
 import { Match, Option } from "effect"
+import { modifyFields } from "foldkit/struct"
 import { Command, given, message, model, story } from "foldkit/story"
 import { fromString } from "foldkit/url"
 import { describe, expect, it } from "vitest"
@@ -1202,6 +1203,158 @@ describe("PWA Islands Story Tests", () => {
               variant: "danger",
             }),
           )
+        }),
+      )
+    })
+
+    it("clears the modal alert banner when user clicks Save again in the Editor", () => {
+      const baseCreate = modifyFields(Editor.makeCreateFile(), {
+        name: () => "test.html",
+        content: () => "hello",
+      })
+      const modelWithAlert: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: modifyFields(baseCreate, {
+            maybeAlertBanner: () =>
+              Option.some({
+                message: "Ein Fehler ist aufgetreten",
+                variant: "danger",
+              }),
+          }),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithAlert),
+        message(editorMsg(Editor.Message.ClickedSave())),
+        Command.expectExact(
+          SaveChanges({
+            model: baseCreate,
+            subPath: [],
+          }),
+        ),
+        Command.resolve(
+          SaveChanges,
+          Editor.Message.SucceededSaveChanges({ entries: sampleEntries }),
+        ),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        model((m) => {
+          expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+    })
+
+    it("clears the modal alert banner when user clicks dismiss in the Editor", () => {
+      const modelWithAlert: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: modifyFields(Editor.makeCreateFile(), {
+            maybeAlertBanner: () =>
+              Option.some({
+                message: "/api.d.ts in die Zwischenablage kopiert",
+                variant: "info",
+              }),
+          }),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithAlert),
+        message(editorMsg(Editor.Message.ClickedDismissAlert())),
+        Command.expectNone(),
+        model((m) => {
+          expect(
+            Match.value(m.modalState).pipe(
+              Match.tag("Editor", ({ editor }) =>
+                Match.value(editor).pipe(
+                  Match.tag("CreateFile", (createFile) => createFile.maybeAlertBanner),
+                  Match.orElse(() => Option.some({ message: "wrong", variant: "danger" })),
+                ),
+              ),
+              Match.orElse(() => Option.some({ message: "wrong", variant: "danger" })),
+            ),
+          ).toEqual(Option.none())
+        }),
+      )
+    })
+
+    it("clears the main app alert banner when navigating into a folder, opening/closing editor, or clicking dismiss", () => {
+      const modelWithMainAlert: Model = {
+        ...readyModel,
+        maybeAlertBanner: Option.some({
+          message: "Vorheriger Fehler",
+          variant: "danger",
+        }),
+      }
+
+      // Dismissing via ClickedDismissAlert
+      story(
+        update,
+        given(modelWithMainAlert),
+        message(Message.ClickedDismissAlert()),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.maybeAlertBanner).toEqual(Option.none())
+        }),
+      )
+
+      // Clicking folder row clears main alert
+      story(
+        update,
+        given(modelWithMainAlert),
+        message(Message.ClickedEntryRow({ entry: sampleEntries[0] })),
+        Command.expectExact(PushUrl({ url: "/projekte?pwaislands" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        model((m) => {
+          expect(m.maybeAlertBanner).toEqual(Option.none())
+        }),
+      )
+
+      // Opening editor clears main alert
+      story(
+        update,
+        given(modelWithMainAlert),
+        message(Message.ClickedNewFile()),
+        Command.expectExact(
+          PushUrl({ url: "/?pwaislands=new" }),
+          FocusModalNameInput(),
+          Editor.LoadUserTemplates(),
+        ),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        Command.resolve(
+          Editor.LoadUserTemplates,
+          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
+        ),
+        Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
+        model((m) => {
+          expect(m.maybeAlertBanner).toEqual(Option.none())
+          expect(m.modalState).toEqual(
+            ModalState.Editor({
+              editor: Editor.makeCreateFile(),
+            }),
+          )
+        }),
+      )
+
+      // Closing editor via Escape clears main alert
+      story(
+        update,
+        given({
+          ...modelWithMainAlert,
+          modalState: ModalState.Editor({
+            editor: Editor.makeCreateFile(),
+          }),
+        }),
+        message(Message.PressedEscape()),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), RevokeActivePreviewUrl()),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        Command.resolve(RevokeActivePreviewUrl, Modal.Message.CompletedRevokeActivePreviewUrl()),
+        model((m) => {
+          expect(m.maybeAlertBanner).toEqual(Option.none())
+          expect(m.modalState).toEqual(ModalState.Closed())
         }),
       )
     })

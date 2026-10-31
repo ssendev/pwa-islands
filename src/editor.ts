@@ -185,6 +185,7 @@ export const Message = defineMessageUnion({
   FailedCopyApiDtsToClipboard: {
     message: Schema.String,
   },
+  ClickedDismissAlert: {},
   ClickedSave: {},
   ClickedConfirmOverwrite: {},
   ClickedCancelOverwrite: {},
@@ -598,6 +599,7 @@ export const update = (
                 content: () => template.content,
                 name: () => replaceFileExtension(state.name, template.defaultFileName),
                 isDeletingTemplate: () => false,
+                maybeAlertBanner: () => Option.none(),
               }),
               outMessage: OutMessage.None(),
             }),
@@ -611,6 +613,7 @@ export const update = (
           isSavingTemplate: () => true,
           isDeletingTemplate: () => false,
           newTemplateLabel: () => state.name.trim() || "Meine Vorlage",
+          maybeAlertBanner: () => Option.none(),
         }),
         outMessage: OutMessage.None(),
       })),
@@ -620,6 +623,7 @@ export const update = (
         model: modifyFields(state, {
           isSavingTemplate: () => false,
           newTemplateLabel: () => "",
+          maybeAlertBanner: () => Option.none(),
         }),
         outMessage: OutMessage.None(),
       })),
@@ -628,6 +632,7 @@ export const update = (
       whenCreateFile(model, (state) => ({
         model: modifyFields(state, {
           newTemplateLabel: () => label,
+          maybeAlertBanner: () => Option.none(),
         }),
         outMessage: OutMessage.None(),
       })),
@@ -639,7 +644,9 @@ export const update = (
           return { model: state, outMessage: OutMessage.None() }
         }
         return {
-          model: state,
+          model: modifyFields(state, {
+            maybeAlertBanner: () => Option.none(),
+          }),
           commands: [GenerateTemplateTimestamp()],
           outMessage: OutMessage.None(),
         }
@@ -677,6 +684,7 @@ export const update = (
             selectedTemplateId: () => id,
             isSavingTemplate: () => false,
             newTemplateLabel: () => "",
+            maybeAlertBanner: () => Option.none(),
           }),
           commands: [
             SaveUserTemplate({
@@ -692,6 +700,7 @@ export const update = (
         model: modifyFields(state, {
           isDeletingTemplate: () => true,
           isSavingTemplate: () => false,
+          maybeAlertBanner: () => Option.none(),
         }),
         outMessage: OutMessage.None(),
       })),
@@ -700,6 +709,7 @@ export const update = (
       whenCreateFile(model, (state) => ({
         model: modifyFields(state, {
           isDeletingTemplate: () => false,
+          maybeAlertBanner: () => Option.none(),
         }),
         outMessage: OutMessage.None(),
       })),
@@ -714,6 +724,7 @@ export const update = (
           return {
             model: modifyFields(state, {
               isDeletingTemplate: () => false,
+              maybeAlertBanner: () => Option.none(),
             }),
             outMessage: OutMessage.None(),
           }
@@ -727,6 +738,7 @@ export const update = (
             userTemplates: () => nextTemplates,
             selectedTemplateId: () => "builtin:empty",
             isDeletingTemplate: () => false,
+            maybeAlertBanner: () => Option.none(),
           }),
           commands: [
             DeleteUserTemplate({
@@ -777,6 +789,7 @@ export const update = (
                 modifyFields(binaryMode, {
                   edit: () => BinaryEdit.Disabled(),
                 }),
+              maybeAlertBanner: () => Option.none(),
             }),
             outMessage: OutMessage.None(),
           }
@@ -788,6 +801,7 @@ export const update = (
               modifyFields(binaryMode, {
                 edit: () => BinaryEdit.Loading(),
               }),
+            maybeAlertBanner: () => Option.none(),
           }),
           commands: [LoadBase64({ entryName: editState.originalName, subPath: context.subPath })],
           outMessage: OutMessage.None(),
@@ -801,6 +815,7 @@ export const update = (
             modifyFields(binaryMode, {
               edit: () => BinaryEdit.Editing({ content: base64Content }),
             }),
+          maybeAlertBanner: () => Option.none(),
         }),
         outMessage: OutMessage.None(),
       })),
@@ -863,6 +878,11 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
+    ClickedDismissAlert: () => ({
+      model: setAlertBanner(model, Option.none()),
+      outMessage: OutMessage.None(),
+    }),
+
     FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => ({
       model: setAlertBanner(
         model,
@@ -917,9 +937,12 @@ export const update = (
               outMessage: OutMessage.None(),
             }
           }
+          const nextModel = modifyFields(createFolder, {
+            maybeAlertBanner: () => Option.none(),
+          })
           return {
-            model,
-            commands: [SaveChanges({ model: createFolder, subPath: context.subPath })],
+            model: nextModel,
+            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
             outMessage: OutMessage.None(),
           }
         },
@@ -945,9 +968,12 @@ export const update = (
               outMessage: OutMessage.None(),
             }
           }
+          const nextModel = modifyFields(editFolder, {
+            maybeAlertBanner: () => Option.none(),
+          })
           return {
-            model,
-            commands: [SaveChanges({ model: editFolder, subPath: context.subPath })],
+            model: nextModel,
+            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
             outMessage: OutMessage.None(),
           }
         },
@@ -977,9 +1003,12 @@ export const update = (
               outMessage: OutMessage.None(),
             }
           }
+          const nextModel = modifyFields(createFile, {
+            maybeAlertBanner: () => Option.none(),
+          })
           return {
-            model,
-            commands: [SaveChanges({ model: createFile, subPath: context.subPath })],
+            model: nextModel,
+            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
             outMessage: OutMessage.None(),
           }
         },
@@ -1051,9 +1080,12 @@ export const update = (
             }
           }
 
+          const nextModel = modifyFields(editFile, {
+            maybeAlertBanner: () => Option.none(),
+          })
           return {
-            model,
-            commands: [SaveChanges({ model: editFile, subPath: context.subPath })],
+            model: nextModel,
+            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
             outMessage: OutMessage.None(),
           }
         },
@@ -1062,7 +1094,9 @@ export const update = (
           outMessage: OutMessage.None(),
         }),
         ConfirmOverwrite: () => ({
-          model,
+          model: modifyFields(model, {
+            maybeAlertBanner: () => Option.none(),
+          }),
           commands: [SaveChanges({ model, subPath: context.subPath })],
           outMessage: OutMessage.None(),
         }),
@@ -1070,7 +1104,9 @@ export const update = (
     },
 
     ClickedConfirmOverwrite: () => ({
-      model,
+      model: modifyFields(model, {
+        maybeAlertBanner: () => Option.none(),
+      }),
       commands: [SaveChanges({ model, subPath: context.subPath })],
       outMessage: OutMessage.None(),
     }),
@@ -1138,7 +1174,9 @@ export const update = (
     ClickedConfirmDelete: () =>
       Model.match(model, {
         ConfirmDelete: ({ entryName, entryKind }) => ({
-          model,
+          model: modifyFields(model, {
+            maybeAlertBanner: () => Option.none(),
+          }),
           commands: [DeleteEntry({ entryName, entryKind, subPath: context.subPath })],
           outMessage: OutMessage.None(),
         }),
@@ -1515,11 +1553,22 @@ const viewModalAlertBanner = (
       h.div(
         [
           h.Id("modal-alert-area"),
-          h.Class(`alert alert-${banner.variant} mb-3 modal-alert-banner`),
+          h.Class(`alert alert-${banner.variant} alert-dismissible mb-3 modal-alert-banner`),
           h.Role(banner.variant === "danger" ? "alert" : "status"),
           h.AriaLive("polite"),
         ],
-        [banner.message],
+        [
+          h.span([h.Class("alert-message")], [banner.message]),
+          h.button(
+            [
+              h.Type("button"),
+              h.Class("alert-close-btn"),
+              h.AriaLabel("Hinweis schließen"),
+              h.OnClick(Message.ClickedDismissAlert()),
+            ],
+            [viewIcon("close", h)],
+          ),
+        ],
       ),
   })
 

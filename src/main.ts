@@ -337,6 +337,7 @@ export const Message = defineMessageUnion({
     entries: Schema.Array(FileEntry),
   },
   ClickedRetryList: {},
+  ClickedDismissAlert: {},
   ClickedBreadcrumbRoot: {},
   ClickedBreadcrumbSegment: {
     index: Schema.Number,
@@ -1485,11 +1486,7 @@ const handleStorageActivated = (
           onNone: () => model.modalState,
           onSome: (modal) => modal,
         }),
-      maybeAlertBanner: () =>
-        Option.match(payload.maybeAlertBanner, {
-          onNone: () => model.maybeAlertBanner,
-          onSome: (alert) => Option.some(alert),
-        }),
+      maybeAlertBanner: () => payload.maybeAlertBanner,
     }),
     commands: Option.exists(payload.maybeModalState, (modal) => modal._tag === "Editor")
       ? [toModalCommand(Modal.FocusModalNameInput())]
@@ -1676,6 +1673,7 @@ export const update = (
               subPath: () => subPath,
               entriesState: () => EntriesState.Loaded({ entries }),
             }),
+          maybeAlertBanner: () => Option.none(),
         }),
       })),
 
@@ -1697,6 +1695,7 @@ export const update = (
               subPath: () => subPath,
               entriesState: () => EntriesState.Loaded({ entries }),
             }),
+          maybeAlertBanner: () => Option.none(),
         }),
       })),
 
@@ -1713,23 +1712,33 @@ export const update = (
     ClickedRetryList: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
-        model,
+        model: modifyFields(model, {
+          maybeAlertBanner: () => Option.none(),
+        }),
         commands: [RefreshEntries({ subPath })],
       }
     },
 
-    ClickedBreadcrumbRoot: () => {
-      return {
-        model,
-        commands: [PushUrl({ url: buildFolderUrl([]) })],
-      }
-    },
+    ClickedDismissAlert: () => ({
+      model: modifyFields(model, {
+        maybeAlertBanner: () => Option.none(),
+      }),
+    }),
+
+    ClickedBreadcrumbRoot: () => ({
+      model: modifyFields(model, {
+        maybeAlertBanner: () => Option.none(),
+      }),
+      commands: [PushUrl({ url: buildFolderUrl([]) })],
+    }),
 
     ClickedBreadcrumbSegment: ({ index }) => {
       const currentSubPath = currentSubPathFromStorageState(model.storageState)
       const targetSubPath = Array.take(currentSubPath, index + 1)
       return {
-        model,
+        model: modifyFields(model, {
+          maybeAlertBanner: () => Option.none(),
+        }),
         commands: [PushUrl({ url: buildFolderUrl(targetSubPath) })],
       }
     },
@@ -1739,7 +1748,9 @@ export const update = (
       if (entry.kind === "directory") {
         const targetSubPath = [...subPath, entry.name]
         return {
-          model,
+          model: modifyFields(model, {
+            maybeAlertBanner: () => Option.none(),
+          }),
           commands: [PushUrl({ url: buildFolderUrl(targetSubPath) })],
         }
       }
@@ -1750,12 +1761,15 @@ export const update = (
           model: modifyFields(model, {
             maybeActiveIslandUrl: () => Option.some(islandUrl),
             maybeActiveIslandPath: () => Option.some(fileUrl),
+            maybeAlertBanner: () => Option.none(),
           }),
           commands: [PushUrl({ url: fileUrl })],
         }
       }
       return {
-        model,
+        model: modifyFields(model, {
+          maybeAlertBanner: () => Option.none(),
+        }),
         commands: [
           OpenFileInBrowser({
             subPath,
@@ -1792,6 +1806,7 @@ export const update = (
           return {
             model: modifyFields(model, {
               returnClickId: () => nextClickId,
+              maybeAlertBanner: () => Option.none(),
             }),
           }
         }
@@ -1800,6 +1815,7 @@ export const update = (
         return {
           model: modifyFields(model, {
             returnClickId: () => nextClickId,
+            maybeAlertBanner: () => Option.none(),
           }),
           commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: parentSubPath })],
         }
@@ -1813,6 +1829,7 @@ export const update = (
           returnClickId: () => nextClickId,
           maybeActiveIslandUrl: () => Option.none(),
           maybeActiveIslandPath: () => Option.none(),
+          maybeAlertBanner: () => Option.none(),
         }),
         commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: folderSubPath })],
       }
@@ -1830,7 +1847,9 @@ export const update = (
         const parentSubPath = Array.dropRight(currentSubPath, 1)
         const targetUrl = buildFolderUrl(parentSubPath)
         return {
-          model,
+          model: modifyFields(model, {
+            maybeAlertBanner: () => Option.none(),
+          }),
           commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: parentSubPath })],
         }
       }
@@ -2000,6 +2019,7 @@ export const update = (
                   model: modifyFields(modelWithRoute, {
                     isSettingsOpen: () => false,
                     modalState: () => nextModalState,
+                    maybeAlertBanner: () => Option.none(),
                   }),
                   ...(wasIslandOpen ? { commands: [RefreshEntries({ subPath })] } : {}),
                 }
@@ -2008,6 +2028,7 @@ export const update = (
                 model: modifyFields(modelWithRoute, {
                   isSettingsOpen: () => false,
                   modalState: () => nextModalState,
+                  maybeAlertBanner: () => Option.none(),
                   storageState: () =>
                     modifyFields(readyState, {
                       entriesState: () => EntriesState.Loading(),
@@ -2020,6 +2041,7 @@ export const update = (
               model: modifyFields(modelWithRoute, {
                 isSettingsOpen: () => false,
                 modalState: () => nextModalState,
+                maybeAlertBanner: () => Option.none(),
               }),
             })),
           )
@@ -2037,6 +2059,7 @@ export const update = (
                 model: modifyFields(modelWithRoute, {
                   isSettingsOpen: () => false,
                   modalState: () => newModalState,
+                  maybeAlertBanner: () => Option.none(),
                 }),
                 commands: [toModalCommand(Modal.FocusModalNameInput()), ...templateLoadCommands],
               }
@@ -2045,6 +2068,7 @@ export const update = (
               model: modifyFields(modelWithRoute, {
                 isSettingsOpen: () => false,
                 modalState: () => newModalState,
+                maybeAlertBanner: () => Option.none(),
                 storageState: () =>
                   modifyFields(readyState, {
                     entriesState: () => EntriesState.Loading(),
@@ -2318,6 +2342,7 @@ export const update = (
       return {
         model: modifyFields(model, {
           modalState: () => Modal.openCreate("file"),
+          maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           PushUrl({ url: buildNewUrl(subPath, "file") }),
@@ -2332,6 +2357,7 @@ export const update = (
       return {
         model: modifyFields(model, {
           modalState: () => Modal.openCreate("folder"),
+          maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           PushUrl({ url: buildNewUrl(subPath, "folder") }),
@@ -2341,7 +2367,9 @@ export const update = (
     },
 
     ClickedImportFiles: () => ({
-      model,
+      model: modifyFields(model, {
+        maybeAlertBanner: () => Option.none(),
+      }),
       commands: [toModalCommand(Modal.SelectImportFiles())],
     }),
 
@@ -2351,6 +2379,7 @@ export const update = (
         return {
           model: modifyFields(model, {
             modalState: () => Modal.openEditFolder(entry.name),
+            maybeAlertBanner: () => Option.none(),
           }),
           commands: [
             PushUrl({ url: buildEditUrl(subPath, entry.name) }),
@@ -2360,7 +2389,9 @@ export const update = (
       }
 
       return {
-        model,
+        model: modifyFields(model, {
+          maybeAlertBanner: () => Option.none(),
+        }),
         commands: [
           PushUrl({ url: buildEditUrl(subPath, entry.name) }),
           toModalCommand(Modal.InspectFileForEditor({ entryName: entry.name, subPath })),
@@ -2376,6 +2407,7 @@ export const update = (
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           modalState: () => Modal.openHelp(Option.some(activeTopic)),
+          maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           PushUrl({
@@ -2419,6 +2451,7 @@ export const update = (
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           modalState: Modal.close,
+          maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           ReplaceUrl({ url: buildFolderUrl(subPath) }),
@@ -2503,6 +2536,7 @@ export const update = (
         ReplaceUrl: ({ url }) => ({
           model: modifyFields(model, {
             modalState: () => modalResult.model,
+            maybeAlertBanner: () => Option.none(),
           }),
           commands: [...mappedCommands, ReplaceUrl({ url })],
         }),
@@ -2533,11 +2567,7 @@ export const update = (
             model: modifyFields(model, {
               storageState: () => nextStorageState,
               modalState: () => modalResult.model,
-              maybeAlertBanner: () =>
-                Option.match(maybeAlertBanner, {
-                  onNone: () => model.maybeAlertBanner,
-                  onSome: (banner) => Option.some(banner),
-                }),
+              maybeAlertBanner: () => maybeAlertBanner,
             }),
             commands,
           }
@@ -3231,7 +3261,26 @@ const viewAlertContainer = (model: Model, h: HtmlBuilder): Html.Html =>
     onSome: (banner) =>
       h.div(
         [h.Id("files-alert-area"), h.AriaLive("polite")],
-        [h.div([h.Class(`alert alert-${banner.variant}`)], [banner.message])],
+        [
+          h.div(
+            [
+              h.Class(`alert alert-${banner.variant} alert-dismissible`),
+              h.Role(banner.variant === "danger" ? "alert" : "status"),
+            ],
+            [
+              h.span([h.Class("alert-message")], [banner.message]),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Class("alert-close-btn"),
+                  h.AriaLabel("Hinweis schließen"),
+                  h.OnClick(Message.ClickedDismissAlert()),
+                ],
+                [viewIcon("close", h)],
+              ),
+            ],
+          ),
+        ],
       ),
   })
 

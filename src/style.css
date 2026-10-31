@@ -135,6 +135,7 @@ code {
 .icon-label-btn-icon .svg-icon,
 .btn-icon-only > span .svg-icon,
 .modal-close-btn .svg-icon,
+.alert-close-btn .svg-icon,
 .btn-icon .svg-icon {
   vertical-align: middle;
 }
@@ -664,6 +665,45 @@ code {
   margin-bottom: 16px;
   font-size: 14px;
   line-height: 1.5;
+}
+
+.alert-dismissible {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.alert-message {
+  flex: 1;
+}
+
+.alert-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  color: inherit;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  box-sizing: border-box;
+}
+
+.alert-close-btn:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.alert-close-btn .svg-icon {
+  width: 14px;
+  height: 14px;
 }
 
 .alert-warning {
