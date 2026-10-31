@@ -3636,19 +3636,10 @@ const viewIslandContainer = (
   h.div(
     [h.Class(isFullscreen ? "island-container is-fullscreen" : "island-container")],
     [
-      showTopBorder
-        ? h.div([h.Id("fullscreen-top-sensor"), h.Class("fullscreen-top-sensor")], [])
-        : h.empty,
       showTopBorder ? viewWindowTopBorder(title, isFocused, isMaximized, isFullscreen, h) : h.empty,
       h.iframe([
         h.Id("island-iframe"),
-        h.Class(
-          showTopBorder
-            ? isFullscreen
-              ? "island-iframe has-top-border is-fullscreen"
-              : "island-iframe has-top-border"
-            : "island-iframe",
-        ),
+        h.Class(showTopBorder ? "island-iframe has-top-border" : "island-iframe"),
         h.Src(islandUrl),
         h.Sandbox(ISLAND_IFRAME_SANDBOX),
         h.Title("PWA Island"),
@@ -3663,9 +3654,6 @@ const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html => {
     [h.Id("router-view"), h.Class("router-view")],
     [
       showWindowsTitlebar
-        ? h.div([h.Id("fullscreen-top-sensor"), h.Class("fullscreen-top-sensor")], [])
-        : h.empty,
-      showWindowsTitlebar
         ? viewManagerTitlebar(
             model.isWindowFocused,
             model.isWindowMaximized,
@@ -3674,15 +3662,7 @@ const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html => {
           )
         : h.empty,
       h.div(
-        [
-          h.Class(
-            showWindowsTitlebar
-              ? model.isWindowFullscreen
-                ? "files-page has-windows-titlebar is-fullscreen"
-                : "files-page has-windows-titlebar"
-              : "files-page",
-          ),
-        ],
+        [h.Class(showWindowsTitlebar ? "files-page has-windows-titlebar" : "files-page")],
         [
           viewToolbar(model, h),
           viewAlertContainer(model, h),

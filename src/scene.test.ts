@@ -353,7 +353,7 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
-  it("renders fullscreen button and fullscreen top sensor when in fullscreen mode", () => {
+  it("renders fullscreen button in window controls when in fullscreen mode", () => {
     const tauriWindowsFullscreenModel: Model = {
       ...readyModel,
       hasTauri: true,
@@ -369,8 +369,6 @@ describe("PWA Islands Scene Tests", () => {
       given(tauriWindowsFullscreenModel),
       sceneExpect(selector("#island-iframe")).toExist(),
       sceneExpect(selector("#island-iframe")).toHaveClass("has-top-border"),
-      sceneExpect(selector("#island-iframe")).toHaveClass("is-fullscreen"),
-      sceneExpect(selector("#fullscreen-top-sensor")).toExist(),
       sceneExpect(selector("#fullscreen-btn")).toExist(),
       click(selector("#fullscreen-btn")),
       Command.expectExact(ToggleFullscreenWindow()),
