@@ -57,6 +57,7 @@ const readyModel: Model = {
   hasTauri: false,
   isWindowsOrLinux: true,
   isWindows: false,
+  isWindowFocused: true,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",

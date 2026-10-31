@@ -1820,50 +1820,61 @@ code {
 
 .window-top-border {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 38px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--border);
+  top: env(titlebar-area-y, 0px);
+  left: env(titlebar-area-x, 0px);
+  height: env(titlebar-area-height, 32px);
+  width: env(titlebar-area-width, calc(100% - 138px));
+  background: transparent;
   display: flex;
   align-items: center;
-  padding: 0 12px;
-  z-index: 1000;
+  justify-content: flex-start;
+  padding: 0;
   box-sizing: border-box;
   user-select: none;
+  z-index: 1000;
+  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-size: 12px;
+  transition: opacity 0.1s ease;
+}
+
+.window-top-border.inactive {
+  opacity: 0.5;
 }
 
 .window-top-border-btn {
-  display: inline-flex;
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  cursor: default;
+  transition: background-color 0.1s ease;
+  user-select: none;
   padding: 0;
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  background: var(--code-bg);
-  color: var(--text-h);
-  font-family: var(--sans);
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  text-decoration: none;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
 }
 
 .window-top-border-btn:hover {
-  background: var(--accent-bg);
-  border-color: var(--accent-border);
-  color: var(--accent);
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.window-top-border-btn:active {
+  background-color: rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  .window-top-border-btn:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+  }
+  .window-top-border-btn:active {
+    background-color: rgba(255, 255, 255, 0.04);
+  }
 }
 
 .window-top-border-arrow {
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
 }
 
@@ -1878,6 +1889,6 @@ code {
 }
 
 .island-iframe.has-top-border {
-  top: 38px;
-  height: calc(100dvh - 38px);
+  top: env(titlebar-area-height, 32px);
+  height: calc(100dvh - env(titlebar-area-height, 32px));
 }

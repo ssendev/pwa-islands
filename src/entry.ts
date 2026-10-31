@@ -53,3 +53,15 @@ Runtime.run(application, {
     origin: window.location.origin,
   })),
 })
+
+if (supportsTauri()) {
+  import("@tauri-apps/api/window")
+    .then(({ getCurrentWindow }) => {
+      getCurrentWindow()
+        .onFocusChanged(({ payload: focused }) => {
+          window.dispatchEvent(new Event(focused ? "focus" : "blur"))
+        })
+        .catch(() => {})
+    })
+    .catch(() => {})
+}

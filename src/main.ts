@@ -250,6 +250,7 @@ export const Model = Schema.Struct({
   hasTauri: Schema.Boolean,
   isWindowsOrLinux: Schema.Boolean,
   isWindows: Schema.Boolean,
+  isWindowFocused: Schema.Boolean,
   origin: Schema.String,
   storageState: StorageState,
   showFileInfo: Schema.Boolean,
@@ -341,6 +342,9 @@ export const Message = defineMessageUnion({
   DoubleClickedReturnArrow: {},
   CompletedReturnArrowClickDelay: {
     clickId: Schema.Number,
+  },
+  ChangedWindowFocus: {
+    isFocused: Schema.Boolean,
   },
   CompletedResolveIslandBackNavigation: {
     targetUrl: Schema.String,
@@ -1316,6 +1320,7 @@ export const init = (
         hasTauri: false,
         isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
         isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
+        isWindowFocused: true,
         origin: flags.origin,
         storageState: StorageState.Unsupported(),
         showFileInfo: true,
@@ -1341,6 +1346,7 @@ export const init = (
       hasTauri: flags.hasTauri,
       isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
       isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
+      isWindowFocused: true,
       origin: flags.origin,
       storageState: StorageState.Initializing(),
       showFileInfo: true,
@@ -1761,6 +1767,12 @@ export const update = (
         ],
       }
     },
+
+    ChangedWindowFocus: ({ isFocused }) => ({
+      model: modifyFields(model, {
+        isWindowFocused: () => isFocused,
+      }),
+    }),
 
     CompletedResolveIslandBackNavigation: ({ targetUrl, isIsland, subPath, shouldNavigate }) => {
       if (!shouldNavigate) {
@@ -2607,6 +2619,21 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       },
     }),
   ),
+
+  windowFocus: Subscription.persistentEntry(
+    Stream.merge(
+      Dom.streamFromEvent({
+        target: window,
+        type: "focus",
+        mapEvent: () => Message.ChangedWindowFocus({ isFocused: true }),
+      }),
+      Dom.streamFromEvent({
+        target: window,
+        type: "blur",
+        mapEvent: () => Message.ChangedWindowFocus({ isFocused: false }),
+      }),
+    ),
+  ),
 }))
 
 // VIEW
@@ -3311,11 +3338,11 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
 const ISLAND_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
 
-const viewWindowTopBorder = (h: HtmlBuilder): Html.Html =>
+const viewWindowTopBorder = (isFocused: boolean, h: HtmlBuilder): Html.Html =>
   h.header(
     [
       h.Id("window-top-border"),
-      h.Class("window-top-border"),
+      h.Class(isFocused ? "window-top-border" : "window-top-border inactive"),
       h.DataAttribute("tauri-drag-region", "true"),
     ],
     [
@@ -3337,12 +3364,13 @@ const viewWindowTopBorder = (h: HtmlBuilder): Html.Html =>
 const viewIslandContainer = (
   islandUrl: string,
   showTopBorder: boolean,
+  isFocused: boolean,
   h: HtmlBuilder,
 ): Html.Html =>
   h.div(
     [h.Class("island-container")],
     [
-      showTopBorder ? viewWindowTopBorder(h) : h.empty,
+      showTopBorder ? viewWindowTopBorder(isFocused, h) : h.empty,
       h.iframe([
         h.Id("island-iframe"),
         h.Class(showTopBorder ? "island-iframe has-top-border" : "island-iframe"),
@@ -3377,7 +3405,13 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
     [
       Option.match(model.maybeActiveIslandUrl, {
         onNone: () => viewManagerMain(model, h),
-        onSome: (islandUrl) => viewIslandContainer(islandUrl, model.hasTauri && model.isWindows, h),
+        onSome: (islandUrl) =>
+          viewIslandContainer(
+            islandUrl,
+            model.hasTauri && model.isWindows,
+            model.isWindowFocused,
+            h,
+          ),
       }),
     ],
   ),

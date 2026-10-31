@@ -80,6 +80,7 @@ const readyModel: Model = {
   hasTauri: false,
   isWindowsOrLinux: true,
   isWindows: false,
+  isWindowFocused: true,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -1688,6 +1689,20 @@ describe("PWA Islands Story Tests", () => {
                 pendingRoute: AppRoute.Folder({ subPath: [] }),
               }),
             )
+          }),
+        )
+      })
+      it("updates isWindowFocused when window focus changes", () => {
+        story(
+          update,
+          given(readyModel),
+          message(Message.ChangedWindowFocus({ isFocused: false })),
+          model((m) => {
+            expect(m.isWindowFocused).toBe(false)
+          }),
+          message(Message.ChangedWindowFocus({ isFocused: true })),
+          model((m) => {
+            expect(m.isWindowFocused).toBe(true)
           }),
         )
       })

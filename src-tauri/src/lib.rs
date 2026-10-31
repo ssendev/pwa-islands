@@ -780,6 +780,17 @@ pub fn run() {
             .build(),
         )?;
       }
+      #[cfg(target_os = "windows")]
+      {
+        use tauri::window::{Effect, EffectsBuilder};
+        if let Some(main_window) = app.get_webview_window("main") {
+          let _ = main_window.set_effects(
+            EffectsBuilder::new()
+              .effect(Effect::Mica)
+              .build(),
+          );
+        }
+      }
       #[cfg(target_os = "linux")]
       {
         use gtk::prelude::*;
