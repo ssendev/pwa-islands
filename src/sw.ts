@@ -28,10 +28,12 @@ const precacheManifest: Array<string | { revision: string | null; url: string }>
 
 precacheAndRoute(precacheManifest)
 cleanupOutdatedCaches()
+void caches.delete("downloads-page-cache")
 
 // NOTE: Bound to URL handler is created lazily in appShell because in dev mode precacheManifest is empty
 registerRoute(
-  ({ request, sameOrigin }) => sameOrigin && request.mode === "navigate",
+  ({ request, url, sameOrigin }) =>
+    sameOrigin && request.mode === "navigate" && !isDownloadsPath(url.pathname),
   async ({ request, url, event }) => {
     if (url.searchParams.has(ISLAND_PARAM)) {
       return appShell(request, url, event)
@@ -73,10 +75,9 @@ registerRoute(
   },
 )
 
-registerRoute(
-  ({ request }) => request.mode === "navigate",
-  ({ request, url, event }) => appShell(request, url, event),
-)
+function isDownloadsPath(pathname: string): boolean {
+  return pathname === "/downloads" || pathname.startsWith("/downloads/")
+}
 
 function resolveRequestPath(pathname: string): string {
   const decoded = decodeURIComponent(pathname)
@@ -102,6 +103,7 @@ function isInternalPath(pathname: string): boolean {
     pathname === "/api.d.ts" ||
     pathname.startsWith("/assets/") ||
     pathname.startsWith("/manifest.webmanifest") ||
+    isDownloadsPath(pathname) ||
     pathname === "/sw.js" ||
     pathname === "/registerSW.js"
   ) {

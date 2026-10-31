@@ -1,4 +1,5 @@
 import { Array, Data, Effect, Option, Stream } from "effect"
+import { invoke } from "@tauri-apps/api/core"
 
 export class DirectoryIterationError extends Data.TaggedError("DirectoryIterationError")<{
   readonly message: string
@@ -335,7 +336,6 @@ export async function findSavedFile(
     const maybeStoredType = await getStoredStorageType()
     if (Option.exists(maybeStoredType, (t) => t === "tauri")) {
       try {
-        const { invoke } = await import("@tauri-apps/api/core")
         const joined = parts.join("/")
         const existsDirect = await invoke<boolean>("tauri_fs_exists", { subPath: joined })
         if (existsDirect) {
@@ -597,7 +597,6 @@ export async function getStoredUserTemplates(
 ): Promise<ReadonlyArray<StoredUserTemplate>> {
   if (type === "tauri") {
     try {
-      const { invoke } = await import("@tauri-apps/api/core")
       const files = await invoke<
         ReadonlyArray<{
           name: string
@@ -682,7 +681,6 @@ export async function saveUserTemplate(
 ): Promise<void> {
   const fileName = sanitizeTemplateName(name)
   if (type === "tauri") {
-    const { invoke } = await import("@tauri-apps/api/core")
     const bytes = new TextEncoder().encode(content)
     await invoke("tauri_fs_write_file", {
       subPath: `${TAURI_TEMPLATES_FOLDER}/${fileName}`,
@@ -712,7 +710,6 @@ export async function deleteUserTemplate(
 ): Promise<void> {
   const fileName = sanitizeTemplateName(name)
   if (type === "tauri") {
-    const { invoke } = await import("@tauri-apps/api/core")
     await invoke("tauri_fs_remove_entry", {
       subPath: `${TAURI_TEMPLATES_FOLDER}/${fileName}`,
       isDirectory: false,

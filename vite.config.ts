@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url"
 
 import { maskableIcon } from "./tools/maskable-icon.ts"
 import { notoEmoji } from "./tools/noto-emoji.ts"
+import { downloadsPlugin } from "./tools/downloads-page.ts"
 
 const root = fileURLToPath(new URL(".", import.meta.url))
 const apiTypesEntry = join(root, "src", "api-types.ts")
@@ -204,6 +205,7 @@ export default defineConfig({
   },
 
   build: {
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       input: {
         main: fileURLToPath(new URL("index.html", import.meta.url)),
@@ -214,6 +216,7 @@ export default defineConfig({
   plugins: [
     foldkit(),
     ...islandsApiPlugin(),
+    downloadsPlugin(),
     maskableIcon(),
     notoEmoji(),
     VitePWA({
@@ -255,6 +258,7 @@ export default defineConfig({
 
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico,d.ts}"],
+        globIgnores: ["**/downloads/**"],
 
         // Vite 8 hat `inlineDynamicImports` durch `codeSplitting: false` ersetzt;
         // das Plugin setzt im Service-Worker-Build noch die alte Option.

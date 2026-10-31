@@ -1,4 +1,5 @@
 import { Array, Option, Order } from "effect"
+import { invoke } from "@tauri-apps/api/core"
 import {
   checkTextBytes,
   collectDirectoryHandles,
@@ -70,7 +71,6 @@ const islandEntryOrder: Order.Order<IslandEntry> = Order.make((a, b) => {
 const api: IslandsApi = {
   async list(path = "") {
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       const cleanPath = normalizePath(path)
       const raw = await invoke<
         ReadonlyArray<{
@@ -118,7 +118,6 @@ const api: IslandsApi = {
 
   async read(path, options) {
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", {
         subPath: normalizePath(path),
       })
@@ -139,7 +138,6 @@ const api: IslandsApi = {
 
   async readBlob(path) {
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", {
         subPath: normalizePath(path),
       })
@@ -153,7 +151,6 @@ const api: IslandsApi = {
 
   async exists(path) {
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       return await invoke<boolean>("tauri_fs_exists", { subPath: normalizePath(path) })
     }
 
@@ -178,7 +175,6 @@ const api: IslandsApi = {
     }
 
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       let bytes: Uint8Array
       if (typeof content === "string") {
         bytes = new TextEncoder().encode(content)
@@ -207,7 +203,6 @@ const api: IslandsApi = {
 
   async makeDir(path) {
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("tauri_fs_create_dir", { subPath: normalizePath(path) })
       return
     }
@@ -217,7 +212,6 @@ const api: IslandsApi = {
 
   async rename(from, to) {
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("tauri_fs_rename", {
         fromSubPath: normalizePath(from),
         toSubPath: normalizePath(to),
@@ -232,7 +226,6 @@ const api: IslandsApi = {
   async remove(path, options) {
     const recursive = options?.recursive ?? false
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("tauri_fs_remove_entry", {
         subPath: normalizePath(path),
         isDirectory: recursive,
@@ -248,7 +241,6 @@ const api: IslandsApi = {
 
   async copy(from, to) {
     if (await isTauriActive()) {
-      const { invoke } = await import("@tauri-apps/api/core")
       await invoke("tauri_fs_copy", {
         fromSubPath: normalizePath(from),
         toSubPath: normalizePath(to),

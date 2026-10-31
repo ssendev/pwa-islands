@@ -1,5 +1,6 @@
 import { Array, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
+import { invoke } from "@tauri-apps/api/core"
 import {
   OPFS_APP_FOLDER,
   checkTextBytes,
@@ -122,14 +123,12 @@ export const folderNameFromPath = (folderPath: string): string => {
 }
 
 export const pickTauriDirectory = async (): Promise<Option.Option<string>> => {
-  const { invoke } = await import("@tauri-apps/api/core")
   const picked = await invoke<string | null>("tauri_fs_pick_folder")
   return Option.fromNullishOr(picked)
 }
 
 export const setTauriRootDirectory = async (folderPath: string): Promise<boolean> => {
   try {
-    const { invoke } = await import("@tauri-apps/api/core")
     await invoke<string>("tauri_fs_set_root", { path: folderPath })
     return true
   } catch {
@@ -139,7 +138,6 @@ export const setTauriRootDirectory = async (folderPath: string): Promise<boolean
 
 export const clearTauriRootDirectory = async (): Promise<void> => {
   try {
-    const { invoke } = await import("@tauri-apps/api/core")
     await invoke("tauri_fs_clear_root")
   } catch {
     // Ignore when not running in Tauri
@@ -148,7 +146,6 @@ export const clearTauriRootDirectory = async (): Promise<void> => {
 
 export const getSavedTauriFolder = async (): Promise<Option.Option<string>> => {
   try {
-    const { invoke } = await import("@tauri-apps/api/core")
     const root = await invoke<string | null>("tauri_fs_get_root")
     return Option.fromNullishOr(root)
   } catch {
@@ -158,7 +155,6 @@ export const getSavedTauriFolder = async (): Promise<Option.Option<string>> => {
 
 export const saveTauriFolder = async (folderPath: string): Promise<void> => {
   invalidateRootCache()
-  const { invoke } = await import("@tauri-apps/api/core")
   await invoke<string>("tauri_fs_set_root", { path: folderPath })
   runtimeBridge.savedTauriFolder = Option.some(folderPath)
   await storeStorageType("tauri")
@@ -431,7 +427,6 @@ export class TauriStorage {
   }
 
   async listEntries(subPath: ReadonlyArray<string>): Promise<ReadonlyArray<FileEntry>> {
-    const { invoke } = await import("@tauri-apps/api/core")
     const relPath = this.joinSubPath(subPath)
     const raw = await invoke<
       ReadonlyArray<{
@@ -454,7 +449,6 @@ export class TauriStorage {
   }
 
   async inspectFile(subPath: ReadonlyArray<string>, name: string): Promise<FileInspection> {
-    const { invoke } = await import("@tauri-apps/api/core")
     const relPath = this.joinSubPath(subPath, name)
     const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", { subPath: relPath })
     const size = buffer.byteLength
@@ -474,7 +468,6 @@ export class TauriStorage {
   }
 
   async readFileBuffer(subPath: ReadonlyArray<string>, name: string): Promise<ArrayBuffer> {
-    const { invoke } = await import("@tauri-apps/api/core")
     const relPath = this.joinSubPath(subPath, name)
     return await invoke<ArrayBuffer>("tauri_fs_read_file", { subPath: relPath })
   }
@@ -485,7 +478,6 @@ export class TauriStorage {
   }
 
   async writeFile(subPath: ReadonlyArray<string>, name: string, content: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core")
     const relPath = this.joinSubPath(subPath, name)
     const bytes = new TextEncoder().encode(content)
     await invoke("tauri_fs_write_file", {
@@ -499,7 +491,6 @@ export class TauriStorage {
     name: string,
     data: ArrayBuffer | Uint8Array<ArrayBuffer>,
   ): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core")
     const relPath = this.joinSubPath(subPath, name)
     const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
     await invoke("tauri_fs_write_file", {
@@ -516,7 +507,6 @@ export class TauriStorage {
     if (oldName === newName) {
       return
     }
-    const { invoke } = await import("@tauri-apps/api/core")
     const fromPath = this.joinSubPath(subPath, oldName)
     const toPath = this.joinSubPath(subPath, newName)
     await invoke("tauri_fs_rename", {
@@ -526,7 +516,6 @@ export class TauriStorage {
   }
 
   async createDirectory(subPath: ReadonlyArray<string>, name: string): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core")
     const relPath = this.joinSubPath(subPath, name)
     await invoke("tauri_fs_create_dir", { subPath: relPath })
   }
@@ -539,7 +528,6 @@ export class TauriStorage {
     if (oldName === newName) {
       return
     }
-    const { invoke } = await import("@tauri-apps/api/core")
     const fromPath = this.joinSubPath(subPath, oldName)
     const toPath = this.joinSubPath(subPath, newName)
     await invoke("tauri_fs_rename", {
@@ -553,7 +541,6 @@ export class TauriStorage {
     name: string,
     kind: "file" | "directory" = "file",
   ): Promise<void> {
-    const { invoke } = await import("@tauri-apps/api/core")
     const relPath = this.joinSubPath(subPath, name)
     await invoke("tauri_fs_remove_entry", {
       subPath: relPath,

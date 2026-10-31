@@ -9,6 +9,7 @@
     "tauri:build": "tauri build",
     "dev": "vite",
     "build": "vite build",
+    "build:downloads": "node scripts/prepare-downloads.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "format": "oxfmt",
