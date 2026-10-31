@@ -6,7 +6,9 @@
   "scripts": {
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
+    "tauri:build": "node scripts/sync-version.mjs && tauri build",
+    "version:sync": "node scripts/sync-version.mjs",
+    "version:restore": "node scripts/sync-version.mjs --restore",
     "dev": "vite",
     "build": "vite build",
     "build:downloads": "node scripts/prepare-downloads.mjs",

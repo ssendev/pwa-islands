@@ -227,7 +227,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               [
                 h.h3(
                   [h.Id("help-modal-title"), h.Class("modal-title")],
-                  [h.span([h.Class("help-title-icon")], [viewIcon("help", h)]), " Hilfe"],
+                  [
+                    h.span([h.Class("help-title-icon")], [viewIcon("help", h)]),
+                    " Hilfe",
+                    h.span([h.Class("help-version-badge")], [`v${__APP_VERSION__}`]),
+                  ],
                 ),
                 h.button(
                   [

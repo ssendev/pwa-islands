@@ -15,6 +15,25 @@ const root = fileURLToPath(new URL(".", import.meta.url))
 const apiTypesEntry = join(root, "src", "api-types.ts")
 const apiDtsFile = join(root, ".generated", "api.d.ts")
 
+function getAppVersion(): string {
+  try {
+    const stdout = execFileSync("git", ["rev-list", "--count", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    const count = parseInt(stdout, 10)
+    if (!isNaN(count)) {
+      return `0.1.${count}`
+    }
+  } catch {
+    // Fallback
+  }
+  return "0.1.0"
+}
+
+const appVersion = getAppVersion()
+
 const dtsHeader = `/**
  * PWA Islands – Typdeklarationen für die API.
  *
@@ -197,6 +216,9 @@ function islandsApiPlugin(): Plugin[] {
 }
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   server: {
     host: "pwaislands.localhost",
     watch: {
