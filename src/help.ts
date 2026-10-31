@@ -811,9 +811,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                 h.p(
                                   [h.Class("help-hint")],
                                   [
-                                    "Wechseln lässt sich die Art jederzeit über das Zahnrad ",
+                                    "Im Web-Browser lässt sich die Speicherart jederzeit über das Zahnrad ",
                                     viewIcon("settings", h),
-                                    ". Die Wahl wird gemerkt, die Dateien der jeweils anderen Art bleiben dabei unangetastet.",
+                                    " wechseln. In der Desktop-App (Tauri) wird direkt das native Dateisystem verwendet.",
                                   ],
                                 ),
                               ],

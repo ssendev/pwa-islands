@@ -346,7 +346,8 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#btn-change-folder")).toExist(),
       sceneExpect(selector("#btn-change-folder")).toContainText("Ordner wechseln"),
       sceneExpect(selector("#btn-disconnect-folder")).toExist(),
-      sceneExpect(selector("#btn-use-opfs")).toExist(),
+      sceneExpect(selector("#btn-use-opfs")).toBeAbsent(),
+      sceneExpect(selector("#btn-select-folder")).toBeAbsent(),
     )
   })
 

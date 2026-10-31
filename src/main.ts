@@ -2528,7 +2528,7 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
   })
 
 const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
-  const hasLocalFolderSupport = model.hasTauri || model.hasDirectoryPicker
+  const hasLocalFolderSupport = !model.hasTauri && model.hasDirectoryPicker
   const {
     isReady,
     isFsaReady,
@@ -2558,7 +2558,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
       isFsaReady: false,
       isFsaNoFolder: isLocalFolderStorage(storageType),
       isFsaPermissionRequired: false,
-      canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
+      canSwitchToOpfs: !model.hasTauri && model.hasOPFS && storageType !== "opfs",
       canSwitchToFsa: hasLocalFolderSupport && !isLocalFolderStorage(storageType),
     }),
     PermissionRequired: ({ storageType }) => ({
@@ -2566,7 +2566,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
       isFsaReady: false,
       isFsaNoFolder: false,
       isFsaPermissionRequired: isLocalFolderStorage(storageType),
-      canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
+      canSwitchToOpfs: !model.hasTauri && model.hasOPFS && storageType !== "opfs",
       canSwitchToFsa: hasLocalFolderSupport && !isLocalFolderStorage(storageType),
     }),
     Ready: ({ storageType }) => ({
@@ -2574,7 +2574,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
       isFsaReady: isLocalFolderStorage(storageType),
       isFsaNoFolder: false,
       isFsaPermissionRequired: false,
-      canSwitchToOpfs: model.hasOPFS && storageType !== "opfs",
+      canSwitchToOpfs: !model.hasTauri && model.hasOPFS && storageType !== "opfs",
       canSwitchToFsa: hasLocalFolderSupport && !isLocalFolderStorage(storageType),
     }),
   })
