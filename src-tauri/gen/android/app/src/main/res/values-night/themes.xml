@@ -2,5 +2,6 @@
     <!-- Base application theme. -->
     <style name="Theme.app" parent="Theme.Material3.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
+        <item name="android:windowFullscreen">true</item>
     </style>
 </resources>
