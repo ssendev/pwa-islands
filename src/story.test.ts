@@ -1,4 +1,4 @@
-import { Option } from "effect"
+import { Match, Option } from "effect"
 import { Command, given, message, model, story } from "foldkit/story"
 import { fromString } from "foldkit/url"
 import { describe, expect, it } from "vitest"
@@ -949,6 +949,7 @@ describe("PWA Islands Story Tests", () => {
           editor: Editor.Model.CreateFolder({
             name: "",
             maybeValidationError: Option.none(),
+            maybeAlertBanner: Option.none(),
           }),
         }),
       }
@@ -964,6 +965,7 @@ describe("PWA Islands Story Tests", () => {
               editor: Editor.Model.CreateFolder({
                 name: "",
                 maybeValidationError: Option.some("Bitte geben Sie einen Ordnernamen ein."),
+                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -979,6 +981,7 @@ describe("PWA Islands Story Tests", () => {
                 maybeValidationError: Option.some(
                   "Der Ordnername darf keine Schrägstriche enthalten.",
                 ),
+                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -993,6 +996,7 @@ describe("PWA Islands Story Tests", () => {
           editor: Editor.Model.CreateFolder({
             name: "projekte",
             maybeValidationError: Option.none(),
+            maybeAlertBanner: Option.none(),
           }),
         }),
       }
@@ -1010,6 +1014,7 @@ describe("PWA Islands Story Tests", () => {
                 maybeValidationError: Option.some(
                   'Ein Eintrag mit dem Namen "projekte" existiert bereits.',
                 ),
+                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1044,6 +1049,7 @@ describe("PWA Islands Story Tests", () => {
                   selectedTemplateId: "builtin:empty",
                   userTemplates: [],
                 }),
+                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1058,6 +1064,7 @@ describe("PWA Islands Story Tests", () => {
                 selectedTemplateId: "builtin:empty",
                 userTemplates: [],
               }),
+              maybeAlertBanner: Option.none(),
             }),
             subPath: [],
           }),
@@ -1082,6 +1089,7 @@ describe("PWA Islands Story Tests", () => {
             name: "index.html",
             fileMode: EditorFileMode.Text({ content: "<p>Hello</p>" }),
             maybeValidationError: Option.none(),
+            maybeAlertBanner: Option.none(),
           }),
         }),
       }
@@ -1097,6 +1105,7 @@ describe("PWA Islands Story Tests", () => {
               editor: Editor.Model.ConfirmDelete({
                 entryName: "index.html",
                 entryKind: "file",
+                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1113,6 +1122,86 @@ describe("PWA Islands Story Tests", () => {
         Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
           expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+    })
+
+    it("handles copying /api.d.ts in the Editor modal and keeps the alert inside the modal", () => {
+      const modelWithEditor: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: Editor.makeCreateFile(),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithEditor),
+        message(editorMsg(Editor.Message.ClickedCopyDts())),
+        Command.expectExact(Editor.CopyApiDtsToClipboard()),
+        Command.resolve(
+          Editor.CopyApiDtsToClipboard,
+          Editor.Message.SucceededCopyApiDtsToClipboard(),
+        ),
+        model((m) => {
+          expect(m.maybeAlertBanner).toEqual(Option.none())
+          expect(
+            Match.value(m.modalState).pipe(
+              Match.tag("Editor", ({ editor }) =>
+                Match.value(editor).pipe(
+                  Match.tag("CreateFile", (createFile) => createFile.maybeAlertBanner),
+                  Match.orElse(() => Option.none()),
+                ),
+              ),
+              Match.orElse(() => Option.none()),
+            ),
+          ).toEqual(
+            Option.some({
+              message: "/api.d.ts in die Zwischenablage kopiert",
+              variant: "info",
+            }),
+          )
+        }),
+      )
+    })
+
+    it("displays save failure alert inside the modal and not in the main app", () => {
+      const modelWithEditor: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: Editor.makeCreateFile(),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithEditor),
+        message(
+          editorMsg(
+            Editor.Message.FailedSaveChanges({
+              message: "Konnte Datei nicht speichern: Speicher voll",
+            }),
+          ),
+        ),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.maybeAlertBanner).toEqual(Option.none())
+          expect(
+            Match.value(m.modalState).pipe(
+              Match.tag("Editor", ({ editor }) =>
+                Match.value(editor).pipe(
+                  Match.tag("CreateFile", (createFile) => createFile.maybeAlertBanner),
+                  Match.orElse(() => Option.none()),
+                ),
+              ),
+              Match.orElse(() => Option.none()),
+            ),
+          ).toEqual(
+            Option.some({
+              message: "Konnte Datei nicht speichern: Speicher voll",
+              variant: "danger",
+            }),
+          )
         }),
       )
     })
@@ -1358,6 +1447,7 @@ describe("PWA Islands Story Tests", () => {
               editor: Editor.Model.CreateFolder({
                 name: "Neuer Ordner",
                 maybeValidationError: Option.none(),
+                maybeAlertBanner: Option.none(),
               }),
             }),
           )

@@ -31,6 +31,15 @@ export { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate }
 
 // MODEL
 
+export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
+export type AlertVariant = typeof AlertVariant.Type
+
+export const AlertBanner = Schema.Struct({
+  message: Schema.String,
+  variant: AlertVariant,
+})
+export type AlertBanner = typeof AlertBanner.Type
+
 export const OverwriteSource = defineTaggedUnion({
   CreateFile: {
     content: Schema.String,
@@ -54,29 +63,35 @@ export const Model = defineTaggedUnion({
     isDeletingTemplate: Schema.Boolean,
     newTemplateLabel: Schema.String,
     maybeValidationError: Schema.Option(Schema.String),
+    maybeAlertBanner: Schema.Option(AlertBanner),
   },
   CreateFolder: {
     name: Schema.String,
     maybeValidationError: Schema.Option(Schema.String),
+    maybeAlertBanner: Schema.Option(AlertBanner),
   },
   EditFolder: {
     originalName: Schema.String,
     name: Schema.String,
     maybeValidationError: Schema.Option(Schema.String),
+    maybeAlertBanner: Schema.Option(AlertBanner),
   },
   EditFile: {
     originalName: Schema.String,
     name: Schema.String,
     fileMode: EditorFileMode,
     maybeValidationError: Schema.Option(Schema.String),
+    maybeAlertBanner: Schema.Option(AlertBanner),
   },
   ConfirmDelete: {
     entryName: Schema.String,
     entryKind: FileEntryKind,
+    maybeAlertBanner: Schema.Option(AlertBanner),
   },
   ConfirmOverwrite: {
     targetName: Schema.String,
     source: OverwriteSource,
+    maybeAlertBanner: Schema.Option(AlertBanner),
   },
 })
 export type Model = typeof Model.Type
@@ -97,16 +112,28 @@ export const makeCreateFile = (
   isDeletingTemplate: false,
   newTemplateLabel: "",
   maybeValidationError: Option.none(),
+  maybeAlertBanner: Option.none(),
 })
 
-export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
-export type AlertVariant = typeof AlertVariant.Type
+export const setAlertBanner = (model: Model, maybeAlertBanner: Option.Option<AlertBanner>): Model =>
+  Model.match(model, {
+    CreateFile: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
+    CreateFolder: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
+    EditFolder: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
+    EditFile: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
+    ConfirmDelete: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
+    ConfirmOverwrite: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
+  })
 
-export const AlertBanner = Schema.Struct({
-  message: Schema.String,
-  variant: AlertVariant,
-})
-export type AlertBanner = typeof AlertBanner.Type
+export const getAlertBanner = (model: Model): Option.Option<AlertBanner> =>
+  Model.match(model, {
+    CreateFile: (state) => state.maybeAlertBanner,
+    CreateFolder: (state) => state.maybeAlertBanner,
+    EditFolder: (state) => state.maybeAlertBanner,
+    EditFile: (state) => state.maybeAlertBanner,
+    ConfirmDelete: (state) => state.maybeAlertBanner,
+    ConfirmOverwrite: (state) => state.maybeAlertBanner,
+  })
 
 // MESSAGE & OUTMESSAGE
 
@@ -508,21 +535,25 @@ export const update = (
           modifyFields(state, {
             name: () => name,
             maybeValidationError: () => Option.none(),
+            maybeAlertBanner: () => Option.none(),
           }),
         CreateFolder: (state) =>
           modifyFields(state, {
             name: () => name,
             maybeValidationError: () => Option.none(),
+            maybeAlertBanner: () => Option.none(),
           }),
         EditFolder: (state) =>
           modifyFields(state, {
             name: () => name,
             maybeValidationError: () => Option.none(),
+            maybeAlertBanner: () => Option.none(),
           }),
         EditFile: (state) =>
           modifyFields(state, {
             name: () => name,
             maybeValidationError: () => Option.none(),
+            maybeAlertBanner: () => Option.none(),
           }),
         ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
@@ -535,6 +566,7 @@ export const update = (
         CreateFile: (state) =>
           modifyFields(state, {
             content: () => content,
+            maybeAlertBanner: () => Option.none(),
           }),
         CreateFolder: () => model,
         EditFolder: () => model,
@@ -543,6 +575,7 @@ export const update = (
             Text: () =>
               modifyFields(state, {
                 fileMode: () => EditorFileMode.Text({ content }),
+                maybeAlertBanner: () => Option.none(),
               }),
             Binary: () => state,
           }),
@@ -774,20 +807,19 @@ export const update = (
 
     FailedLoadBase64: ({ message: errorMessage }) =>
       whenBinaryEditor(model, (editState, binaryMode) => ({
-        model: modifyFields(editState, {
-          fileMode: () =>
-            modifyFields(binaryMode, {
-              edit: () => BinaryEdit.Disabled(),
-            }),
-        }),
-        outMessage: OutMessage.ShowAlert({
-          banner: {
+        model: setAlertBanner(
+          modifyFields(editState, {
+            fileMode: () =>
+              modifyFields(binaryMode, {
+                edit: () => BinaryEdit.Disabled(),
+              }),
+          }),
+          Option.some({
             message: errorMessage,
             variant: "danger",
-          },
-          closeModal: false,
-          replaceUrl: false,
-        }),
+          }),
+        ),
+        outMessage: OutMessage.None(),
       })),
 
     UpdatedBase64Content: ({ base64Content }) =>
@@ -808,39 +840,38 @@ export const update = (
               modifyFields(binaryMode, {
                 edit: () => BinaryEdit.Editing({ content: base64Content }),
               }),
+            maybeAlertBanner: () => Option.none(),
           }),
           outMessage: OutMessage.None(),
         }
       }),
 
     ClickedCopyDts: () => ({
-      model,
+      model: setAlertBanner(model, Option.none()),
       commands: [CopyApiDtsToClipboard()],
       outMessage: OutMessage.None(),
     }),
 
     SucceededCopyApiDtsToClipboard: () => ({
-      model,
-      outMessage: OutMessage.ShowAlert({
-        banner: {
+      model: setAlertBanner(
+        model,
+        Option.some({
           message: "/api.d.ts in die Zwischenablage kopiert",
           variant: "info",
-        },
-        closeModal: false,
-        replaceUrl: false,
-      }),
+        }),
+      ),
+      outMessage: OutMessage.None(),
     }),
 
     FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => ({
-      model,
-      outMessage: OutMessage.ShowAlert({
-        banner: {
+      model: setAlertBanner(
+        model,
+        Option.some({
           message: errorMessage,
           variant: "danger",
-        },
-        closeModal: false,
-        replaceUrl: false,
-      }),
+        }),
+      ),
+      outMessage: OutMessage.None(),
     }),
 
     ClickedSave: () => {
@@ -870,6 +901,7 @@ export const update = (
             return {
               model: modifyFields(createFolder, {
                 maybeValidationError: () => error,
+                maybeAlertBanner: () => Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -880,6 +912,7 @@ export const update = (
               model: modifyFields(createFolder, {
                 maybeValidationError: () =>
                   Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+                maybeAlertBanner: () => Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -896,6 +929,7 @@ export const update = (
             return {
               model: modifyFields(editFolder, {
                 maybeValidationError: () => error,
+                maybeAlertBanner: () => Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -906,6 +940,7 @@ export const update = (
               model: modifyFields(editFolder, {
                 maybeValidationError: () =>
                   Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+                maybeAlertBanner: () => Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -922,6 +957,7 @@ export const update = (
             return {
               model: modifyFields(createFile, {
                 maybeValidationError: () => error,
+                maybeAlertBanner: () => Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -936,6 +972,7 @@ export const update = (
                   selectedTemplateId: createFile.selectedTemplateId,
                   userTemplates: createFile.userTemplates,
                 }),
+                maybeAlertBanner: Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -952,6 +989,7 @@ export const update = (
             return {
               model: modifyFields(editFile, {
                 maybeValidationError: () => error,
+                maybeAlertBanner: () => Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -978,6 +1016,7 @@ export const update = (
                 model: modifyFields(editFile, {
                   maybeValidationError: () =>
                     Option.some("Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe."),
+                  maybeAlertBanner: () => Option.none(),
                 }),
                 outMessage: OutMessage.None(),
               }
@@ -994,6 +1033,7 @@ export const update = (
                 model: modifyFields(editFile, {
                   maybeValidationError: () =>
                     Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+                  maybeAlertBanner: () => Option.none(),
                 }),
                 outMessage: OutMessage.None(),
               }
@@ -1005,6 +1045,7 @@ export const update = (
                   originalName: editFile.originalName,
                   fileMode: editFile.fileMode,
                 }),
+                maybeAlertBanner: Option.none(),
               }),
               outMessage: OutMessage.None(),
             }
@@ -1048,6 +1089,7 @@ export const update = (
                 isDeletingTemplate: false,
                 newTemplateLabel: "",
                 maybeValidationError: Option.none(),
+                maybeAlertBanner: Option.none(),
               }),
               outMessage: OutMessage.None(),
             }),
@@ -1057,6 +1099,7 @@ export const update = (
                 name: targetName,
                 fileMode,
                 maybeValidationError: Option.none(),
+                maybeAlertBanner: Option.none(),
               }),
               outMessage: OutMessage.None(),
             }),
@@ -1071,11 +1114,19 @@ export const update = (
     ClickedDelete: () =>
       Model.match(model, {
         EditFolder: ({ originalName }) => ({
-          model: Model.ConfirmDelete({ entryName: originalName, entryKind: "directory" }),
+          model: Model.ConfirmDelete({
+            entryName: originalName,
+            entryKind: "directory",
+            maybeAlertBanner: Option.none(),
+          }),
           outMessage: OutMessage.None(),
         }),
         EditFile: ({ originalName }) => ({
-          model: Model.ConfirmDelete({ entryName: originalName, entryKind: "file" }),
+          model: Model.ConfirmDelete({
+            entryName: originalName,
+            entryKind: "file",
+            maybeAlertBanner: Option.none(),
+          }),
           outMessage: OutMessage.None(),
         }),
         CreateFile: () => ({ model, outMessage: OutMessage.None() }),
@@ -1114,15 +1165,14 @@ export const update = (
     }),
 
     FailedSaveChanges: ({ message: errorMessage }) => ({
-      model,
-      outMessage: OutMessage.ShowAlert({
-        banner: {
+      model: setAlertBanner(
+        model,
+        Option.some({
           message: errorMessage,
           variant: "danger",
-        },
-        closeModal: false,
-        replaceUrl: false,
-      }),
+        }),
+      ),
+      outMessage: OutMessage.None(),
     }),
 
     SucceededDeleteEntry: ({ entries }) => ({
@@ -1131,15 +1181,14 @@ export const update = (
     }),
 
     FailedDeleteEntry: ({ message: errorMessage }) => ({
-      model,
-      outMessage: OutMessage.ShowAlert({
-        banner: {
+      model: setAlertBanner(
+        model,
+        Option.some({
           message: errorMessage,
           variant: "danger",
-        },
-        closeModal: false,
-        replaceUrl: false,
-      }),
+        }),
+      ),
+      outMessage: OutMessage.None(),
     }),
 
     CompletedFocusNameInput: () => ({
@@ -1456,6 +1505,24 @@ const viewEditorFileBody = (
     },
   })
 
+const viewModalAlertBanner = (
+  maybeAlertBanner: Option.Option<AlertBanner>,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
+  Option.match(maybeAlertBanner, {
+    onNone: () => h.empty,
+    onSome: (banner) =>
+      h.div(
+        [
+          h.Id("modal-alert-area"),
+          h.Class(`alert alert-${banner.variant} mb-3 modal-alert-banner`),
+          h.Role(banner.variant === "danger" ? "alert" : "status"),
+          h.AriaLive("polite"),
+        ],
+        [banner.message],
+      ),
+  })
+
 const viewEditorModal = (
   {
     titleText,
@@ -1464,6 +1531,7 @@ const viewEditorModal = (
     isEditingExisting,
     nameValue,
     maybeValidationError,
+    maybeAlertBanner,
     extraBodyNodes,
   }: {
     readonly titleText: string
@@ -1472,6 +1540,7 @@ const viewEditorModal = (
     readonly isEditingExisting: boolean
     readonly nameValue: string
     readonly maybeValidationError: Option.Option<string>
+    readonly maybeAlertBanner: Option.Option<AlertBanner>
     readonly extraBodyNodes: ReadonlyArray<Html.Html>
   },
   h: Html.HtmlBuilder<Message>,
@@ -1510,6 +1579,7 @@ const viewEditorModal = (
               h.div(
                 [h.Class("modal-body")],
                 [
+                  viewModalAlertBanner(maybeAlertBanner, h),
                   Option.match(maybeValidationError, {
                     onNone: () => h.empty,
                     onSome: (error) =>
@@ -1632,6 +1702,7 @@ const viewEditorModal = (
 const viewConfirmDeleteModal = (
   entryName: string,
   entryKind: FileEntryKind,
+  maybeAlertBanner: Option.Option<AlertBanner>,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isFolder = entryKind === "directory"
@@ -1665,6 +1736,7 @@ const viewConfirmDeleteModal = (
           h.div(
             [h.Class("modal-body")],
             [
+              viewModalAlertBanner(maybeAlertBanner, h),
               h.p(
                 [],
                 [
@@ -1708,7 +1780,11 @@ const viewConfirmDeleteModal = (
   )
 }
 
-const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Message>): Html.Html =>
+const viewConfirmOverwriteModal = (
+  targetName: string,
+  maybeAlertBanner: Option.Option<AlertBanner>,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
   h.div(
     [
       h.Class("modal-overlay"),
@@ -1738,6 +1814,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
           h.div(
             [h.Class("modal-body")],
             [
+              viewModalAlertBanner(maybeAlertBanner, h),
               h.p(
                 [],
                 [
@@ -1789,6 +1866,7 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isEditingExisting: false,
           nameValue: state.name,
           maybeValidationError: state.maybeValidationError,
+          maybeAlertBanner: state.maybeAlertBanner,
           extraBodyNodes: [
             viewTemplatePicker(state, h),
             ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
@@ -1797,7 +1875,7 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
         h,
       ),
 
-    CreateFolder: ({ name, maybeValidationError }) =>
+    CreateFolder: ({ name, maybeValidationError, maybeAlertBanner }) =>
       viewEditorModal(
         {
           titleText: "Neuen Ordner erstellen",
@@ -1806,12 +1884,13 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isEditingExisting: false,
           nameValue: name,
           maybeValidationError,
+          maybeAlertBanner,
           extraBodyNodes: [],
         },
         h,
       ),
 
-    EditFolder: ({ originalName, name, maybeValidationError }) =>
+    EditFolder: ({ originalName, name, maybeValidationError, maybeAlertBanner }) =>
       viewEditorModal(
         {
           titleText: `Ordner bearbeiten: ${originalName}`,
@@ -1820,12 +1899,13 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isEditingExisting: true,
           nameValue: name,
           maybeValidationError,
+          maybeAlertBanner,
           extraBodyNodes: [],
         },
         h,
       ),
 
-    EditFile: ({ originalName, name, fileMode, maybeValidationError }) =>
+    EditFile: ({ originalName, name, fileMode, maybeValidationError, maybeAlertBanner }) =>
       viewEditorModal(
         {
           titleText: `Datei bearbeiten: ${originalName}`,
@@ -1834,13 +1914,16 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isEditingExisting: true,
           nameValue: name,
           maybeValidationError,
+          maybeAlertBanner,
           extraBodyNodes: viewEditorFileBody(fileMode, h),
         },
         h,
       ),
 
-    ConfirmDelete: ({ entryName, entryKind }) => viewConfirmDeleteModal(entryName, entryKind, h),
+    ConfirmDelete: ({ entryName, entryKind, maybeAlertBanner }) =>
+      viewConfirmDeleteModal(entryName, entryKind, maybeAlertBanner, h),
 
-    ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
+    ConfirmOverwrite: ({ targetName, maybeAlertBanner }) =>
+      viewConfirmOverwriteModal(targetName, maybeAlertBanner, h),
   }),
 )

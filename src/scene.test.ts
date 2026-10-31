@@ -128,6 +128,7 @@ describe("PWA Islands Scene Tests", () => {
             edit: BinaryEdit.Disabled(),
           }),
           maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
         }),
       }),
     }
@@ -193,6 +194,8 @@ describe("PWA Islands Scene Tests", () => {
         Editor.Message.SucceededCopyApiDtsToClipboard(),
       ),
       sceneExpect(text("/api.d.ts in die Zwischenablage kopiert")).toExist(),
+      sceneExpect(selector(".modal-overlay #modal-alert-area")).toExist(),
+      sceneExpect(selector("#files-alert-area .alert")).toBeAbsent(),
     )
   })
 
@@ -203,6 +206,7 @@ describe("PWA Islands Scene Tests", () => {
         editor: Editor.Model.CreateFolder({
           name: "Neuer Ordner",
           maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
         }),
       }),
     }
@@ -224,6 +228,7 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
           maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
         }),
       }),
     }

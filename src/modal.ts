@@ -113,6 +113,7 @@ export const openCreate = (
         ? Editor.Model.CreateFolder({
             name: "Neuer Ordner",
             maybeValidationError: Option.none(),
+            maybeAlertBanner: Option.none(),
           })
         : Editor.makeCreateFile(templates),
   })
@@ -127,6 +128,7 @@ export const openEditFolder = (name: string): ModalState =>
       originalName: name,
       name,
       maybeValidationError: Option.none(),
+      maybeAlertBanner: Option.none(),
     }),
   })
 
@@ -268,6 +270,7 @@ export const resolveModalForRoute = async (
                   name: targetEntry.name,
                   fileMode,
                   maybeValidationError: Option.none(),
+                  maybeAlertBanner: Option.none(),
                 }),
               }),
             ),
@@ -596,6 +599,7 @@ export const update = (
           name: originalName,
           fileMode,
           maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
         }),
       }),
       commands: [FocusModalNameInput()],

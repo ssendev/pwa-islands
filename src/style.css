@@ -53,6 +53,12 @@
     color: #34d399;
     background: rgba(16, 185, 129, 0.2);
   }
+
+  .alert-info {
+    color: #60a5fa;
+    background-color: rgba(59, 130, 246, 0.15);
+    border-color: rgba(59, 130, 246, 0.35);
+  }
 }
 
 body {
@@ -672,6 +678,12 @@ code {
   color: #b91c1c;
 }
 
+.alert-info {
+  background-color: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #1d4ed8;
+}
+
 /* Modal Dialog Styles */
 .modal-overlay {
   position: fixed;
@@ -684,6 +696,8 @@ code {
   z-index: 1000;
   padding: 16px;
   animation: modalFadeIn 0.15s ease-out;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 @keyframes modalFadeIn {
@@ -704,8 +718,19 @@ code {
   max-width: 680px;
   display: flex;
   flex-direction: column;
-  max-height: 90vh;
+  max-height: min(90vh, calc(100vh - 32px));
   box-sizing: border-box;
+  overflow: hidden;
+  margin: auto;
+}
+
+.modal-content > form,
+#modal-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .modal-header {
@@ -714,6 +739,7 @@ code {
   justify-content: space-between;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .modal-header h3 {
@@ -753,6 +779,12 @@ code {
   flex-direction: column;
   gap: 16px;
   overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.modal-alert-banner {
+  flex-shrink: 0;
 }
 
 .form-group {
@@ -889,6 +921,7 @@ code {
   background: var(--social-bg);
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
+  flex-shrink: 0;
 }
 
 /* Links steht die zerstoerende Aktion allein, rechts Abbrechen/Speichern. */
