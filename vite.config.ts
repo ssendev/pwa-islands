@@ -16,6 +16,9 @@ const apiTypesEntry = join(root, "src", "api-types.ts")
 const apiDtsFile = join(root, ".generated", "api.d.ts")
 
 function getAppVersion(): string {
+  if (process.env.APP_VERSION?.trim()) {
+    return process.env.APP_VERSION.trim()
+  }
   try {
     const stdout = execFileSync("git", ["rev-list", "--count", "HEAD"], {
       cwd: root,

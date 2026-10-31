@@ -780,6 +780,12 @@ pub fn run() {
             .build(),
         )?;
       }
+      #[cfg(target_os = "windows")]
+      {
+        if let Some(main_window) = app.get_webview_window("main") {
+          let _ = main_window.clear_all_browsing_data();
+        }
+      }
       #[cfg(target_os = "linux")]
       {
         use gtk::prelude::*;

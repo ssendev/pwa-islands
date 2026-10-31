@@ -19,6 +19,10 @@ declare const self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ revision: string | null; url: string }>
 }
 
+if (self.location.hostname === "tauri.localhost" || self.location.protocol === "tauri:") {
+  void self.registration.unregister()
+}
+
 void self.skipWaiting()
 clientsClaim()
 

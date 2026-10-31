@@ -11,18 +11,50 @@ import {
 } from "./files"
 import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
 
-registerSW({
-  immediate: true,
-  onNeedReload() {
-    console.log("PWA: onNeedReload - Service Worker aktualisiert")
-  },
-  onOfflineReady() {
-    console.log("PWA: onOfflineReady - App ist bereit für die Offline-Nutzung")
-  },
-  onRegisterError(error) {
-    console.error("PWA: onRegisterError - Fehler bei der Service-Worker-Registrierung:", error)
-  },
-})
+if (supportsTauri()) {
+  // In nativen Tauri-Apps sind alle Web-Assets bereits lokal in der Binärdatei gebündelt.
+  // Ein Service Worker darf hier nicht aktiv sein, da er alte Builds im Webview-Cache
+  // festhält und Versionsupdates blockiert. Eventuell vorhandene Service Worker und
+  // Caches (z. B. aus vorherigen Builds) werden bereinigt.
+  if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+    void navigator.serviceWorker.getRegistrations().then(async (registrations) => {
+      let hadRegistrations = registrations.length > 0
+      for (const registration of registrations) {
+        await registration.unregister()
+      }
+      let hadCaches = false
+      if ("caches" in window) {
+        const keys = await caches.keys()
+        if (keys.length > 0) {
+          hadCaches = true
+          for (const key of keys) {
+            await caches.delete(key)
+          }
+        }
+      }
+      if (hadRegistrations || hadCaches || navigator.serviceWorker.controller) {
+        const reloadKey = "pwaislands:sw-cleaned"
+        if (!sessionStorage.getItem(reloadKey)) {
+          sessionStorage.setItem(reloadKey, "1")
+          window.location.reload()
+        }
+      }
+    })
+  }
+} else {
+  registerSW({
+    immediate: true,
+    onNeedReload() {
+      console.log("PWA: onNeedReload - Service Worker aktualisiert")
+    },
+    onOfflineReady() {
+      console.log("PWA: onOfflineReady - App ist bereit für die Offline-Nutzung")
+    },
+    onRegisterError(error) {
+      console.error("PWA: onRegisterError - Fehler bei der Service-Worker-Registrierung:", error)
+    },
+  })
+}
 
 const container = document.getElementById("app")
 if (!container) {
