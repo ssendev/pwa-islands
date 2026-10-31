@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { basename, dirname, join } from "node:path"
@@ -53,6 +54,22 @@ const findFiles = (dir: string, predicate: (name: string) => boolean): string[] 
 }
 
 export function readTauriVersion(rootDir: string): string {
+  if (process.env.APP_VERSION?.trim()) {
+    return process.env.APP_VERSION.trim()
+  }
+  try {
+    const stdout = execFileSync("git", ["rev-list", "--count", "HEAD"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    const count = parseInt(stdout, 10)
+    if (!isNaN(count)) {
+      return `0.1.${count}`
+    }
+  } catch {
+    // Fallback below
+  }
   const tauriConfPath = join(rootDir, "src-tauri", "tauri.conf.json")
   if (existsSync(tauriConfPath)) {
     try {

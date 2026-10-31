@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "node scripts/sync-version.mjs && tauri build",
+    "tauri": "node scripts/tauri.mjs",
+    "tauri:dev": "node scripts/tauri.mjs dev",
+    "tauri:build": "node scripts/tauri.mjs build",
     "version:sync": "node scripts/sync-version.mjs",
     "version:restore": "node scripts/sync-version.mjs --restore",
     "dev": "vite",

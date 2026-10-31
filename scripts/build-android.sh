@@ -68,22 +68,11 @@ else
   echo "==> Verwende vorhandenen Android Signing-Key: $KEYSTORE_FILE"
 fi
 
-# 3. Versionsnummer synchronisieren (und beim Beenden zurücksetzen, falls nicht aus deploy aufgerufen)
-if [ -z "${BUILD_TARGETS:-}" ]; then
-  cleanup() {
-    node "$SCRIPT_DIR/sync-version.mjs" --restore >/dev/null 2>&1 || true
-  }
-  trap cleanup EXIT
-fi
-
-echo "==> Synchronisiere Version in tauri.conf.json:"
-node "$SCRIPT_DIR/sync-version.mjs"
-
-# 4. Android APK bauen
+# 3. Android APK bauen
 echo "==> Baue Android Release APK:"
 npm run tauri -- android build --apk --ci
 
-# 5. Signatur der erstellten APK verifizieren
+# 4. Signatur der erstellten APK verifizieren
 APK_DIR="$ANDROID_DIR/app/build/outputs/apk/universal/release"
 SIGNED_APK="$APK_DIR/app-universal-release.apk"
 
