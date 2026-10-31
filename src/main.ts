@@ -49,6 +49,9 @@ import {
   setTauriRootDirectory,
   showDirectoryPicker,
   supportsTauri,
+  isWindowsOrLinux,
+  isWindows,
+  checkFileExists,
 } from "./files"
 import * as Modal from "./modal"
 import { AlertBanner } from "./modal"
@@ -58,7 +61,9 @@ import {
   buildFolderUrl,
   buildHelpUrl,
   buildNewUrl,
+  decodeUrlPathnameSegments,
   encodeSubPath,
+  parseIslandPath,
   parseUrlToRoute,
 } from "./route"
 import { OPFS_APP_FOLDER, getFileExtension } from "./storage"
@@ -234,6 +239,8 @@ export const Flags = Schema.Struct({
   hasOPFS: Schema.Boolean,
   hasTauri: Schema.Boolean,
   origin: Schema.String,
+  isWindowsOrLinux: Schema.optionalKey(Schema.Boolean),
+  isWindows: Schema.optionalKey(Schema.Boolean),
 })
 export type Flags = typeof Flags.Type
 
@@ -241,6 +248,8 @@ export const Model = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
   hasTauri: Schema.Boolean,
+  isWindowsOrLinux: Schema.Boolean,
+  isWindows: Schema.Boolean,
   origin: Schema.String,
   storageState: StorageState,
   showFileInfo: Schema.Boolean,
@@ -249,6 +258,8 @@ export const Model = Schema.Struct({
   modalState: Modal.ModalState,
   maybeAlertBanner: Schema.Option(AlertBanner),
   maybeActiveIslandUrl: Schema.Option(Schema.String),
+  maybeActiveIslandPath: Schema.Option(Schema.String),
+  returnClickId: Schema.Number,
 })
 export type Model = typeof Model.Type
 
@@ -326,6 +337,17 @@ export const Message = defineMessageUnion({
   CompletedOpenFileInBrowser: {},
   LoadedIslandIframe: {},
   CompletedFocusIslandIframe: {},
+  ClickedReturnArrow: {},
+  DoubleClickedReturnArrow: {},
+  CompletedReturnArrowClickDelay: {
+    clickId: Schema.Number,
+  },
+  CompletedResolveIslandBackNavigation: {
+    targetUrl: Schema.String,
+    isIsland: Schema.Boolean,
+    subPath: Schema.Array(Schema.String),
+    shouldNavigate: Schema.Boolean,
+  },
   ReceivedIslandNavigation: {
     url: Schema.String,
   },
@@ -1075,6 +1097,97 @@ export const FocusIslandIframe = Command.define("FocusIslandIframe", {
   ),
 })
 
+export const ScheduleReturnArrowClick = Command.define("ScheduleReturnArrowClick", {
+  args: {
+    clickId: Schema.Number,
+  },
+  messages: [Message.CompletedReturnArrowClickDelay],
+  execute: ({ clickId }) =>
+    Effect.sleep("250 millis").pipe(
+      Effect.map(() => Message.CompletedReturnArrowClickDelay({ clickId })),
+    ),
+})
+
+export const ResolveIslandBackNavigation = Command.define("ResolveIslandBackNavigation", {
+  args: {
+    folderSubPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+  },
+  messages: [Message.CompletedResolveIslandBackNavigation],
+  execute: ({ folderSubPath, fileName }) =>
+    Effect.tryPromise({
+      try: async () => {
+        let storage: StorageBackend | null = null
+        try {
+          storage = requireActiveStorage()
+        } catch {
+          storage = null
+        }
+
+        if (fileName === "index.html") {
+          if (folderSubPath.length === 0) {
+            return Message.CompletedResolveIslandBackNavigation({
+              targetUrl: "",
+              isIsland: false,
+              subPath: [],
+              shouldNavigate: false,
+            })
+          }
+          const parentSubPath = Array.dropRight(folderSubPath, 1)
+          const exists = storage
+            ? await checkFileExists(storage, parentSubPath, "index.html")
+            : false
+          if (exists) {
+            const parentPathPart = encodeSubPath(parentSubPath)
+            const targetUrl = parentPathPart !== "" ? `/${parentPathPart}` : "/index.html"
+            return Message.CompletedResolveIslandBackNavigation({
+              targetUrl,
+              isIsland: true,
+              subPath: parentSubPath,
+              shouldNavigate: true,
+            })
+          }
+          return Message.CompletedResolveIslandBackNavigation({
+            targetUrl: buildFolderUrl(folderSubPath),
+            isIsland: false,
+            subPath: folderSubPath,
+            shouldNavigate: true,
+          })
+        }
+
+        const exists = storage ? await checkFileExists(storage, folderSubPath, "index.html") : false
+        if (exists) {
+          const pathPart = encodeSubPath(folderSubPath)
+          const targetUrl = pathPart !== "" ? `/${pathPart}` : "/index.html"
+          return Message.CompletedResolveIslandBackNavigation({
+            targetUrl,
+            isIsland: true,
+            subPath: folderSubPath,
+            shouldNavigate: true,
+          })
+        }
+        return Message.CompletedResolveIslandBackNavigation({
+          targetUrl: buildFolderUrl(folderSubPath),
+          isIsland: false,
+          subPath: folderSubPath,
+          shouldNavigate: true,
+        })
+      },
+      catch: () => new Error("Fehler beim Prüfen der Island-Rücknavigation"),
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(
+          Message.CompletedResolveIslandBackNavigation({
+            targetUrl: buildFolderUrl(folderSubPath),
+            isIsland: false,
+            subPath: folderSubPath,
+            shouldNavigate: folderSubPath.length > 0 || fileName !== "index.html",
+          }),
+        ),
+      ),
+    ),
+})
+
 const postIslandIpcResponse = (payload: {
   readonly requestId: string
   readonly ok: boolean
@@ -1201,6 +1314,8 @@ export const init = (
         hasDirectoryPicker: false,
         hasOPFS: false,
         hasTauri: false,
+        isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
+        isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
         origin: flags.origin,
         storageState: StorageState.Unsupported(),
         showFileInfo: true,
@@ -1213,6 +1328,8 @@ export const init = (
           variant: "warning",
         }),
         maybeActiveIslandUrl: Option.none(),
+        maybeActiveIslandPath: Option.none(),
+        returnClickId: 0,
       },
     }
   }
@@ -1222,6 +1339,8 @@ export const init = (
       hasDirectoryPicker: flags.hasDirectoryPicker,
       hasOPFS: flags.hasOPFS,
       hasTauri: flags.hasTauri,
+      isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
+      isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
       origin: flags.origin,
       storageState: StorageState.Initializing(),
       showFileInfo: true,
@@ -1230,6 +1349,8 @@ export const init = (
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
       maybeAlertBanner: Option.none(),
       maybeActiveIslandUrl: Option.none(),
+      maybeActiveIslandPath: Option.none(),
+      returnClickId: 0,
     },
     commands: [
       InitializeStorage({
@@ -1540,6 +1661,7 @@ export const update = (
         return {
           model: modifyFields(model, {
             maybeActiveIslandUrl: () => Option.some(islandUrl),
+            maybeActiveIslandPath: () => Option.some(fileUrl),
           }),
           commands: [PushUrl({ url: fileUrl })],
         }
@@ -1564,11 +1686,111 @@ export const update = (
 
     CompletedFocusIslandIframe: () => ({ model }),
 
+    ClickedReturnArrow: () => {
+      const nextClickId = model.returnClickId + 1
+      return {
+        model: modifyFields(model, {
+          returnClickId: () => nextClickId,
+        }),
+        commands: [ScheduleReturnArrowClick({ clickId: nextClickId })],
+      }
+    },
+
+    DoubleClickedReturnArrow: () => {
+      const nextClickId = model.returnClickId + 1
+      if (Option.isNone(model.maybeActiveIslandUrl)) {
+        const currentSubPath = currentSubPathFromStorageState(model.storageState)
+        if (currentSubPath.length === 0) {
+          return {
+            model: modifyFields(model, {
+              returnClickId: () => nextClickId,
+            }),
+          }
+        }
+        const parentSubPath = Array.dropRight(currentSubPath, 1)
+        const targetUrl = buildFolderUrl(parentSubPath)
+        return {
+          model: modifyFields(model, {
+            returnClickId: () => nextClickId,
+          }),
+          commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: parentSubPath })],
+        }
+      }
+
+      const activePath = Option.getOrElse(model.maybeActiveIslandPath, () => "")
+      const { folderSubPath } = parseIslandPath(activePath)
+      const targetUrl = buildFolderUrl(folderSubPath)
+      return {
+        model: modifyFields(model, {
+          returnClickId: () => nextClickId,
+          maybeActiveIslandUrl: () => Option.none(),
+          maybeActiveIslandPath: () => Option.none(),
+        }),
+        commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: folderSubPath })],
+      }
+    },
+
+    CompletedReturnArrowClickDelay: ({ clickId }) => {
+      if (clickId !== model.returnClickId) {
+        return { model }
+      }
+      if (Option.isNone(model.maybeActiveIslandUrl)) {
+        const currentSubPath = currentSubPathFromStorageState(model.storageState)
+        if (currentSubPath.length === 0) {
+          return { model }
+        }
+        const parentSubPath = Array.dropRight(currentSubPath, 1)
+        const targetUrl = buildFolderUrl(parentSubPath)
+        return {
+          model,
+          commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: parentSubPath })],
+        }
+      }
+      const activePath = Option.getOrElse(model.maybeActiveIslandPath, () => "")
+      const { folderSubPath, fileName } = parseIslandPath(activePath)
+      if (fileName === "index.html" && folderSubPath.length === 0) {
+        return { model }
+      }
+      return {
+        model,
+        commands: [
+          ResolveIslandBackNavigation({
+            folderSubPath,
+            fileName,
+          }),
+        ],
+      }
+    },
+
+    CompletedResolveIslandBackNavigation: ({ targetUrl, isIsland, subPath, shouldNavigate }) => {
+      if (!shouldNavigate) {
+        return { model }
+      }
+      if (isIsland) {
+        const islandUrl = buildTauriIslandUrl(subPath, "index.html")
+        return {
+          model: modifyFields(model, {
+            maybeActiveIslandUrl: () => Option.some(islandUrl),
+            maybeActiveIslandPath: () => Option.some(targetUrl),
+          }),
+          commands: [PushUrl({ url: targetUrl })],
+        }
+      }
+      return {
+        model: modifyFields(model, {
+          maybeActiveIslandUrl: () => Option.none(),
+          maybeActiveIslandPath: () => Option.none(),
+        }),
+        commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath })],
+      }
+    },
+
     ReceivedIslandNavigation: ({ url }) => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
           maybeActiveIslandUrl: () => Option.none(),
+          maybeActiveIslandPath: () => Option.none(),
         }),
         commands: [PushUrl({ url }), RefreshEntries({ subPath })],
       }
@@ -1600,23 +1822,13 @@ export const update = (
         searchStr.startsWith("?") ? searchStr : `?${searchStr}`,
       )
       if (isTauriStorageState(model.storageState) && !searchParams.has("pwaislands")) {
-        const segments = pipe(
-          url.pathname.split("/"),
-          Array.filter((s) => s !== ""),
-          Array.map((s) => {
-            try {
-              return decodeURIComponent(s)
-            } catch {
-              return s
-            }
-          }),
-        )
+        const segments = decodeUrlPathnameSegments(url.pathname)
         if (Array.isReadonlyArrayNonEmpty(segments)) {
-          const fileName = Array.lastNonEmpty(segments)
-          const subPath = Array.dropRight(segments, 1)
+          const { folderSubPath, fileName } = parseIslandPath(url.pathname)
           return {
             model: modifyFields(model, {
-              maybeActiveIslandUrl: () => Option.some(buildTauriIslandUrl(subPath, fileName)),
+              maybeActiveIslandUrl: () => Option.some(buildTauriIslandUrl(folderSubPath, fileName)),
+              maybeActiveIslandPath: () => Option.some(url.pathname),
             }),
           }
         }
@@ -1625,6 +1837,7 @@ export const update = (
       const route = parseUrlToRoute(url)
       const modelWithRoute = modifyFields(model, {
         maybeActiveIslandUrl: () => Option.none(),
+        maybeActiveIslandPath: () => Option.none(),
         storageState: (state) =>
           StorageState.match(state, {
             Initializing: () => state,
@@ -2032,12 +2245,15 @@ export const update = (
 
     PressedEscape: () => {
       if (Option.isSome(model.maybeActiveIslandUrl)) {
-        const subPath = currentSubPathFromStorageState(model.storageState)
+        const activePath = Option.getOrElse(model.maybeActiveIslandPath, () => "")
+        const { folderSubPath } = parseIslandPath(activePath)
+        const targetUrl = buildFolderUrl(folderSubPath)
         return {
           model: modifyFields(model, {
             maybeActiveIslandUrl: () => Option.none(),
+            maybeActiveIslandPath: () => Option.none(),
           }),
-          commands: [ReplaceUrl({ url: buildFolderUrl(subPath) }), RefreshEntries({ subPath })],
+          commands: [ReplaceUrl({ url: targetUrl }), RefreshEntries({ subPath: folderSubPath })],
         }
       }
       if (!Modal.isOpen(model.modalState)) {
@@ -2247,6 +2463,12 @@ export const parseIslandWindowMessage = (event: Event): Option.Option<Message> =
   }
   if (data.type === "pwaislands:navigate" && typeof data.url === "string") {
     return Option.some(Message.ReceivedIslandNavigation({ url: data.url }))
+  }
+  if (data.type === "pwaislands:titlebar-double-click") {
+    return Option.some(Message.DoubleClickedReturnArrow())
+  }
+  if (data.type === "pwaislands:titlebar-click") {
+    return Option.some(Message.ClickedReturnArrow())
   }
   const requestId = data.requestId
   if (data.type === "pwaislands:ipc" && typeof requestId === "string") {
@@ -3089,15 +3311,48 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
 const ISLAND_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
 
-const viewIslandIframe = (islandUrl: string, h: HtmlBuilder): Html.Html =>
-  h.iframe([
-    h.Id("island-iframe"),
-    h.Class("island-iframe"),
-    h.Src(islandUrl),
-    h.Sandbox(ISLAND_IFRAME_SANDBOX),
-    h.Title("PWA Island"),
-    h.OnLoad(Message.LoadedIslandIframe()),
-  ])
+const viewWindowTopBorder = (h: HtmlBuilder): Html.Html =>
+  h.header(
+    [
+      h.Id("window-top-border"),
+      h.Class("window-top-border"),
+      h.DataAttribute("tauri-drag-region", "true"),
+    ],
+    [
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("btn-return-pwaislands"),
+          h.Class("window-top-border-btn"),
+          h.Title("Zurück (Doppelklick: Bearbeitungsmodus)"),
+          h.AriaLabel("Zurück"),
+          h.OnClick(Message.ClickedReturnArrow()),
+          h.OnDoubleClick(Message.DoubleClickedReturnArrow()),
+        ],
+        [h.span([h.Class("window-top-border-arrow"), h.AriaHidden(true)], ["←"])],
+      ),
+    ],
+  )
+
+const viewIslandContainer = (
+  islandUrl: string,
+  showTopBorder: boolean,
+  h: HtmlBuilder,
+): Html.Html =>
+  h.div(
+    [h.Class("island-container")],
+    [
+      showTopBorder ? viewWindowTopBorder(h) : h.empty,
+      h.iframe([
+        h.Id("island-iframe"),
+        h.Class(showTopBorder ? "island-iframe has-top-border" : "island-iframe"),
+        h.Src(islandUrl),
+        h.Sandbox(ISLAND_IFRAME_SANDBOX),
+        h.Title("PWA Island"),
+        h.OnLoad(Message.LoadedIslandIframe()),
+      ]),
+    ],
+  )
 
 const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html =>
   h.main(
@@ -3122,7 +3377,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
     [
       Option.match(model.maybeActiveIslandUrl, {
         onNone: () => viewManagerMain(model, h),
-        onSome: (islandUrl) => viewIslandIframe(islandUrl, h),
+        onSome: (islandUrl) => viewIslandContainer(islandUrl, model.hasTauri && model.isWindows, h),
       }),
     ],
   ),

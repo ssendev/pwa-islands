@@ -780,6 +780,38 @@ pub fn run() {
             .build(),
         )?;
       }
+      #[cfg(target_os = "linux")]
+      {
+        use gtk::prelude::*;
+        if let Some(main_window) = app.get_webview_window("main") {
+          if let Ok(gtk_win) = main_window.gtk_window() {
+            let header_bar = gtk::HeaderBar::new();
+            header_bar.set_show_close_button(true);
+            header_bar.set_title(Some("PWA Islands"));
+
+            let return_btn = gtk::Button::from_icon_name(Some("go-previous"), gtk::IconSize::Button);
+            return_btn.set_tooltip_text(Some("Zurück (Doppelklick: Bearbeitungsmodus)"));
+            let win_clone = main_window.clone();
+            return_btn.connect_button_press_event(move |_, event| {
+              use gtk::gdk::EventType;
+              if event.event_type() == EventType::DoubleButtonPress {
+                let _ = win_clone.eval("window.postMessage({ type: 'pwaislands:titlebar-double-click' }, '*')");
+              } else if event.event_type() == EventType::ButtonPress {
+                let _ = win_clone.eval("window.postMessage({ type: 'pwaislands:titlebar-click' }, '*')");
+              }
+              gtk::glib::Propagation::Proceed
+            });
+
+            header_bar.pack_start(&return_btn);
+            gtk_win
+              .bind_property("title", &header_bar, "title")
+              .flags(gtk::glib::BindingFlags::DEFAULT | gtk::glib::BindingFlags::SYNC_CREATE)
+              .build();
+            gtk_win.set_titlebar(Some(&header_bar));
+            header_bar.show_all();
+          }
+        }
+      }
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![

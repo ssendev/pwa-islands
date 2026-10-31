@@ -30,9 +30,11 @@ import {
   PushUrl,
   RefreshEntries,
   ReplaceUrl,
+  ResolveIslandBackNavigation,
   SavedBackend,
   SaveFileInfoPreference,
   SaveStorageTypePreference,
+  ScheduleReturnArrowClick,
   StorageState,
   init,
   parseIslandWindowMessage,
@@ -76,6 +78,8 @@ const readyModel: Model = {
   hasDirectoryPicker: true,
   hasOPFS: true,
   hasTauri: false,
+  isWindowsOrLinux: true,
+  isWindows: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -90,6 +94,8 @@ const readyModel: Model = {
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
   maybeActiveIslandUrl: Option.none(),
+  maybeActiveIslandPath: Option.none(),
+  returnClickId: 0,
 }
 
 const rootUrl = Option.getOrThrow(fromString("http://localhost:5173/"))
@@ -310,6 +316,306 @@ describe("PWA Islands Story Tests", () => {
             RefreshEntries,
             Message.SucceededRefreshEntries({
               subPath: ["unterordner"],
+              entries: sampleEntries,
+            }),
+          ],
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.none())
+        }),
+      )
+    })
+
+    it("immediately navigates to /folder?pwaislands when DoubleClickedReturnArrow is dispatched", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: ["unterordner"],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      story(
+        update,
+        given({
+          ...tauriReadyModel,
+          maybeActiveIslandUrl: Option.some("pwaislands://localhost/unterordner/index.html"),
+          maybeActiveIslandPath: Option.some("/unterordner/index.html"),
+        }),
+        message(Message.DoubleClickedReturnArrow()),
+        Command.expectExact(
+          PushUrl({ url: "/unterordner?pwaislands" }),
+          RefreshEntries({ subPath: ["unterordner"] }),
+        ),
+        Command.resolveAll(
+          [PushUrl, Message.CompletedPushUrl()],
+          [
+            RefreshEntries,
+            Message.SucceededRefreshEntries({
+              subPath: ["unterordner"],
+              entries: sampleEntries,
+            }),
+          ],
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.none())
+        }),
+      )
+    })
+
+    it("handles single-click navigation check: goes to parent index.html if it exists", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: ["foo", "bar"],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      story(
+        update,
+        given({
+          ...tauriReadyModel,
+          maybeActiveIslandUrl: Option.some("pwaislands://localhost/foo/bar/index.html"),
+          maybeActiveIslandPath: Option.some("/foo/bar"),
+        }),
+        message(Message.ClickedReturnArrow()),
+        Command.expectExact(ScheduleReturnArrowClick({ clickId: 1 })),
+        Command.resolve(
+          ScheduleReturnArrowClick,
+          Message.CompletedReturnArrowClickDelay({ clickId: 1 }),
+        ),
+        Command.expectExact(
+          ResolveIslandBackNavigation({
+            folderSubPath: ["foo", "bar"],
+            fileName: "index.html",
+          }),
+        ),
+        Command.resolve(
+          ResolveIslandBackNavigation,
+          Message.CompletedResolveIslandBackNavigation({
+            targetUrl: "/foo",
+            isIsland: true,
+            subPath: ["foo"],
+            shouldNavigate: true,
+          }),
+        ),
+        Command.expectExact(PushUrl({ url: "/foo" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(
+            Option.some("pwaislands://localhost/foo/index.html"),
+          )
+        }),
+      )
+    })
+
+    it("handles single-click navigation check: falls back to ?pwaislands if index.html does not exist", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: ["foo", "bar"],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      story(
+        update,
+        given({
+          ...tauriReadyModel,
+          maybeActiveIslandUrl: Option.some("pwaislands://localhost/foo/bar/index.html"),
+          maybeActiveIslandPath: Option.some("/foo/bar"),
+        }),
+        message(Message.ClickedReturnArrow()),
+        Command.expectExact(ScheduleReturnArrowClick({ clickId: 1 })),
+        Command.resolve(
+          ScheduleReturnArrowClick,
+          Message.CompletedReturnArrowClickDelay({ clickId: 1 }),
+        ),
+        Command.expectExact(
+          ResolveIslandBackNavigation({
+            folderSubPath: ["foo", "bar"],
+            fileName: "index.html",
+          }),
+        ),
+        Command.resolve(
+          ResolveIslandBackNavigation,
+          Message.CompletedResolveIslandBackNavigation({
+            targetUrl: "/foo/bar?pwaislands",
+            isIsland: false,
+            subPath: ["foo", "bar"],
+            shouldNavigate: true,
+          }),
+        ),
+        Command.expectExact(
+          PushUrl({ url: "/foo/bar?pwaislands" }),
+          RefreshEntries({ subPath: ["foo", "bar"] }),
+        ),
+        Command.resolveAll(
+          [PushUrl, Message.CompletedPushUrl()],
+          [
+            RefreshEntries,
+            Message.SucceededRefreshEntries({
+              subPath: ["foo", "bar"],
+              entries: sampleEntries,
+            }),
+          ],
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.none())
+        }),
+      )
+    })
+
+    it("does not navigate away on single-click when root / (index.html) is open, only on double-click", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: [],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      // Single click on root / or /index.html: does not produce commands or change URL
+      story(
+        update,
+        given({
+          ...tauriReadyModel,
+          maybeActiveIslandUrl: Option.some("pwaislands://localhost/index.html"),
+          maybeActiveIslandPath: Option.some("/index.html"),
+        }),
+        message(Message.ClickedReturnArrow()),
+        Command.expectExact(ScheduleReturnArrowClick({ clickId: 1 })),
+        Command.resolve(
+          ScheduleReturnArrowClick,
+          Message.CompletedReturnArrowClickDelay({ clickId: 1 }),
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.some("pwaislands://localhost/index.html"))
+        }),
+      )
+
+      // Double click on root / or /index.html: immediately goes to /?pwaislands
+      story(
+        update,
+        given({
+          ...tauriReadyModel,
+          maybeActiveIslandUrl: Option.some("pwaislands://localhost/index.html"),
+          maybeActiveIslandPath: Option.some("/index.html"),
+        }),
+        message(Message.DoubleClickedReturnArrow()),
+        Command.expectExact(PushUrl({ url: "/?pwaislands" }), RefreshEntries({ subPath: [] })),
+        Command.resolveAll(
+          [PushUrl, Message.CompletedPushUrl()],
+          [
+            RefreshEntries,
+            Message.SucceededRefreshEntries({
+              subPath: [],
+              entries: sampleEntries,
+            }),
+          ],
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.none())
+        }),
+      )
+    })
+
+    it("navigates from /foo?pwaislands to /?pwaislands on single-click", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: ["foo"],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      story(
+        update,
+        given({
+          ...tauriReadyModel,
+          maybeActiveIslandUrl: Option.none(),
+          maybeActiveIslandPath: Option.none(),
+        }),
+        message(Message.ClickedReturnArrow()),
+        Command.expectExact(ScheduleReturnArrowClick({ clickId: 1 })),
+        Command.resolve(
+          ScheduleReturnArrowClick,
+          Message.CompletedReturnArrowClickDelay({ clickId: 1 }),
+        ),
+        Command.expectExact(PushUrl({ url: "/?pwaislands" }), RefreshEntries({ subPath: [] })),
+        Command.resolveAll(
+          [PushUrl, Message.CompletedPushUrl()],
+          [
+            RefreshEntries,
+            Message.SucceededRefreshEntries({
+              subPath: [],
+              entries: sampleEntries,
+            }),
+          ],
+        ),
+        model((m) => {
+          expect(m.maybeActiveIslandUrl).toEqual(Option.none())
+        }),
+      )
+    })
+
+    it("navigates from /foo/bar?pwaislands to /foo?pwaislands on single-click", () => {
+      const tauriReadyModel: Model = {
+        ...readyModel,
+        hasTauri: true,
+        storageState: StorageState.Ready({
+          storageType: "tauri",
+          rootName: "PWA Islands",
+          subPath: ["foo", "bar"],
+          entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+          otherBackend: SavedBackend.Unsupported(),
+        }),
+      }
+
+      story(
+        update,
+        given({
+          ...tauriReadyModel,
+          maybeActiveIslandUrl: Option.none(),
+          maybeActiveIslandPath: Option.none(),
+        }),
+        message(Message.ClickedReturnArrow()),
+        Command.expectExact(ScheduleReturnArrowClick({ clickId: 1 })),
+        Command.resolve(
+          ScheduleReturnArrowClick,
+          Message.CompletedReturnArrowClickDelay({ clickId: 1 }),
+        ),
+        Command.expectExact(
+          PushUrl({ url: "/foo?pwaislands" }),
+          RefreshEntries({ subPath: ["foo"] }),
+        ),
+        Command.resolveAll(
+          [PushUrl, Message.CompletedPushUrl()],
+          [
+            RefreshEntries,
+            Message.SucceededRefreshEntries({
+              subPath: ["foo"],
               entries: sampleEntries,
             }),
           ],

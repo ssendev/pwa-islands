@@ -3,6 +3,7 @@ import {
   Command,
   change,
   click,
+  doubleClick,
   expect as sceneExpect,
   given,
   scene,
@@ -19,6 +20,7 @@ import {
   type Model,
   PickLocalDirectory,
   PushUrl,
+  RefreshEntries,
   ReplaceUrl,
   SavedBackend,
   StorageState,
@@ -53,6 +55,8 @@ const readyModel: Model = {
   hasDirectoryPicker: true,
   hasOPFS: true,
   hasTauri: false,
+  isWindowsOrLinux: true,
+  isWindows: false,
   origin: "http://localhost:5173",
   storageState: StorageState.Ready({
     storageType: "fsa",
@@ -67,6 +71,8 @@ const readyModel: Model = {
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
   maybeActiveIslandUrl: Option.none(),
+  maybeActiveIslandPath: Option.none(),
+  returnClickId: 0,
 }
 
 describe("PWA Islands Scene Tests", () => {
@@ -293,10 +299,12 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
-  it("renders full-window iframe for pwaislands:// when clicking a file in Tauri mode", () => {
-    const tauriReadyModel: Model = {
+  it("renders full-window iframe for pwaislands:// with top border return button in Windows builds", () => {
+    const tauriWindowsModel: Model = {
       ...readyModel,
       hasTauri: true,
+      isWindowsOrLinux: true,
+      isWindows: true,
       storageState: StorageState.Ready({
         storageType: "tauri",
         rootName: "PWA Islands",
@@ -308,20 +316,60 @@ describe("PWA Islands Scene Tests", () => {
 
     scene(
       { update, view },
-      given(tauriReadyModel),
+      given(tauriWindowsModel),
       sceneExpect(selector("#island-iframe")).toBeAbsent(),
+      sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
       click(text("index.html")),
       Command.expectExact(PushUrl({ url: "/unterordner/index.html" })),
       Command.resolve(PushUrl, Message.CompletedPushUrl()),
       sceneExpect(selector("#island-iframe")).toExist(),
-      sceneExpect(selector("#island-iframe")).toHaveAttr(
-        "src",
-        "pwaislands://localhost/unterordner/index.html",
+      sceneExpect(selector("#island-iframe")).toHaveClass("has-top-border"),
+      sceneExpect(selector("#window-top-border")).toExist(),
+      sceneExpect(selector("#btn-return-pwaislands")).toExist(),
+      sceneExpect(selector("#btn-return-pwaislands")).toContainText("←"),
+      doubleClick(selector("#btn-return-pwaislands")),
+      Command.expectExact(
+        PushUrl({ url: "/unterordner?pwaislands" }),
+        RefreshEntries({ subPath: ["unterordner"] }),
       ),
-      sceneExpect(selector("#island-iframe")).toHaveAttr(
-        "sandbox",
-        "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads",
+      Command.resolve(PushUrl, Message.CompletedPushUrl()),
+      Command.resolve(
+        RefreshEntries,
+        Message.SucceededRefreshEntries({
+          subPath: ["unterordner"],
+          entries: sampleEntries,
+        }),
       ),
+      sceneExpect(selector("#island-iframe")).toBeAbsent(),
+      sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
+    )
+  })
+
+  it("does not render HTML top border return button in Linux/Android builds (Linux has it in native GTK title bar)", () => {
+    const tauriLinuxModel: Model = {
+      ...readyModel,
+      hasTauri: true,
+      isWindowsOrLinux: true,
+      isWindows: false,
+      storageState: StorageState.Ready({
+        storageType: "tauri",
+        rootName: "PWA Islands",
+        subPath: ["unterordner"],
+        entriesState: EntriesState.Loaded({ entries: sampleEntries }),
+        otherBackend: SavedBackend.Unsupported(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(tauriLinuxModel),
+      click(text("index.html")),
+      Command.expectExact(PushUrl({ url: "/unterordner/index.html" })),
+      Command.resolve(PushUrl, Message.CompletedPushUrl()),
+      sceneExpect(selector("#island-iframe")).toExist(),
+      sceneExpect(selector("#island-iframe")).not.toHaveClass("has-top-border"),
+      sceneExpect(selector("#window-top-border")).toBeAbsent(),
+      sceneExpect(selector("#btn-return-pwaislands")).toBeAbsent(),
     )
   })
 

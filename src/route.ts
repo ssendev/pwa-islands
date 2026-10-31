@@ -112,6 +112,32 @@ export const decodeUrlPathnameSegments = (pathname: string): ReadonlyArray<strin
     }),
   )
 
+export interface IslandPathInfo {
+  readonly folderSubPath: ReadonlyArray<string>
+  readonly fileName: string
+}
+
+export const parseIslandPath = (pathname: string): IslandPathInfo => {
+  const segments = decodeUrlPathnameSegments(pathname)
+  if (Array.isReadonlyArrayNonEmpty(segments)) {
+    const last = Array.lastNonEmpty(segments)
+    if (last.includes(".")) {
+      return {
+        folderSubPath: Array.dropRight(segments, 1),
+        fileName: last,
+      }
+    }
+    return {
+      folderSubPath: segments,
+      fileName: "index.html",
+    }
+  }
+  return {
+    folderSubPath: [],
+    fileName: "index.html",
+  }
+}
+
 export const parsePathAndSearchToRoute = (pathname: string, search: string): AppRoute => {
   const segments = decodeUrlPathnameSegments(pathname)
   const searchParams = new URLSearchParams(search.startsWith("?") ? search : `?${search}`)

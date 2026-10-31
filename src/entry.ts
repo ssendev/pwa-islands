@@ -2,7 +2,13 @@ import "./style.css"
 import { Effect } from "effect"
 import * as Runtime from "foldkit/runtime"
 import { registerSW } from "virtual:pwa-register"
-import { supportsDirectoryPicker, supportsOPFS, supportsTauri } from "./files"
+import {
+  isWindows,
+  isWindowsOrLinux,
+  supportsDirectoryPicker,
+  supportsOPFS,
+  supportsTauri,
+} from "./files"
 import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
 
 registerSW({
@@ -42,6 +48,8 @@ Runtime.run(application, {
     hasDirectoryPicker: supportsDirectoryPicker(),
     hasOPFS: supportsOPFS(),
     hasTauri: supportsTauri(),
+    isWindowsOrLinux: isWindowsOrLinux(),
+    isWindows: isWindows(),
     origin: window.location.origin,
   })),
 })

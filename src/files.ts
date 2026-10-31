@@ -51,6 +51,20 @@ export type FileInspection = typeof FileInspection.Type
 export const supportsTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
 
+export const isWindows = (): boolean => {
+  if (typeof navigator === "undefined") return false
+  return /Windows|Win32|Win64/i.test(navigator.userAgent)
+}
+
+export const isLinux = (): boolean => {
+  if (typeof navigator === "undefined") return false
+  const ua = navigator.userAgent
+  const isAndroid = /Android/i.test(ua)
+  return /Linux/i.test(ua) && !isAndroid
+}
+
+export const isWindowsOrLinux = (): boolean => isWindows() || isLinux()
+
 export const supportsDirectoryPicker = (): boolean =>
   typeof window !== "undefined" && typeof window.showDirectoryPicker === "function"
 
@@ -554,6 +568,29 @@ export class TauriStorage {
 }
 
 export type StorageBackend = FileSystemHandleStorage | TauriStorage
+
+export const checkFileExists = async (
+  storage: StorageBackend,
+  subPath: ReadonlyArray<string>,
+  name: string,
+): Promise<boolean> => {
+  if (storage instanceof TauriStorage) {
+    try {
+      const relPath = [...subPath, name].filter(Boolean).join("/")
+      return await invoke<boolean>("tauri_fs_exists", { subPath: relPath })
+    } catch {
+      return false
+    }
+  } else {
+    try {
+      const dirHandle = await storage.getDirectoryHandle(subPath)
+      await dirHandle.getFileHandle(name)
+      return true
+    } catch {
+      return false
+    }
+  }
+}
 
 // RUNTIME BRIDGE
 
