@@ -3338,7 +3338,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
 const ISLAND_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
 
-const viewWindowTopBorder = (isFocused: boolean, h: HtmlBuilder): Html.Html =>
+const viewWindowTopBorder = (title: string, isFocused: boolean, h: HtmlBuilder): Html.Html =>
   h.header(
     [
       h.Id("window-top-border"),
@@ -3356,7 +3356,10 @@ const viewWindowTopBorder = (isFocused: boolean, h: HtmlBuilder): Html.Html =>
           h.OnClick(Message.ClickedReturnArrow()),
           h.OnDoubleClick(Message.DoubleClickedReturnArrow()),
         ],
-        [h.span([h.Class("window-top-border-arrow"), h.AriaHidden(true)], ["←"])],
+        [
+          h.span([h.Class("window-top-border-arrow"), h.AriaHidden(true)], ["←"]),
+          h.span([h.Class("window-top-border-title")], [title]),
+        ],
       ),
     ],
   )
@@ -3364,13 +3367,14 @@ const viewWindowTopBorder = (isFocused: boolean, h: HtmlBuilder): Html.Html =>
 const viewIslandContainer = (
   islandUrl: string,
   showTopBorder: boolean,
+  title: string,
   isFocused: boolean,
   h: HtmlBuilder,
 ): Html.Html =>
   h.div(
     [h.Class("island-container")],
     [
-      showTopBorder ? viewWindowTopBorder(isFocused, h) : h.empty,
+      showTopBorder ? viewWindowTopBorder(title, isFocused, h) : h.empty,
       h.iframe([
         h.Id("island-iframe"),
         h.Class(showTopBorder ? "island-iframe has-top-border" : "island-iframe"),
@@ -3398,21 +3402,25 @@ const viewManagerMain = (model: Model, h: HtmlBuilder): Html.Html =>
     ],
   )
 
-export const view = (model: Model, h: HtmlBuilder): Html.Document => ({
-  title: computeDocumentTitle(model),
-  body: h.div(
-    [h.Id("app")],
-    [
-      Option.match(model.maybeActiveIslandUrl, {
-        onNone: () => viewManagerMain(model, h),
-        onSome: (islandUrl) =>
-          viewIslandContainer(
-            islandUrl,
-            model.hasTauri && model.isWindows,
-            model.isWindowFocused,
-            h,
-          ),
-      }),
-    ],
-  ),
-})
+export const view = (model: Model, h: HtmlBuilder): Html.Document => {
+  const docTitle = computeDocumentTitle(model)
+  return {
+    title: docTitle,
+    body: h.div(
+      [h.Id("app")],
+      [
+        Option.match(model.maybeActiveIslandUrl, {
+          onNone: () => viewManagerMain(model, h),
+          onSome: (islandUrl) =>
+            viewIslandContainer(
+              islandUrl,
+              model.hasTauri && model.isWindows,
+              docTitle,
+              model.isWindowFocused,
+              h,
+            ),
+        }),
+      ],
+    ),
+  }
+}

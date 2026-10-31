@@ -1822,9 +1822,10 @@ code {
   position: fixed;
   top: env(titlebar-area-y, 0px);
   left: env(titlebar-area-x, 0px);
-  height: env(titlebar-area-height, 32px);
-  width: env(titlebar-area-width, calc(100% - 138px));
-  background: transparent;
+  height: max(32px, env(titlebar-area-height, 32px));
+  width: 100%;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -1842,18 +1843,21 @@ code {
 }
 
 .window-top-border-btn {
-  width: 46px;
   height: 100%;
   border: none;
   background: transparent;
-  color: inherit;
-  display: flex;
+  color: var(--text-h);
+  display: inline-flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
   cursor: default;
   transition: background-color 0.1s ease;
   user-select: none;
-  padding: 0;
+  padding: 0 12px 0 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 450px;
 }
 
 .window-top-border-btn:hover {
@@ -1876,6 +1880,15 @@ code {
 .window-top-border-arrow {
   font-size: 14px;
   line-height: 1;
+  flex-shrink: 0;
+}
+
+.window-top-border-title {
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .island-iframe {
@@ -1889,6 +1902,6 @@ code {
 }
 
 .island-iframe.has-top-border {
-  top: env(titlebar-area-height, 32px);
-  height: calc(100dvh - env(titlebar-area-height, 32px));
+  top: max(32px, env(titlebar-area-height, 32px));
+  height: calc(100dvh - max(32px, env(titlebar-area-height, 32px)));
 }
