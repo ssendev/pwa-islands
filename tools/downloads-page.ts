@@ -299,10 +299,13 @@ export function scanAvailableDownloads(
 
   // 4. Android APK (.apk)
   if (isTargetAllowed("apk")) {
-    const apks = findFiles(
+    const allApks = findFiles(
       join(rootDir, "src-tauri", "gen", "android", "app", "build", "outputs", "apk"),
       (f) => f.endsWith(".apk") && !f.includes("androidTest"),
     )
+    // Wenn signierte Release-APKs vorhanden sind, unsignierte ignorieren
+    const hasSigned = allApks.some((f) => !f.endsWith("-unsigned.apk"))
+    const apks = hasSigned ? allApks.filter((f) => !f.endsWith("-unsigned.apk")) : allApks
     for (const src of apks) {
       const stat = statSync(src)
       const apkMeta = readApkMetadata(src)

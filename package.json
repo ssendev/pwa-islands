@@ -12,6 +12,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:downloads": "node scripts/prepare-downloads.mjs",
+    "build:android": "scripts/build-android.sh",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "format": "oxfmt",

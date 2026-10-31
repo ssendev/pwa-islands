@@ -34,3 +34,9 @@ dev-dist
 
 # Kotlin / Gradle
 .kotlin
+
+# Android Keystore & Signing
+*.keystore
+*.jks
+keystore.properties
+key.properties

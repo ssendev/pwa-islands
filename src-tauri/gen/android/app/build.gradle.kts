@@ -14,6 +14,13 @@ val tauriProperties = Properties().apply {
     }
 }
 
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     compileSdk = 37
     namespace = "dev.ssen.pwaislands"
@@ -24,6 +31,19 @@ android {
         targetSdk = 37
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        create("release") {
+            if (keystorePropertiesFile.exists()) {
+                val storeFilePath = keystoreProperties.getProperty("storeFile")
+                if (!storeFilePath.isNullOrBlank()) {
+                    storeFile = rootProject.file(storeFilePath)
+                    storePassword = keystoreProperties.getProperty("storePassword")
+                    keyAlias = keystoreProperties.getProperty("keyAlias")
+                    keyPassword = keystoreProperties.getProperty("keyPassword")
+                }
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -40,6 +60,9 @@ android {
             }
         }
         getByName("release") {
+            if (keystorePropertiesFile.exists() && !keystoreProperties.getProperty("storeFile").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                enable = true
             }
