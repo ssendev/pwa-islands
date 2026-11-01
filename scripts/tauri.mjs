@@ -22,11 +22,41 @@ export function getCommitCount(dir = rootDir) {
   return 1
 }
 
+export function isGitDirty(dir = rootDir) {
+  try {
+    const stdout = execFileSync("git", ["status", "--porcelain"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    if (!stdout) return false
+    const lines = stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(
+        (l) =>
+          l && !l.endsWith("src-tauri/tauri.conf.json") && !l.endsWith(".tauri.conf.json.backup"),
+      )
+    return lines.length > 0
+  } catch {
+    return false
+  }
+}
+
 const commitCount = getCommitCount()
-const version = process.env.APP_VERSION?.trim() || `0.1.${commitCount}`
+const dirty = isGitDirty()
+const rawAppVersion = process.env.APP_VERSION?.trim()
+const displayVersion = rawAppVersion || `0.1.${commitCount}${dirty ? "+" : ""}`
+// Tauri verlangt strikt gültiges SemVer (nach '+' muss ein Bezeichner wie 'dirty' folgen).
+// Ein einfaches '0.1.30+' führt bei tauri-build zu einem Fehler.
+const tauriVersion = rawAppVersion
+  ? rawAppVersion.endsWith("+")
+    ? `${rawAppVersion}dirty`
+    : rawAppVersion
+  : `0.1.${commitCount}${dirty ? "+dirty" : ""}`
 
 const configOverride = {
-  version,
+  version: tauriVersion,
   bundle: {
     android: {
       versionCode: commitCount,
@@ -52,20 +82,22 @@ if (args[0] === "android" || args[0] === "ios") {
   insertIdx = 1
 }
 
-if (insertIdx !== -1) {
-  args.splice(insertIdx, 0, "--config", JSON.stringify(configOverride))
-  console.log(
-    `[tauri] Dynamische Version gesetzt: ${version} (Android versionCode: ${commitCount})`,
-  )
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  if (insertIdx !== -1) {
+    args.splice(insertIdx, 0, "--config", JSON.stringify(configOverride))
+    console.log(
+      `[tauri] Dynamische Version gesetzt: ${displayVersion} (Tauri: ${tauriVersion}, Android versionCode: ${commitCount})`,
+    )
+  }
+
+  const result = spawnSync(process.execPath, [tauriCli, ...args], {
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      APP_VERSION: displayVersion,
+    },
+  })
+
+  if (result.error) throw result.error
+  process.exit(result.status ?? 1)
 }
-
-const result = spawnSync(process.execPath, [tauriCli, ...args], {
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    APP_VERSION: version,
-  },
-})
-
-if (result.error) throw result.error
-process.exit(result.status ?? 1)

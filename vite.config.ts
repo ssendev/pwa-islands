@@ -15,6 +15,27 @@ const root = fileURLToPath(new URL(".", import.meta.url))
 const apiTypesEntry = join(root, "src", "api-types.ts")
 const apiDtsFile = join(root, ".generated", "api.d.ts")
 
+function isGitDirty(): boolean {
+  try {
+    const stdout = execFileSync("git", ["status", "--porcelain"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    if (!stdout) return false
+    const lines = stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(
+        (l) =>
+          l && !l.endsWith("src-tauri/tauri.conf.json") && !l.endsWith(".tauri.conf.json.backup"),
+      )
+    return lines.length > 0
+  } catch {
+    return false
+  }
+}
+
 function getAppVersion(): string {
   if (process.env.APP_VERSION?.trim()) {
     return process.env.APP_VERSION.trim()
@@ -27,7 +48,8 @@ function getAppVersion(): string {
     }).trim()
     const count = parseInt(stdout, 10)
     if (!isNaN(count)) {
-      return `0.1.${count}`
+      const dirty = isGitDirty()
+      return `0.1.${count}${dirty ? "+" : ""}`
     }
   } catch {
     // Fallback

@@ -1,7 +1,11 @@
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { renderDownloadsHtml, scanAvailableDownloads } from "../tools/downloads-page.ts"
+import {
+  renderDownloadsHtml,
+  scanAvailableDownloads,
+  serializeDownloadsManifest,
+} from "../tools/downloads-page.ts"
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..")
 const distDownloadsDir = join(rootDir, "dist", "downloads")
@@ -29,8 +33,8 @@ for (const item of manifest.downloads) {
   }
 }
 
-// 4. Schreibe downloads.json ausschließlich in dist/downloads/
-const manifestJson = JSON.stringify(manifest, null, 2)
+// 4. Schreibe downloads.json ausschließlich in dist/downloads/ (ohne sourcePath)
+const manifestJson = serializeDownloadsManifest(manifest)
 writeFileSync(join(distDownloadsDir, "downloads.json"), manifestJson, "utf8")
 console.log(
   `[prepare-downloads] Generated dist/downloads/downloads.json with ${manifest.downloads.length} downloads`,

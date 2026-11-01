@@ -28,6 +28,17 @@ export interface DownloadsManifest {
   downloads: DownloadItem[]
 }
 
+export function sanitizeDownloadsManifest(manifest: DownloadsManifest): DownloadsManifest {
+  return {
+    ...manifest,
+    downloads: manifest.downloads.map(({ sourcePath: _, ...item }) => item),
+  }
+}
+
+export function serializeDownloadsManifest(manifest: DownloadsManifest): string {
+  return JSON.stringify(sanitizeDownloadsManifest(manifest), null, 2)
+}
+
 export const formatSize = (bytes: number): string => {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -38,6 +49,9 @@ export const computeSha256 = (filePath: string): string => {
   const buffer = readFileSync(filePath)
   return createHash("sha256").update(buffer).digest("hex")
 }
+
+export const normalizeDownloadFilename = (filename: string): string =>
+  filename.replace(/^PWA[ _-]?Islands/i, "pwa-islands")
 
 const findFiles = (dir: string, predicate: (name: string) => boolean): string[] => {
   if (!existsSync(dir)) return []
@@ -54,6 +68,27 @@ const findFiles = (dir: string, predicate: (name: string) => boolean): string[] 
   return results
 }
 
+export function isGitDirty(rootDir: string): boolean {
+  try {
+    const stdout = execFileSync("git", ["status", "--porcelain"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim()
+    if (!stdout) return false
+    const lines = stdout
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(
+        (l) =>
+          l && !l.endsWith("src-tauri/tauri.conf.json") && !l.endsWith(".tauri.conf.json.backup"),
+      )
+    return lines.length > 0
+  } catch {
+    return false
+  }
+}
+
 export function readTauriVersion(rootDir: string): string {
   if (process.env.APP_VERSION?.trim()) {
     return process.env.APP_VERSION.trim()
@@ -66,7 +101,8 @@ export function readTauriVersion(rootDir: string): string {
     }).trim()
     const count = parseInt(stdout, 10)
     if (!isNaN(count)) {
-      return `0.1.${count}`
+      const dirty = isGitDirty(rootDir)
+      return `0.1.${count}${dirty ? "+" : ""}`
     }
   } catch {
     // Fallback below
@@ -328,7 +364,7 @@ export function scanAvailableDownloads(
     const exes = nsisDirs.flatMap((dir) => findFiles(dir, (f) => f.endsWith(".exe")))
     for (const src of exes) {
       const stat = statSync(src)
-      const fname = basename(src)
+      const fname = normalizeDownloadFilename(basename(src))
       const arch =
         fname.toLowerCase().includes("arm64") || fname.toLowerCase().includes("aarch64")
           ? "arm64"
@@ -364,12 +400,13 @@ export function scanAvailableDownloads(
     )
     for (const src of appImages) {
       const stat = statSync(src)
+      const fname = normalizeDownloadFilename(basename(src))
       downloads.push({
         id: "linux-appimage",
         platform: "Linux",
         title: "Linux AppImage",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
+        filename: fname,
+        url: `/downloads/${fname}`,
         size: formatSize(stat.size),
         bytes: stat.size,
         sha256: computeSha256(src),
@@ -377,7 +414,7 @@ export function scanAvailableDownloads(
         format: "AppImage",
         description:
           "Universelles Linux-Paket, das auf modernen Distributionen direkt ohne Installation ausgeführt werden kann.",
-        command: `chmod +x ${basename(src)} && ./${basename(src)}`,
+        command: `chmod +x ${fname} && ./${fname}`,
         hint: "Datei im Terminal ausführbar machen und ausführen, oder in den Dateieigenschaften 'Ausführen als Programm' aktivieren.",
         sourcePath: src,
       })
@@ -391,12 +428,13 @@ export function scanAvailableDownloads(
     )
     for (const src of debs) {
       const stat = statSync(src)
+      const fname = normalizeDownloadFilename(basename(src))
       downloads.push({
         id: "linux-deb",
         platform: "Linux",
         title: "Debian / Ubuntu (.deb)",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
+        filename: fname,
+        url: `/downloads/${fname}`,
         size: formatSize(stat.size),
         bytes: stat.size,
         sha256: computeSha256(src),
@@ -404,7 +442,7 @@ export function scanAvailableDownloads(
         format: "deb",
         description:
           "Installationspaket für Debian, Ubuntu, Linux Mint, Pop!_OS und verwandte Distributionen.",
-        command: `sudo dpkg -i ${basename(src)}`,
+        command: `sudo dpkg -i ${fname}`,
         hint: "Per Terminal mit dpkg oder durch Doppelklick im Software-Center installieren.",
         sourcePath: src,
       })
@@ -418,19 +456,20 @@ export function scanAvailableDownloads(
     )
     for (const src of rpms) {
       const stat = statSync(src)
+      const fname = normalizeDownloadFilename(basename(src))
       downloads.push({
         id: "linux-rpm",
         platform: "Linux",
         title: "Fedora / openSUSE (.rpm)",
-        filename: basename(src),
-        url: `/downloads/${basename(src)}`,
+        filename: fname,
+        url: `/downloads/${fname}`,
         size: formatSize(stat.size),
         bytes: stat.size,
         sha256: computeSha256(src),
         arch: "x86_64",
         format: "rpm",
         description: "RPM-Paket für Fedora, RHEL, openSUSE, CentOS und kompatible Systeme.",
-        command: `sudo dnf install ./${basename(src)}`,
+        command: `sudo dnf install ./${fname}`,
         hint: "Per Terminal mit dnf oder über das Paketverwaltungsprogramm Ihrer Distribution installieren.",
         sourcePath: src,
       })
@@ -463,7 +502,7 @@ export function scanAvailableDownloads(
     const dmgs = dmgDirs.flatMap((dir) => findFiles(dir, (f) => f.endsWith(".dmg")))
     for (const src of dmgs) {
       const stat = statSync(src)
-      const fname = basename(src)
+      const fname = normalizeDownloadFilename(basename(src))
       downloads.push({
         id: "macos-dmg",
         platform: "macOS",
@@ -485,6 +524,8 @@ export function scanAvailableDownloads(
 
   const filteredDownloads = filterHighestVersionPerKind(downloads)
 
+  const isDirty = isGitDirty(rootDir) || version.endsWith("+") || version.includes("+dirty")
+
   let manifestVersion = version
   let parsedManifestVersion = parseVersionString(manifestVersion)
 
@@ -496,6 +537,10 @@ export function scanAvailableDownloads(
         manifestVersion = parsed.raw
       }
     }
+  }
+
+  if (isDirty && !manifestVersion.endsWith("+")) {
+    manifestVersion = `${manifestVersion}+`
   }
 
   return {
@@ -1108,7 +1153,7 @@ export function downloadsPlugin(): Plugin {
         if (url === "/downloads/downloads.json") {
           const manifest = scanAvailableDownloads(root)
           res.setHeader("Content-Type", "application/json; charset=utf-8")
-          res.end(JSON.stringify(manifest, null, 2))
+          res.end(serializeDownloadsManifest(manifest))
           return
         }
         if (url.startsWith("/downloads/")) {

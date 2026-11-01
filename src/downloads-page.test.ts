@@ -2,13 +2,66 @@ import { describe, expect, it } from "vitest"
 import {
   compareParsedVersions,
   filterHighestVersionPerKind,
+  normalizeDownloadFilename,
   parseVersionString,
   renderDownloadsHtml,
+  sanitizeDownloadsManifest,
   scanAvailableDownloads,
+  serializeDownloadsManifest,
   type DownloadItem,
+  type DownloadsManifest,
 } from "../tools/downloads-page"
 
 describe("downloads-page versioning", () => {
+  it("entfernt sourcePath aus dem serialisierten Manifest", () => {
+    const mockManifest: DownloadsManifest = {
+      version: "0.1.153+",
+      updatedAt: "2026-11-01T00:00:00.000Z",
+      downloads: [
+        {
+          id: "linux-deb",
+          platform: "Linux",
+          title: "Debian (.deb)",
+          filename: "pwa-islands_0.1.153_amd64.deb",
+          url: "/downloads/pwa-islands_0.1.153_amd64.deb",
+          size: "3.5 MB",
+          bytes: 3500000,
+          sha256: "abc",
+          arch: "amd64",
+          format: "deb",
+          description: "Debian",
+          sourcePath:
+            "/home/user/src-tauri/target/release/bundle/deb/pwa-islands_0.1.153_amd64.deb",
+        },
+      ],
+    }
+
+    const sanitized = sanitizeDownloadsManifest(mockManifest)
+    expect(sanitized.downloads[0].sourcePath).toBeUndefined()
+    expect("sourcePath" in sanitized.downloads[0]).toBe(false)
+
+    const serialized = serializeDownloadsManifest(mockManifest)
+    expect(serialized).not.toContain("sourcePath")
+    expect(serialized).not.toContain("/home/user/src-tauri")
+
+    const html = renderDownloadsHtml(mockManifest)
+    expect(html).toContain('<span class="hero-badge">Version 0.1.153+</span>')
+  })
+
+  it("normalisiert Paketnamen auf pwa-islands", () => {
+    expect(normalizeDownloadFilename("PWA Islands_0.1.131_x64-setup.exe")).toBe(
+      "pwa-islands_0.1.131_x64-setup.exe",
+    )
+    expect(normalizeDownloadFilename("PWA Islands_0.1.125_amd64.deb")).toBe(
+      "pwa-islands_0.1.125_amd64.deb",
+    )
+    expect(normalizeDownloadFilename("PWA Islands_0.1.125_amd64.AppImage")).toBe(
+      "pwa-islands_0.1.125_amd64.AppImage",
+    )
+    expect(normalizeDownloadFilename("PWA Islands-0.1.125-1.x86_64.rpm")).toBe(
+      "pwa-islands-0.1.125-1.x86_64.rpm",
+    )
+  })
   it("extrahiert Versionsnummern korrekt aus Paketdateinamen", () => {
     const vDebOld = parseVersionString("pwa-islands_0.1.0_amd64.deb")
     expect(vDebOld).toEqual({
@@ -39,6 +92,24 @@ describe("downloads-page versioning", () => {
 
     const vWin = parseVersionString("PWA Islands_0.1.131_x64-setup.exe")
     expect(vWin).toEqual({
+      raw: "0.1.131",
+      major: 0,
+      minor: 1,
+      patch: 131,
+      build: 0,
+    })
+
+    const vDirty = parseVersionString("PWA Islands_0.1.131+dirty_amd64.deb")
+    expect(vDirty).toEqual({
+      raw: "0.1.131",
+      major: 0,
+      minor: 1,
+      patch: 131,
+      build: 0,
+    })
+
+    const vPlus = parseVersionString("PWA Islands_0.1.131+_amd64.deb")
+    expect(vPlus).toEqual({
       raw: "0.1.131",
       major: 0,
       minor: 1,
@@ -142,8 +213,8 @@ describe("downloads-page versioning", () => {
         id: "windows-exe",
         platform: "Windows",
         title: "Windows Installer (.exe)",
-        filename: "PWA Islands_0.1.0_x64-setup.exe",
-        url: "/downloads/PWA%20Islands_0.1.0_x64-setup.exe",
+        filename: "pwa-islands_0.1.0_x64-setup.exe",
+        url: "/downloads/pwa-islands_0.1.0_x64-setup.exe",
         size: "2.3 MB",
         bytes: 2300000,
         sha256: "hash7",
@@ -155,8 +226,8 @@ describe("downloads-page versioning", () => {
         id: "windows-exe",
         platform: "Windows",
         title: "Windows Installer (.exe)",
-        filename: "PWA Islands_0.1.131_x64-setup.exe",
-        url: "/downloads/PWA%20Islands_0.1.131_x64-setup.exe",
+        filename: "pwa-islands_0.1.131_x64-setup.exe",
+        url: "/downloads/pwa-islands_0.1.131_x64-setup.exe",
         size: "2.4 MB",
         bytes: 2400000,
         sha256: "hash8",
@@ -171,7 +242,7 @@ describe("downloads-page versioning", () => {
     expect(filtered).toHaveLength(5)
     expect(filtered.map((item) => item.filename)).toEqual([
       "pwa-islands_0.1.125_universal.apk",
-      "PWA Islands_0.1.131_x64-setup.exe",
+      "pwa-islands_0.1.131_x64-setup.exe",
       "pwa-islands_0.1.125_amd64.AppImage",
       "pwa-islands_0.1.125_amd64.deb",
       "pwa-islands-0.1.125-1.x86_64.rpm",
