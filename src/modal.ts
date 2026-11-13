@@ -79,6 +79,7 @@ export const isOpen = (state: ModalState): boolean =>
 export const close = (): ModalState => ModalState.Closed()
 
 const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
+  quickstart: "Quickstart: Mit KI bearbeiten",
   api: "PWA Islands bauen",
   fs: "Speicher: App (Tauri), FS API und OPFS",
 }
@@ -159,7 +160,7 @@ export const openHelp = (
   const topicToUse = Option.match(maybeTopic, {
     onNone: () =>
       Option.match(maybeExistingHelp, {
-        onNone: () => Option.some<HelpTopic>("api"),
+        onNone: () => Option.some<HelpTopic>("quickstart"),
         onSome: (existing) => existing.maybeOpenTopic,
       }),
     onSome: (topic) => Option.some(topic),

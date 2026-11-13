@@ -2270,7 +2270,7 @@ const viewEditorModal = (
                             [
                               h.span(
                                 [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                [viewIcon("puzzle", h)],
+                                [viewIcon("ai", h)],
                               ),
                               h.span([h.Class("icon-label-btn-text")], ["LLM"]),
                             ],

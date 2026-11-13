@@ -1,5 +1,6 @@
 import type * as Html from "foldkit/html"
 
+import iconAi from "./emoji/🤖.svg"
 import iconArchive from "./emoji/🗃️.svg"
 import iconAudio from "./emoji/🎵.svg"
 import iconCheck from "./emoji/✅.svg"
@@ -26,6 +27,7 @@ import iconPdf from "./emoji/📕.svg"
 import iconPlug from "./emoji/🔌.svg"
 import iconPlus from "./emoji/➕.svg"
 import iconPuzzle from "./emoji/🧩.svg"
+import iconQuickstart from "./emoji/⚡.svg"
 import iconSave from "./emoji/💾.svg"
 import iconScroll from "./emoji/📜.svg"
 import iconSettings from "./emoji/⚙️.svg"
@@ -70,6 +72,8 @@ export const ICONS = {
   puzzle: iconPuzzle,
   check: iconCheck,
   cross: iconCross,
+  ai: iconAi,
+  quickstart: iconQuickstart,
 } as const
 
 export type IconId = keyof typeof ICONS

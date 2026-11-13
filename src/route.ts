@@ -4,7 +4,7 @@ import type { Url } from "foldkit/url"
 
 // SCHEMAS & TYPES
 
-export const HelpTopic = Schema.Literals(["api", "fs"])
+export const HelpTopic = Schema.Literals(["quickstart", "api", "fs"])
 export type HelpTopic = typeof HelpTopic.Type
 
 export const NewTarget = Schema.Literals(["file", "folder"])
@@ -74,6 +74,9 @@ const parseHelpValue = (
   const normalized = raw.trim().toLowerCase()
   if (normalized === "help" || normalized === "h" || normalized === "hilfe") {
     return Option.some({ maybeTopic: Option.none() })
+  }
+  if (normalized === "help-quickstart" || normalized === "hilfe-quickstart") {
+    return Option.some({ maybeTopic: Option.some("quickstart" as const) })
   }
   if (normalized === "help-api" || normalized === "hilfe-api") {
     return Option.some({ maybeTopic: Option.some("api" as const) })

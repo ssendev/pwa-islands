@@ -210,6 +210,7 @@ export type ViewInputs = {
 
 export const view = Submodel.defineView<Model, Message, ViewInputs>(
   (model, context, h): Html.Html => {
+    const isQuickstartOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "quickstart")
     const isApiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "api")
     const isFsOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "fs")
     return h.div(
@@ -251,6 +252,130 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 h.div(
                   [h.Class("help-accordion")],
                   [
+                    h.details(
+                      [
+                        h.Class("help-topic"),
+                        h.Name("help-topic"),
+                        h.DataAttribute("topic", "quickstart"),
+                        h.Open(isQuickstartOpen),
+                        h.OnToggle((isOpen) =>
+                          Message.ToggledTopic({ topic: "quickstart", isOpen }),
+                        ),
+                      ],
+                      [
+                        h.summary(
+                          [h.Class("help-topic-summary")],
+                          [
+                            h.span(
+                              [h.Class("help-topic-marker"), h.AriaHidden(true)],
+                              [viewIcon("quickstart", h)],
+                            ),
+                            h.span(
+                              [h.Class("help-topic-title")],
+                              ["Quickstart: Mit KI bearbeiten"],
+                            ),
+                          ],
+                        ),
+                        h.div(
+                          [h.Class("help-topic-body")],
+                          [
+                            h.p(
+                              [],
+                              [
+                                "Tipp: Klicke in der Werkzeugleiste auf ",
+                                h.strong([], ["Neue Datei erstellen (+)"]),
+                                " und wähle unter ",
+                                h.strong([], ["Vorlage"]),
+                                " die fertige ",
+                                h.strong([], ["PWA Island (mit /api.js)"]),
+                                "-Vorlage als Startpunkt.",
+                              ],
+                            ),
+                            h.p(
+                              [],
+                              [
+                                "Im Datei-Editor kannst du Seiten direkt zusammen mit einem LLM (z. B. ChatGPT, Claude oder Gemini) über die Zwischenablage bearbeiten:",
+                              ],
+                            ),
+                            h.ol(
+                              [],
+                              [
+                                h.li(
+                                  [],
+                                  [
+                                    h.strong([], ["LLM-Modus öffnen: "]),
+                                    "Klicke im Editor unten auf ",
+                                    h.strong([], ["LLM"]),
+                                    ", um die LLM-Leiste einzublenden.",
+                                  ],
+                                ),
+                                h.li(
+                                  [],
+                                  [
+                                    h.strong([], ["Datei für das LLM kopieren: "]),
+                                    "Wähle ",
+                                    h.strong([], ["Mit Anleitung"]),
+                                    " (kopiert Kurzanleitung, ",
+                                    h.code([], ["/api.d.ts"]),
+                                    " und die Datei im ",
+                                    h.code([], ["ZEILE:HASH|INHALT"]),
+                                    "-Format) oder ",
+                                    h.strong([], ["Datei"]),
+                                    " (nur die Datei mit Hashes). Über ",
+                                    h.strong([], ["/app.d.ts"]),
+                                    " kopierst du bei Bedarf nur die API-Typen.",
+                                  ],
+                                ),
+                                h.li(
+                                  [],
+                                  [
+                                    h.strong([], ["An das LLM senden: "]),
+                                    "Füge das Kopierte zusammen mit deinen Änderungswünschen in das LLM ein.",
+                                  ],
+                                ),
+                                h.li(
+                                  [],
+                                  [
+                                    h.strong([], ["KI-Antwort einfügen: "]),
+                                    "Kopiere die Antwort des LLMs (",
+                                    h.code([], ["REPLACE"]),
+                                    ", ",
+                                    h.code([], ["INSERT_AFTER"]),
+                                    ", ",
+                                    h.code([], ["INSERT_BEFORE"]),
+                                    ", ",
+                                    h.code([], ["DELETE"]),
+                                    " … ",
+                                    h.code([], ["END"]),
+                                    ") und klicke auf ",
+                                    h.strong([], ["Einfügen"]),
+                                    ". Bei Erfolg werden nur die geänderten Zeilen mit den neuen Hashes wieder in die Zwischenablage kopiert. Bei Fehlern landet die Fehlermeldung direkt in der Zwischenablage.",
+                                  ],
+                                ),
+                                h.li(
+                                  [],
+                                  [
+                                    h.strong([], ["Speichern & testen: "]),
+                                    "Mit ",
+                                    h.strong([], ["Anzeigen"]),
+                                    " (rechts neben ",
+                                    h.strong([], ["Speichern"]),
+                                    ") wird die Datei gespeichert und in einem neuen Tab geöffnet, während der Editor für weitere Edits offen bleibt.",
+                                  ],
+                                ),
+                                h.li(
+                                  [],
+                                  [
+                                    h.strong([], ["Weiterarbeiten: "]),
+                                    "Füge die in Schritt 4 kopierten Zeilen (oder Fehlermeldungen) zusammen mit deinen nächsten Änderungswünschen wieder in das LLM ein.",
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                     h.details(
                       [
                         h.Class("help-topic"),
