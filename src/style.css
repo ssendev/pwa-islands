@@ -978,6 +978,22 @@ code {
   box-sizing: border-box;
 }
 
+.modal-llm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--social-bg);
+}
+
+.modal-llm-bar .btn {
+  height: 36px;
+  box-sizing: border-box;
+}
+
 /*
  * Buttons mit Icon + Beschriftung. Auf schmalen Bildschirmen bleibt nur das
  * Icon uebrig; der zugaengliche Name kommt dann aus aria-label/title.
@@ -1058,6 +1074,17 @@ code {
   }
 
   .save-modal-btn .icon-label-btn-text {
+    display: inline;
+    white-space: nowrap;
+  }
+
+  .modal-llm-bar .icon-label-btn {
+    width: auto;
+    height: 36px;
+    padding: 0 10px;
+  }
+
+  .modal-llm-bar .icon-label-btn-text {
     display: inline;
     white-space: nowrap;
   }

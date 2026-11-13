@@ -1091,6 +1091,8 @@ describe("PWA Islands Story Tests", () => {
             fileMode: EditorFileMode.Text({ content: "<p>Hello</p>" }),
             maybeValidationError: Option.none(),
             maybeAlertBanner: Option.none(),
+            maybePasteError: Option.none(),
+            isLlmBarOpen: false,
           }),
         }),
       }
@@ -1127,7 +1129,7 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
-    it("handles copying /api.d.ts in the Editor modal and keeps the alert inside the modal", () => {
+    it("handles copying LLM context in the Editor modal and keeps the alert inside the modal", () => {
       const modelWithEditor: Model = {
         ...readyModel,
         modalState: ModalState.Editor({
@@ -1138,12 +1140,11 @@ describe("PWA Islands Story Tests", () => {
       story(
         update,
         given(modelWithEditor),
-        message(editorMsg(Editor.Message.ClickedCopyDts())),
-        Command.expectExact(Editor.CopyApiDtsToClipboard()),
-        Command.resolve(
-          Editor.CopyApiDtsToClipboard,
-          Editor.Message.SucceededCopyApiDtsToClipboard(),
+        message(editorMsg(Editor.Message.ClickedCopyLlmContext())),
+        Command.expectExact(
+          Editor.CopyLlmContextToClipboard({ fileName: "Neu.html", content: "" }),
         ),
+        Command.resolve(Editor.CopyLlmContextToClipboard, Editor.Message.SucceededCopyLlmContext()),
         model((m) => {
           expect(m.maybeAlertBanner).toEqual(Option.none())
           expect(
@@ -1158,7 +1159,7 @@ describe("PWA Islands Story Tests", () => {
             ),
           ).toEqual(
             Option.some({
-              message: "/api.d.ts in die Zwischenablage kopiert",
+              message: "Datei und /api.d.ts für KI in die Zwischenablage kopiert",
               variant: "info",
             }),
           )

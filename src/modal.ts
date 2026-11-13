@@ -271,6 +271,8 @@ export const resolveModalForRoute = async (
                   fileMode,
                   maybeValidationError: Option.none(),
                   maybeAlertBanner: Option.none(),
+                  maybePasteError: Option.none(),
+                  isLlmBarOpen: false,
                 }),
               }),
             ),
@@ -520,13 +522,15 @@ export const update = (
                 ? OutMessage.ReplaceUrl({ url: buildFolderUrl(context.subPath) })
                 : OutMessage.None(),
             }),
-            EntriesUpdated: ({ entries }) => ({
-              model: ModalState.Closed(),
+            EntriesUpdated: ({ entries, closeModal }) => ({
+              model: closeModal
+                ? ModalState.Closed()
+                : ModalState.Editor({ editor: editorResult.model }),
               commands: mappedCommands,
               outMessage: OutMessage.EntriesUpdated({
                 entries,
                 maybeAlertBanner: Option.none(),
-                replaceUrl: true,
+                replaceUrl: closeModal,
               }),
             }),
             ShowAlert: ({ banner, closeModal, replaceUrl }) => ({
@@ -600,6 +604,8 @@ export const update = (
           fileMode,
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          isLlmBarOpen: false,
         }),
       }),
       commands: [FocusModalNameInput()],

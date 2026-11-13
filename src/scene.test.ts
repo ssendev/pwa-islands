@@ -12,6 +12,7 @@ import {
   type,
 } from "foldkit/scene"
 import { describe, it } from "vitest"
+import { hashLine } from "./hashline"
 import {
   ActivateOpfsBackend,
   EntriesState,
@@ -129,6 +130,8 @@ describe("PWA Islands Scene Tests", () => {
           }),
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          isLlmBarOpen: false,
         }),
       }),
     }
@@ -138,6 +141,8 @@ describe("PWA Islands Scene Tests", () => {
       given(binaryModel),
       sceneExpect(selector("#modal-file-preview")).toExist(),
       sceneExpect(selector("#modal-base64-editor")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-toggle-llm")).toBeAbsent(),
+      sceneExpect(selector("#modal-llm-bar")).toBeAbsent(),
       change(selector("#modal-use-base64"), "true"),
       Command.expectExact(Editor.LoadBase64({ entryName: "bild.png", subPath: [] })),
       Command.resolve(
@@ -174,7 +179,7 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
-  it("copies /app.d.ts from editor modal", () => {
+  it("toggles LLM toolbar and copies /app.d.ts, full LLM context, or hashes only", () => {
     const modelWithEditor: Model = {
       ...readyModel,
       modalState: ModalState.Editor({
@@ -185,8 +190,16 @@ describe("PWA Islands Scene Tests", () => {
     scene(
       { update, view },
       given(modelWithEditor),
-      sceneExpect(selector("#modal-btn-copy-dts")).toExist(),
+      sceneExpect(selector("#modal-btn-toggle-llm")).toExist(),
+      sceneExpect(selector("#modal-btn-toggle-llm")).toContainText("LLM"),
+      sceneExpect(selector("#modal-llm-bar")).toBeAbsent(),
+      click(selector("#modal-btn-toggle-llm")),
+      sceneExpect(selector("#modal-llm-bar")).toExist(),
       sceneExpect(selector("#modal-btn-copy-dts")).toContainText("/app.d.ts"),
+      sceneExpect(selector("#modal-btn-copy-llm")).toContainText("Mit Anleitung"),
+      sceneExpect(selector("#modal-btn-copy-hashes")).toContainText("Datei"),
+      sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Einfügen"),
+      sceneExpect(selector("#modal-btn-save-and-open")).toContainText("Anzeigen"),
       click(selector("#modal-btn-copy-dts")),
       Command.expectExact(Editor.CopyApiDtsToClipboard()),
       Command.resolve(
@@ -194,12 +207,157 @@ describe("PWA Islands Scene Tests", () => {
         Editor.Message.SucceededCopyApiDtsToClipboard(),
       ),
       sceneExpect(text("/api.d.ts in die Zwischenablage kopiert")).toExist(),
+      click(selector("#modal-btn-copy-hashes")),
+      Command.expectExact(Editor.CopyFileHashesToClipboard({ fileName: "Neu.html", content: "" })),
+      Command.resolve(Editor.CopyFileHashesToClipboard, Editor.Message.SucceededCopyFileHashes()),
+      sceneExpect(text("Datei mit Hashes in die Zwischenablage kopiert")).toExist(),
+      click(selector("#modal-btn-copy-llm")),
+      Command.expectExact(Editor.CopyLlmContextToClipboard({ fileName: "Neu.html", content: "" })),
+      Command.resolve(Editor.CopyLlmContextToClipboard, Editor.Message.SucceededCopyLlmContext()),
+      sceneExpect(text("Datei und /api.d.ts für KI in die Zwischenablage kopiert")).toExist(),
       sceneExpect(selector(".modal-overlay #modal-alert-area")).toExist(),
       sceneExpect(selector("#files-alert-area .alert")).toBeAbsent(),
     )
   })
 
-  it("does not show /app.d.ts copy button in folder modal", () => {
+  it("pastes valid LLM edits and updates editor content", () => {
+    const original = "<p>Alt</p>"
+    const lineHash = hashLine(original)
+    const modelWithEditFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: original }),
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          isLlmBarOpen: true,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithEditFile),
+      click(selector("#modal-btn-paste-llm")),
+      Command.expectExact(Editor.ReadClipboardForLlmEdits()),
+      Command.resolve(
+        Editor.ReadClipboardForLlmEdits,
+        Editor.Message.SucceededReadClipboardForLlmEdits({
+          text: `\`\`\`hashline\nREPLACE 1:${lineHash}\n<p>Neu</p>\nEND\n\`\`\``,
+        }),
+      ),
+      Command.expectExact(
+        Editor.CopyUpdatedHashesToClipboard({
+          fileName: "index.html",
+          changedLines: `1:${hashLine("<p>Neu</p>")}|<p>Neu</p>`,
+        }),
+      ),
+      Command.resolve(
+        Editor.CopyUpdatedHashesToClipboard,
+        Editor.Message.SucceededCopyUpdatedHashes(),
+      ),
+      sceneExpect(
+        text("1 Bearbeitung(en) angewendet – neue Hashes in die Zwischenablage kopiert"),
+      ).toExist(),
+      sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Einfügen"),
+    )
+  })
+
+  it("shows error on paste button and copies error to clipboard when LLM edits fail", () => {
+    const modelWithEditFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Alt</p>" }),
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          isLlmBarOpen: true,
+        }),
+      }),
+    }
+    const expectedError =
+      "Zeile 1: Hash stimmt nicht überein (erwartet " + hashLine("<p>Alt</p>") + ", angegeben 000)."
+
+    scene(
+      { update, view },
+      given(modelWithEditFile),
+      click(selector("#modal-btn-paste-llm")),
+      Command.expectExact(Editor.ReadClipboardForLlmEdits()),
+      Command.resolve(
+        Editor.ReadClipboardForLlmEdits,
+        Editor.Message.SucceededReadClipboardForLlmEdits({
+          text: "REPLACE 1:000\n<p>Neu</p>\nEND",
+        }),
+      ),
+      Command.expectExact(Editor.CopyPasteErrorToClipboard({ errorText: expectedError })),
+      Command.resolve(
+        Editor.CopyPasteErrorToClipboard,
+        Editor.Message.CompletedCopyPasteErrorToClipboard(),
+      ),
+      sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Fehler"),
+      sceneExpect(selector("#modal-btn-paste-llm.btn-danger")).toExist(),
+      sceneExpect(text(expectedError)).toExist(),
+    )
+  })
+
+  it("hides delete button in LLM mode and saves + opens in new tab on Anzeigen click", () => {
+    const editModel = Editor.Model.EditFile({
+      originalName: "index.html",
+      name: "index.html",
+      fileMode: EditorFileMode.Text({ content: "<p>Test</p>" }),
+      maybeValidationError: Option.none(),
+      maybeAlertBanner: Option.none(),
+      maybePasteError: Option.none(),
+      isLlmBarOpen: false,
+    })
+    const modelWithEditFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: editModel,
+      }),
+    }
+
+    const expectedOpenEditModel = Editor.Model.EditFile({
+      originalName: "index.html",
+      name: "index.html",
+      fileMode: EditorFileMode.Text({ content: "<p>Test</p>" }),
+      maybeValidationError: Option.none(),
+      maybeAlertBanner: Option.none(),
+      maybePasteError: Option.none(),
+      isLlmBarOpen: true,
+    })
+
+    scene(
+      { update, view },
+      given(modelWithEditFile),
+      sceneExpect(selector("#modal-btn-delete")).toExist(),
+      click(selector("#modal-btn-toggle-llm")),
+      sceneExpect(selector("#modal-btn-delete")).toBeAbsent(),
+      sceneExpect(selector(".modal-footer-right #modal-btn-save-and-open")).toExist(),
+      click(selector("#modal-btn-save-and-open")),
+      Command.expectExact(Editor.SaveAndOpenChanges({ model: expectedOpenEditModel, subPath: [] })),
+      Command.resolve(
+        Editor.SaveAndOpenChanges,
+        Editor.Message.SucceededSaveAndOpen({
+          entries: [],
+          savedFileName: "index.html",
+          url: "/index.html",
+        }),
+      ),
+      Command.expectExact(Editor.OpenUrlInNewTab({ url: "/index.html" })),
+      Command.resolve(Editor.OpenUrlInNewTab, Editor.Message.CompletedOpenInNewTab()),
+      sceneExpect(selector(".modal-overlay")).toExist(),
+      sceneExpect(text("Gespeichert und in neuem Tab geöffnet")).toExist(),
+    )
+  })
+
+  it("does not show LLM button in folder modal", () => {
     const modelWithFolderModal: Model = {
       ...readyModel,
       modalState: ModalState.Editor({
@@ -214,7 +372,8 @@ describe("PWA Islands Scene Tests", () => {
     scene(
       { update, view },
       given(modelWithFolderModal),
-      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-toggle-llm")).toBeAbsent(),
+      sceneExpect(selector("#modal-llm-bar")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-cancel")).toExist(),
     )
   })
@@ -229,6 +388,8 @@ describe("PWA Islands Scene Tests", () => {
           fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          isLlmBarOpen: false,
         }),
       }),
     }

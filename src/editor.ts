@@ -17,7 +17,15 @@ import {
   requireActiveStorage,
   revokeActivePreviewUrl,
 } from "./files"
+import {
+  applyHashlineEdits,
+  formatFencedHashlineFile,
+  formatLlmContext,
+  formatUpdatedHashlines,
+  HashlineApplyResult,
+} from "./hashline"
 import { viewIcon } from "./icons"
+import { encodeSubPath } from "./route"
 import {
   deleteUserTemplate,
   getStoredUserTemplates,
@@ -64,6 +72,8 @@ export const Model = defineTaggedUnion({
     newTemplateLabel: Schema.String,
     maybeValidationError: Schema.Option(Schema.String),
     maybeAlertBanner: Schema.Option(AlertBanner),
+    maybePasteError: Schema.Option(Schema.String),
+    isLlmBarOpen: Schema.Boolean,
   },
   CreateFolder: {
     name: Schema.String,
@@ -82,6 +92,8 @@ export const Model = defineTaggedUnion({
     fileMode: EditorFileMode,
     maybeValidationError: Schema.Option(Schema.String),
     maybeAlertBanner: Schema.Option(AlertBanner),
+    maybePasteError: Schema.Option(Schema.String),
+    isLlmBarOpen: Schema.Boolean,
   },
   ConfirmDelete: {
     entryName: Schema.String,
@@ -113,6 +125,8 @@ export const makeCreateFile = (
   newTemplateLabel: "",
   maybeValidationError: Option.none(),
   maybeAlertBanner: Option.none(),
+  maybePasteError: Option.none(),
+  isLlmBarOpen: false,
 })
 
 export const setAlertBanner = (model: Model, maybeAlertBanner: Option.Option<AlertBanner>): Model =>
@@ -133,6 +147,70 @@ export const getAlertBanner = (model: Model): Option.Option<AlertBanner> =>
     EditFile: (state) => state.maybeAlertBanner,
     ConfirmDelete: (state) => state.maybeAlertBanner,
     ConfirmOverwrite: (state) => state.maybeAlertBanner,
+  })
+
+const getTextFileContext = (
+  model: Model,
+): Option.Option<{ readonly fileName: string; readonly content: string }> =>
+  Model.match(model, {
+    CreateFile: (state) => Option.some({ fileName: state.name, content: state.content }),
+    EditFile: (state) =>
+      EditorFileMode.match(state.fileMode, {
+        Text: ({ content }) => Option.some({ fileName: state.name, content }),
+        Binary: () => Option.none(),
+      }),
+    CreateFolder: () => Option.none(),
+    EditFolder: () => Option.none(),
+    ConfirmDelete: () => Option.none(),
+    ConfirmOverwrite: () => Option.none(),
+  })
+
+const toggleLlmBar = (model: Model): Model =>
+  Model.match(model, {
+    CreateFile: (state) => modifyFields(state, { isLlmBarOpen: (open) => !open }),
+    EditFile: (state) => modifyFields(state, { isLlmBarOpen: (open) => !open }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+const setPasteError = (model: Model, maybePasteError: Option.Option<string>): Model =>
+  Model.match(model, {
+    CreateFile: (state) => modifyFields(state, { maybePasteError: () => maybePasteError }),
+    EditFile: (state) => modifyFields(state, { maybePasteError: () => maybePasteError }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+const applyTextContentUpdate = (
+  model: Model,
+  content: string,
+  maybeAlertBanner: Option.Option<AlertBanner>,
+): Model =>
+  Model.match(model, {
+    CreateFile: (state) =>
+      modifyFields(state, {
+        content: () => content,
+        maybeAlertBanner: () => maybeAlertBanner,
+        maybePasteError: () => Option.none(),
+      }),
+    EditFile: (state) =>
+      EditorFileMode.match(state.fileMode, {
+        Text: () =>
+          modifyFields(state, {
+            fileMode: () => EditorFileMode.Text({ content }),
+            maybeAlertBanner: () => maybeAlertBanner,
+            maybePasteError: () => Option.none(),
+          }),
+        Binary: () => state,
+      }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
   })
 
 // MESSAGE & OUTMESSAGE
@@ -180,13 +258,37 @@ export const Message = defineMessageUnion({
   UpdatedBase64Content: {
     base64Content: Schema.String,
   },
+  ClickedToggleLlmBar: {},
   ClickedCopyDts: {},
   SucceededCopyApiDtsToClipboard: {},
   FailedCopyApiDtsToClipboard: {
     message: Schema.String,
   },
+  ClickedCopyLlmContext: {},
+  SucceededCopyLlmContext: {},
+  FailedCopyLlmContext: {
+    message: Schema.String,
+  },
+  ClickedCopyFileHashes: {},
+  SucceededCopyFileHashes: {},
+  FailedCopyFileHashes: {
+    message: Schema.String,
+  },
+  ClickedPasteLlmEdits: {},
+  SucceededReadClipboardForLlmEdits: {
+    text: Schema.String,
+  },
+  FailedReadClipboardForLlmEdits: {
+    message: Schema.String,
+  },
+  SucceededCopyUpdatedHashes: {},
+  FailedCopyUpdatedHashes: {
+    message: Schema.String,
+  },
+  CompletedCopyPasteErrorToClipboard: {},
   ClickedDismissAlert: {},
   ClickedSave: {},
+  ClickedSaveAndOpen: {},
   ClickedConfirmOverwrite: {},
   ClickedCancelOverwrite: {},
   ClickedDelete: {},
@@ -196,6 +298,12 @@ export const Message = defineMessageUnion({
   SucceededSaveChanges: {
     entries: Schema.Array(FileEntry),
   },
+  SucceededSaveAndOpen: {
+    entries: Schema.Array(FileEntry),
+    savedFileName: Schema.String,
+    url: Schema.String,
+  },
+  CompletedOpenInNewTab: {},
   FailedSaveChanges: {
     message: Schema.String,
   },
@@ -212,7 +320,7 @@ export type Message = typeof Message.Type
 export const OutMessage = defineTaggedUnion({
   None: {},
   CloseModal: { replaceUrl: Schema.Boolean },
-  EntriesUpdated: { entries: Schema.Array(FileEntry) },
+  EntriesUpdated: { entries: Schema.Array(FileEntry), closeModal: Schema.Boolean },
   ShowAlert: {
     banner: AlertBanner,
     closeModal: Schema.Boolean,
@@ -341,6 +449,73 @@ export const LoadBase64 = Command.define("LoadBase64", {
     ),
 })
 
+const executeSaveChanges = async (
+  model: Model,
+  subPath: ReadonlyArray<string>,
+): Promise<{ readonly entries: ReadonlyArray<FileEntry>; readonly savedFileName: string }> => {
+  const storage = requireActiveStorage()
+
+  const saveEditedFile = (originalName: string, targetName: string, fileMode: EditorFileMode) =>
+    BinaryOrText(fileMode, {
+      text: async (content) => {
+        await storage.writeFile(subPath, targetName, content)
+        if (originalName !== targetName) {
+          await storage.deleteEntry(subPath, originalName, "file")
+        }
+      },
+      binaryEditing: async (content) => {
+        await storage.writeFileBuffer(subPath, targetName, base64ToUint8Array(content))
+        if (originalName !== targetName) {
+          await storage.deleteEntry(subPath, originalName, "file")
+        }
+      },
+      binaryRename: () => storage.renameBinaryFile(subPath, originalName, targetName),
+    })
+
+  const savedFileName = await Match.value(model).pipe(
+    Match.tag("CreateFolder", async ({ name }) => {
+      const targetName = name.trim()
+      await storage.createDirectory(subPath, targetName)
+      return targetName
+    }),
+    Match.tag("EditFolder", async ({ name, originalName }) => {
+      const newName = name.trim()
+      if (newName !== originalName) {
+        await storage.renameDirectory(subPath, originalName, newName)
+      }
+      return newName
+    }),
+    Match.tag("CreateFile", async ({ name, content }) => {
+      const targetName = name.trim()
+      await storage.writeFile(subPath, targetName, content)
+      return targetName
+    }),
+    Match.tag("EditFile", async ({ name, originalName, fileMode }) => {
+      const targetName = name.trim()
+      await saveEditedFile(originalName, targetName, fileMode)
+      return targetName
+    }),
+    Match.tag("ConfirmOverwrite", async ({ targetName, source }) => {
+      await Match.value(source).pipe(
+        Match.tag("CreateFile", async ({ content }) => {
+          await storage.writeFile(subPath, targetName, content)
+        }),
+        Match.tag("EditFile", async ({ originalName, fileMode }) => {
+          await saveEditedFile(originalName, targetName, fileMode)
+        }),
+        Match.exhaustive,
+      )
+      return targetName
+    }),
+    Match.tag("ConfirmDelete", () => Promise.resolve("")),
+    Match.exhaustive,
+  )
+
+  revokeActivePreviewUrl()
+  const updatedEntries = await storage.listEntries(subPath)
+  return { entries: updatedEntries, savedFileName }
+}
+
 export const SaveChanges = Command.define("SaveChanges", {
   args: {
     model: Model,
@@ -350,63 +525,8 @@ export const SaveChanges = Command.define("SaveChanges", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const storage = requireActiveStorage()
-
-        const saveEditedFile = (
-          originalName: string,
-          targetName: string,
-          fileMode: EditorFileMode,
-        ) =>
-          BinaryOrText(fileMode, {
-            text: async (content) => {
-              await storage.writeFile(args.subPath, targetName, content)
-              if (originalName !== targetName) {
-                await storage.deleteEntry(args.subPath, originalName, "file")
-              }
-            },
-            binaryEditing: async (content) => {
-              await storage.writeFileBuffer(args.subPath, targetName, base64ToUint8Array(content))
-              if (originalName !== targetName) {
-                await storage.deleteEntry(args.subPath, originalName, "file")
-              }
-            },
-            binaryRename: () => storage.renameBinaryFile(args.subPath, originalName, targetName),
-          })
-
-        await Match.value(args.model).pipe(
-          Match.tag("CreateFolder", ({ name }) =>
-            storage.createDirectory(args.subPath, name.trim()),
-          ),
-          Match.tag("EditFolder", async ({ name, originalName }) => {
-            const newName = name.trim()
-            if (newName !== originalName) {
-              await storage.renameDirectory(args.subPath, originalName, newName)
-            }
-          }),
-          Match.tag("CreateFile", ({ name, content }) =>
-            storage.writeFile(args.subPath, name.trim(), content),
-          ),
-          Match.tag("EditFile", async ({ name, originalName, fileMode }) => {
-            await saveEditedFile(originalName, name.trim(), fileMode)
-          }),
-          Match.tag("ConfirmOverwrite", async ({ targetName, source }) => {
-            await Match.value(source).pipe(
-              Match.tag("CreateFile", async ({ content }) => {
-                await storage.writeFile(args.subPath, targetName, content)
-              }),
-              Match.tag("EditFile", async ({ originalName, fileMode }) => {
-                await saveEditedFile(originalName, targetName, fileMode)
-              }),
-              Match.exhaustive,
-            )
-          }),
-          Match.tag("ConfirmDelete", () => Promise.resolve()),
-          Match.exhaustive,
-        )
-
-        revokeActivePreviewUrl()
-        const updatedEntries = await storage.listEntries(args.subPath)
-        return Message.SucceededSaveChanges({ entries: updatedEntries })
+        const { entries } = await executeSaveChanges(args.model, args.subPath)
+        return Message.SucceededSaveChanges({ entries })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(
@@ -418,6 +538,43 @@ export const SaveChanges = Command.define("SaveChanges", {
         ),
       ),
     ),
+})
+
+export const SaveAndOpenChanges = Command.define("SaveAndOpenChanges", {
+  args: {
+    model: Model,
+    subPath: Schema.Array(Schema.String),
+  },
+  messages: [Message.SucceededSaveAndOpen, Message.FailedSaveChanges],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const { entries, savedFileName } = await executeSaveChanges(args.model, args.subPath)
+        const url = `/${encodeSubPath([...args.subPath, savedFileName])}`
+        return Message.SucceededSaveAndOpen({ entries, savedFileName, url })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedSaveChanges({
+            message: `Speichern fehlgeschlagen: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const OpenUrlInNewTab = Command.define("OpenUrlInNewTab", {
+  args: {
+    url: Schema.String,
+  },
+  messages: [Message.CompletedOpenInNewTab],
+  execute: ({ url }) =>
+    Effect.sync(() => {
+      window.open(url, "_blank", "noopener")
+      return Message.CompletedOpenInNewTab()
+    }),
 })
 
 export const DeleteEntry = Command.define("DeleteEntry", {
@@ -473,6 +630,118 @@ export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
   ),
 })
 
+export const CopyFileHashesToClipboard = Command.define("CopyFileHashesToClipboard", {
+  args: {
+    fileName: Schema.String,
+    content: Schema.String,
+  },
+  messages: [Message.SucceededCopyFileHashes, Message.FailedCopyFileHashes],
+  execute: ({ fileName, content }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await navigator.clipboard.writeText(formatFencedHashlineFile(fileName, content))
+        return Message.SucceededCopyFileHashes()
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedCopyFileHashes({
+            message: `Kopieren fehlgeschlagen: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const CopyLlmContextToClipboard = Command.define("CopyLlmContextToClipboard", {
+  args: {
+    fileName: Schema.String,
+    content: Schema.String,
+  },
+  messages: [Message.SucceededCopyLlmContext, Message.FailedCopyLlmContext],
+  execute: ({ fileName, content }) =>
+    Effect.tryPromise({
+      try: async () => {
+        const res = await fetch("/api.d.ts", { cache: "no-cache" })
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
+        }
+        const dtsText = await res.text()
+        const promptText = formatLlmContext(fileName, content, dtsText)
+        await navigator.clipboard.writeText(promptText)
+        return Message.SucceededCopyLlmContext()
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedCopyLlmContext({
+            message: `Kopieren fehlgeschlagen: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const ReadClipboardForLlmEdits = Command.define("ReadClipboardForLlmEdits", {
+  messages: [Message.SucceededReadClipboardForLlmEdits, Message.FailedReadClipboardForLlmEdits],
+  execute: Effect.tryPromise({
+    try: async () => {
+      const text = await navigator.clipboard.readText()
+      return Message.SucceededReadClipboardForLlmEdits({ text })
+    },
+    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(
+        Message.FailedReadClipboardForLlmEdits({
+          message: `Zwischenablage konnte nicht gelesen werden: ${error.message}`,
+        }),
+      ),
+    ),
+  ),
+})
+
+export const CopyUpdatedHashesToClipboard = Command.define("CopyUpdatedHashesToClipboard", {
+  args: {
+    fileName: Schema.String,
+    changedLines: Schema.String,
+  },
+  messages: [Message.SucceededCopyUpdatedHashes, Message.FailedCopyUpdatedHashes],
+  execute: ({ fileName, changedLines }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await navigator.clipboard.writeText(formatUpdatedHashlines(fileName, changedLines))
+        return Message.SucceededCopyUpdatedHashes()
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedCopyUpdatedHashes({
+            message: `Neue Hashes konnten nicht kopiert werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const CopyPasteErrorToClipboard = Command.define("CopyPasteErrorToClipboard", {
+  args: {
+    errorText: Schema.String,
+  },
+  messages: [Message.CompletedCopyPasteErrorToClipboard],
+  execute: ({ errorText }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await navigator.clipboard.writeText(errorText)
+        return Message.CompletedCopyPasteErrorToClipboard()
+      },
+      catch: () => undefined,
+    }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedCopyPasteErrorToClipboard()))),
+})
+
 // UPDATE
 
 const whenCreateFile = (
@@ -516,6 +785,231 @@ const whenBinaryEditor = (
     ),
     Match.orElse(() => ({ model, outMessage: OutMessage.None() })),
   )
+
+const handleSaveAction = (
+  model: Model,
+  context: {
+    readonly subPath: ReadonlyArray<string>
+    readonly existingEntries: ReadonlyArray<FileEntry>
+  },
+  openInNewTab: boolean,
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+  readonly outMessage: OutMessage
+} => {
+  const makeSaveCommand = (nextModel: Model) =>
+    openInNewTab
+      ? SaveAndOpenChanges({ model: nextModel, subPath: context.subPath })
+      : SaveChanges({ model: nextModel, subPath: context.subPath })
+
+  const validateName = (rawName: string, isFolder: boolean): Option.Option<string> => {
+    const trimmed = rawName.trim()
+    if (!trimmed) {
+      return Option.some(
+        isFolder
+          ? "Bitte geben Sie einen Ordnernamen ein."
+          : "Bitte geben Sie einen Dateinamen ein.",
+      )
+    }
+    if (trimmed.includes("/") || trimmed.includes("\\")) {
+      return Option.some(
+        `Der ${isFolder ? "Ordnername" : "Dateiname"} darf keine Schrägstriche enthalten.`,
+      )
+    }
+    return Option.none()
+  }
+
+  const existingNames = new Set(Array.map(context.existingEntries, (e) => e.name))
+
+  return Model.match(model, {
+    CreateFolder: (createFolder) => {
+      const error = validateName(createFolder.name, true)
+      if (Option.isSome(error)) {
+        return {
+          model: modifyFields(createFolder, {
+            maybeValidationError: () => error,
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+      const trimmed = createFolder.name.trim()
+      if (existingNames.has(trimmed)) {
+        return {
+          model: modifyFields(createFolder, {
+            maybeValidationError: () =>
+              Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+      const nextModel = modifyFields(createFolder, {
+        maybeAlertBanner: () => Option.none(),
+      })
+      return {
+        model: nextModel,
+        commands: [makeSaveCommand(nextModel)],
+        outMessage: OutMessage.None(),
+      }
+    },
+    EditFolder: (editFolder) => {
+      const error = validateName(editFolder.name, true)
+      if (Option.isSome(error)) {
+        return {
+          model: modifyFields(editFolder, {
+            maybeValidationError: () => error,
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+      const trimmed = editFolder.name.trim()
+      if (trimmed !== editFolder.originalName && existingNames.has(trimmed)) {
+        return {
+          model: modifyFields(editFolder, {
+            maybeValidationError: () =>
+              Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+      const nextModel = modifyFields(editFolder, {
+        maybeAlertBanner: () => Option.none(),
+      })
+      return {
+        model: nextModel,
+        commands: [makeSaveCommand(nextModel)],
+        outMessage: OutMessage.None(),
+      }
+    },
+    CreateFile: (createFile) => {
+      const error = validateName(createFile.name, false)
+      if (Option.isSome(error)) {
+        return {
+          model: modifyFields(createFile, {
+            maybeValidationError: () => error,
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+      const trimmed = createFile.name.trim()
+      if (existingNames.has(trimmed)) {
+        return {
+          model: Model.ConfirmOverwrite({
+            targetName: trimmed,
+            source: OverwriteSource.CreateFile({
+              content: createFile.content,
+              selectedTemplateId: createFile.selectedTemplateId,
+              userTemplates: createFile.userTemplates,
+            }),
+            maybeAlertBanner: Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+      const nextModel = modifyFields(createFile, {
+        maybeAlertBanner: () => Option.none(),
+      })
+      return {
+        model: nextModel,
+        commands: [makeSaveCommand(nextModel)],
+        outMessage: OutMessage.None(),
+      }
+    },
+    EditFile: (editFile) => {
+      const error = validateName(editFile.name, false)
+      if (Option.isSome(error)) {
+        return {
+          model: modifyFields(editFile, {
+            maybeValidationError: () => error,
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+
+      const trimmed = editFile.name.trim()
+
+      const maybeBase64Content = EditorFileMode.match(editFile.fileMode, {
+        Text: () => Option.none<string>(),
+        Binary: ({ edit }) =>
+          BinaryEdit.match(edit, {
+            Locked: () => Option.none<string>(),
+            Disabled: () => Option.none<string>(),
+            Loading: () => Option.none<string>(),
+            Editing: ({ content }) => Option.some(content),
+          }),
+      })
+
+      if (Option.isSome(maybeBase64Content)) {
+        try {
+          base64ToUint8Array(maybeBase64Content.value)
+        } catch {
+          return {
+            model: modifyFields(editFile, {
+              maybeValidationError: () =>
+                Option.some("Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe."),
+              maybeAlertBanner: () => Option.none(),
+            }),
+            outMessage: OutMessage.None(),
+          }
+        }
+      }
+
+      if (trimmed !== editFile.originalName && existingNames.has(trimmed)) {
+        const isText = EditorFileMode.match(editFile.fileMode, {
+          Text: () => true,
+          Binary: () => false,
+        })
+        if (!isText && Option.isNone(maybeBase64Content)) {
+          return {
+            model: modifyFields(editFile, {
+              maybeValidationError: () =>
+                Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+              maybeAlertBanner: () => Option.none(),
+            }),
+            outMessage: OutMessage.None(),
+          }
+        }
+        return {
+          model: Model.ConfirmOverwrite({
+            targetName: trimmed,
+            source: OverwriteSource.EditFile({
+              originalName: editFile.originalName,
+              fileMode: editFile.fileMode,
+            }),
+            maybeAlertBanner: Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+
+      const nextModel = modifyFields(editFile, {
+        maybeAlertBanner: () => Option.none(),
+      })
+      return {
+        model: nextModel,
+        commands: [makeSaveCommand(nextModel)],
+        outMessage: OutMessage.None(),
+      }
+    },
+    ConfirmDelete: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+    ConfirmOverwrite: () => ({
+      model: modifyFields(model, {
+        maybeAlertBanner: () => Option.none(),
+      }),
+      commands: [makeSaveCommand(model)],
+      outMessage: OutMessage.None(),
+    }),
+  })
+}
 
 export const update = (
   model: Model,
@@ -568,6 +1062,7 @@ export const update = (
           modifyFields(state, {
             content: () => content,
             maybeAlertBanner: () => Option.none(),
+            maybePasteError: () => Option.none(),
           }),
         CreateFolder: () => model,
         EditFolder: () => model,
@@ -577,6 +1072,7 @@ export const update = (
               modifyFields(state, {
                 fileMode: () => EditorFileMode.Text({ content }),
                 maybeAlertBanner: () => Option.none(),
+                maybePasteError: () => Option.none(),
               }),
             Binary: () => state,
           }),
@@ -861,6 +1357,11 @@ export const update = (
         }
       }),
 
+    ClickedToggleLlmBar: () => ({
+      model: toggleLlmBar(model),
+      outMessage: OutMessage.None(),
+    }),
+
     ClickedCopyDts: () => ({
       model: setAlertBanner(model, Option.none()),
       commands: [CopyApiDtsToClipboard()],
@@ -878,11 +1379,6 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
-    ClickedDismissAlert: () => ({
-      model: setAlertBanner(model, Option.none()),
-      outMessage: OutMessage.None(),
-    }),
-
     FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => ({
       model: setAlertBanner(
         model,
@@ -894,214 +1390,148 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
-    ClickedSave: () => {
-      const validateName = (rawName: string, isFolder: boolean): Option.Option<string> => {
-        const trimmed = rawName.trim()
-        if (!trimmed) {
-          return Option.some(
-            isFolder
-              ? "Bitte geben Sie einen Ordnernamen ein."
-              : "Bitte geben Sie einen Dateinamen ein.",
-          )
-        }
-        if (trimmed.includes("/") || trimmed.includes("\\")) {
-          return Option.some(
-            `Der ${isFolder ? "Ordnername" : "Dateiname"} darf keine Schrägstriche enthalten.`,
-          )
-        }
-        return Option.none()
-      }
-
-      const existingNames = new Set(Array.map(context.existingEntries, (e) => e.name))
-
-      return Model.match(model, {
-        CreateFolder: (createFolder) => {
-          const error = validateName(createFolder.name, true)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(createFolder, {
-                maybeValidationError: () => error,
-                maybeAlertBanner: () => Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const trimmed = createFolder.name.trim()
-          if (existingNames.has(trimmed)) {
-            return {
-              model: modifyFields(createFolder, {
-                maybeValidationError: () =>
-                  Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                maybeAlertBanner: () => Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const nextModel = modifyFields(createFolder, {
-            maybeAlertBanner: () => Option.none(),
-          })
-          return {
-            model: nextModel,
-            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        },
-        EditFolder: (editFolder) => {
-          const error = validateName(editFolder.name, true)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(editFolder, {
-                maybeValidationError: () => error,
-                maybeAlertBanner: () => Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const trimmed = editFolder.name.trim()
-          if (trimmed !== editFolder.originalName && existingNames.has(trimmed)) {
-            return {
-              model: modifyFields(editFolder, {
-                maybeValidationError: () =>
-                  Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                maybeAlertBanner: () => Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const nextModel = modifyFields(editFolder, {
-            maybeAlertBanner: () => Option.none(),
-          })
-          return {
-            model: nextModel,
-            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        },
-        CreateFile: (createFile) => {
-          const error = validateName(createFile.name, false)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(createFile, {
-                maybeValidationError: () => error,
-                maybeAlertBanner: () => Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const trimmed = createFile.name.trim()
-          if (existingNames.has(trimmed)) {
-            return {
-              model: Model.ConfirmOverwrite({
-                targetName: trimmed,
-                source: OverwriteSource.CreateFile({
-                  content: createFile.content,
-                  selectedTemplateId: createFile.selectedTemplateId,
-                  userTemplates: createFile.userTemplates,
-                }),
-                maybeAlertBanner: Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-          const nextModel = modifyFields(createFile, {
-            maybeAlertBanner: () => Option.none(),
-          })
-          return {
-            model: nextModel,
-            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        },
-        EditFile: (editFile) => {
-          const error = validateName(editFile.name, false)
-          if (Option.isSome(error)) {
-            return {
-              model: modifyFields(editFile, {
-                maybeValidationError: () => error,
-                maybeAlertBanner: () => Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-
-          const trimmed = editFile.name.trim()
-
-          const maybeBase64Content = EditorFileMode.match(editFile.fileMode, {
-            Text: () => Option.none<string>(),
-            Binary: ({ edit }) =>
-              BinaryEdit.match(edit, {
-                Locked: () => Option.none<string>(),
-                Disabled: () => Option.none<string>(),
-                Loading: () => Option.none<string>(),
-                Editing: ({ content }) => Option.some(content),
-              }),
-          })
-
-          if (Option.isSome(maybeBase64Content)) {
-            try {
-              base64ToUint8Array(maybeBase64Content.value)
-            } catch {
-              return {
-                model: modifyFields(editFile, {
-                  maybeValidationError: () =>
-                    Option.some("Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe."),
-                  maybeAlertBanner: () => Option.none(),
-                }),
-                outMessage: OutMessage.None(),
-              }
-            }
-          }
-
-          if (trimmed !== editFile.originalName && existingNames.has(trimmed)) {
-            const isText = EditorFileMode.match(editFile.fileMode, {
-              Text: () => true,
-              Binary: () => false,
-            })
-            if (!isText && Option.isNone(maybeBase64Content)) {
-              return {
-                model: modifyFields(editFile, {
-                  maybeValidationError: () =>
-                    Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
-                  maybeAlertBanner: () => Option.none(),
-                }),
-                outMessage: OutMessage.None(),
-              }
-            }
-            return {
-              model: Model.ConfirmOverwrite({
-                targetName: trimmed,
-                source: OverwriteSource.EditFile({
-                  originalName: editFile.originalName,
-                  fileMode: editFile.fileMode,
-                }),
-                maybeAlertBanner: Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }
-          }
-
-          const nextModel = modifyFields(editFile, {
-            maybeAlertBanner: () => Option.none(),
-          })
-          return {
-            model: nextModel,
-            commands: [SaveChanges({ model: nextModel, subPath: context.subPath })],
-            outMessage: OutMessage.None(),
-          }
-        },
-        ConfirmDelete: () => ({
-          model,
+    ClickedCopyLlmContext: () =>
+      Option.match(getTextFileContext(model), {
+        onNone: () => ({ model, outMessage: OutMessage.None() }),
+        onSome: ({ fileName, content }) => ({
+          model: setAlertBanner(setPasteError(model, Option.none()), Option.none()),
+          commands: [CopyLlmContextToClipboard({ fileName, content })],
           outMessage: OutMessage.None(),
         }),
-        ConfirmOverwrite: () => ({
-          model: modifyFields(model, {
-            maybeAlertBanner: () => Option.none(),
+      }),
+
+    SucceededCopyLlmContext: () => ({
+      model: setAlertBanner(
+        model,
+        Option.some({
+          message: "Datei und /api.d.ts für KI in die Zwischenablage kopiert",
+          variant: "info",
+        }),
+      ),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedDismissAlert: () => ({
+      model: setAlertBanner(model, Option.none()),
+      outMessage: OutMessage.None(),
+    }),
+
+    FailedCopyLlmContext: ({ message: errorMessage }) => ({
+      model: setAlertBanner(
+        model,
+        Option.some({
+          message: errorMessage,
+          variant: "danger",
+        }),
+      ),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedCopyFileHashes: () =>
+      Option.match(getTextFileContext(model), {
+        onNone: () => ({ model, outMessage: OutMessage.None() }),
+        onSome: ({ fileName, content }) => ({
+          model: setAlertBanner(setPasteError(model, Option.none()), Option.none()),
+          commands: [CopyFileHashesToClipboard({ fileName, content })],
+          outMessage: OutMessage.None(),
+        }),
+      }),
+
+    SucceededCopyFileHashes: () => ({
+      model: setAlertBanner(
+        model,
+        Option.some({
+          message: "Datei mit Hashes in die Zwischenablage kopiert",
+          variant: "info",
+        }),
+      ),
+      outMessage: OutMessage.None(),
+    }),
+
+    FailedCopyFileHashes: ({ message: errorMessage }) => ({
+      model: setAlertBanner(
+        model,
+        Option.some({
+          message: errorMessage,
+          variant: "danger",
+        }),
+      ),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedPasteLlmEdits: () => ({
+      model: setAlertBanner(setPasteError(model, Option.none()), Option.none()),
+      commands: [ReadClipboardForLlmEdits()],
+      outMessage: OutMessage.None(),
+    }),
+
+    SucceededReadClipboardForLlmEdits: ({ text }) =>
+      Option.match(getTextFileContext(model), {
+        onNone: () => ({ model, outMessage: OutMessage.None() }),
+        onSome: ({ fileName, content: currentContent }) =>
+          HashlineApplyResult.match(applyHashlineEdits(currentContent, text), {
+            Ok: ({ content: nextContent, appliedCount, changedLines }) => ({
+              model: applyTextContentUpdate(
+                model,
+                nextContent,
+                Option.some({
+                  message: `${appliedCount} Bearbeitung(en) angewendet – neue Hashes in die Zwischenablage kopiert`,
+                  variant: "info",
+                }),
+              ),
+              commands: [CopyUpdatedHashesToClipboard({ fileName, changedLines })],
+              outMessage: OutMessage.None(),
+            }),
+            Error: ({ message: errorMessage }) => ({
+              model: setAlertBanner(
+                setPasteError(model, Option.some(errorMessage)),
+                Option.some({
+                  message: errorMessage,
+                  variant: "danger",
+                }),
+              ),
+              commands: [CopyPasteErrorToClipboard({ errorText: errorMessage })],
+              outMessage: OutMessage.None(),
+            }),
           }),
-          commands: [SaveChanges({ model, subPath: context.subPath })],
-          outMessage: OutMessage.None(),
+      }),
+
+    SucceededCopyUpdatedHashes: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
+    FailedCopyUpdatedHashes: ({ message: errorMessage }) => ({
+      model: setAlertBanner(
+        model,
+        Option.some({
+          message: errorMessage,
+          variant: "danger",
         }),
-      })
-    },
+      ),
+      outMessage: OutMessage.None(),
+    }),
+
+    FailedReadClipboardForLlmEdits: ({ message: errorMessage }) => ({
+      model: setAlertBanner(
+        setPasteError(model, Option.some(errorMessage)),
+        Option.some({
+          message: errorMessage,
+          variant: "danger",
+        }),
+      ),
+      commands: [CopyPasteErrorToClipboard({ errorText: errorMessage })],
+      outMessage: OutMessage.None(),
+    }),
+
+    CompletedCopyPasteErrorToClipboard: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedSave: () => handleSaveAction(model, context, false),
+
+    ClickedSaveAndOpen: () => handleSaveAction(model, context, true),
 
     ClickedConfirmOverwrite: () => ({
       model: modifyFields(model, {
@@ -1126,6 +1556,8 @@ export const update = (
                 newTemplateLabel: "",
                 maybeValidationError: Option.none(),
                 maybeAlertBanner: Option.none(),
+                maybePasteError: Option.none(),
+                isLlmBarOpen: false,
               }),
               outMessage: OutMessage.None(),
             }),
@@ -1136,6 +1568,8 @@ export const update = (
                 fileMode,
                 maybeValidationError: Option.none(),
                 maybeAlertBanner: Option.none(),
+                maybePasteError: Option.none(),
+                isLlmBarOpen: false,
               }),
               outMessage: OutMessage.None(),
             }),
@@ -1199,7 +1633,49 @@ export const update = (
 
     SucceededSaveChanges: ({ entries }) => ({
       model,
-      outMessage: OutMessage.EntriesUpdated({ entries }),
+      outMessage: OutMessage.EntriesUpdated({ entries, closeModal: true }),
+    }),
+
+    SucceededSaveAndOpen: ({ entries, savedFileName, url }) => {
+      const banner = Option.some({
+        message: "Gespeichert und in neuem Tab geöffnet",
+        variant: "info" as const,
+      })
+      const nextModel = Model.match(model, {
+        CreateFile: (state) =>
+          Model.EditFile({
+            originalName: savedFileName,
+            name: savedFileName,
+            fileMode: EditorFileMode.Text({ content: state.content }),
+            maybeValidationError: Option.none(),
+            maybeAlertBanner: banner,
+            maybePasteError: Option.none(),
+            isLlmBarOpen: state.isLlmBarOpen,
+          }),
+        EditFile: (state) =>
+          modifyFields(state, {
+            originalName: () => savedFileName,
+            name: () => savedFileName,
+            maybeValidationError: () => Option.none(),
+            maybeAlertBanner: () => banner,
+            maybePasteError: () => Option.none(),
+          }),
+        CreateFolder: () => setAlertBanner(model, banner),
+        EditFolder: () => setAlertBanner(model, banner),
+        ConfirmDelete: () => setAlertBanner(model, banner),
+        ConfirmOverwrite: () => setAlertBanner(model, banner),
+      })
+
+      return {
+        model: nextModel,
+        commands: [OpenUrlInNewTab({ url })],
+        outMessage: OutMessage.EntriesUpdated({ entries, closeModal: false }),
+      }
+    },
+
+    CompletedOpenInNewTab: () => ({
+      model,
+      outMessage: OutMessage.None(),
     }),
 
     FailedSaveChanges: ({ message: errorMessage }) => ({
@@ -1215,7 +1691,7 @@ export const update = (
 
     SucceededDeleteEntry: ({ entries }) => ({
       model,
-      outMessage: OutMessage.EntriesUpdated({ entries }),
+      outMessage: OutMessage.EntriesUpdated({ entries, closeModal: true }),
     }),
 
     FailedDeleteEntry: ({ message: errorMessage }) => ({
@@ -1572,24 +2048,120 @@ const viewModalAlertBanner = (
       ),
   })
 
+const viewLlmBar = (
+  maybePasteError: Option.Option<string>,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
+  h.div(
+    [h.Id("modal-llm-bar"), h.Class("modal-llm-bar")],
+    [
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("modal-btn-copy-dts"),
+          h.Class("btn btn-secondary icon-label-btn"),
+          h.AriaLabel("/app.d.ts kopieren"),
+          h.DataAttribute("tip", "/app.d.ts kopieren"),
+          h.OnClick(Message.ClickedCopyDts()),
+        ],
+        [
+          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+          h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
+        ],
+      ),
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("modal-btn-copy-llm"),
+          h.Class("btn btn-secondary icon-label-btn"),
+          h.AriaLabel("Datei, /api.d.ts und Anleitung für KI kopieren"),
+          h.DataAttribute("tip", "Datei, /api.d.ts und Anleitung kopieren"),
+          h.OnClick(Message.ClickedCopyLlmContext()),
+        ],
+        [
+          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+          h.span([h.Class("icon-label-btn-text")], ["Mit Anleitung"]),
+        ],
+      ),
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("modal-btn-copy-hashes"),
+          h.Class("btn btn-secondary icon-label-btn"),
+          h.AriaLabel("Nur Datei mit Hashes kopieren"),
+          h.DataAttribute("tip", "Nur Datei mit Hashes kopieren"),
+          h.OnClick(Message.ClickedCopyFileHashes()),
+        ],
+        [
+          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+          h.span([h.Class("icon-label-btn-text")], ["Datei"]),
+        ],
+      ),
+      Option.match(maybePasteError, {
+        onNone: () =>
+          h.button(
+            [
+              h.Type("button"),
+              h.Id("modal-btn-paste-llm"),
+              h.Class("btn btn-secondary icon-label-btn"),
+              h.AriaLabel("KI-Änderungen einfügen"),
+              h.DataAttribute("tip", "KI-Änderungen einfügen"),
+              h.OnClick(Message.ClickedPasteLlmEdits()),
+            ],
+            [
+              h.span(
+                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                [viewIcon("install", h)],
+              ),
+              h.span([h.Class("icon-label-btn-text")], ["Einfügen"]),
+            ],
+          ),
+        onSome: (pasteError) =>
+          h.button(
+            [
+              h.Type("button"),
+              h.Id("modal-btn-paste-llm"),
+              h.Class("btn btn-danger icon-label-btn"),
+              h.AriaLabel(`Fehler beim Einfügen: ${pasteError}`),
+              h.DataAttribute("tip", "Fehler (in Zwischenablage kopiert)"),
+              h.OnClick(Message.ClickedPasteLlmEdits()),
+            ],
+            [
+              h.span(
+                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                [viewIcon("warning", h)],
+              ),
+              h.span([h.Class("icon-label-btn-text")], ["Fehler"]),
+            ],
+          ),
+      }),
+    ],
+  )
+
 const viewEditorModal = (
   {
     titleText,
     noun,
     isFolder,
+    isTextFile,
+    isLlmBarOpen,
     isEditingExisting,
     nameValue,
     maybeValidationError,
     maybeAlertBanner,
+    maybePasteError,
     extraBodyNodes,
   }: {
     readonly titleText: string
     readonly noun: "Datei" | "Ordner"
     readonly isFolder: boolean
+    readonly isTextFile: boolean
+    readonly isLlmBarOpen: boolean
     readonly isEditingExisting: boolean
     readonly nameValue: string
     readonly maybeValidationError: Option.Option<string>
     readonly maybeAlertBanner: Option.Option<AlertBanner>
+    readonly maybePasteError: Option.Option<string>
     readonly extraBodyNodes: ReadonlyArray<Html.Html>
   },
   h: Html.HtmlBuilder<Message>,
@@ -1653,13 +2225,14 @@ const viewEditorModal = (
                   ...extraBodyNodes,
                 ],
               ),
+              isTextFile && isLlmBarOpen ? viewLlmBar(maybePasteError, h) : h.empty,
               h.footer(
                 [h.Class("modal-footer")],
                 [
                   h.div(
                     [h.Class("modal-footer-left")],
                     [
-                      isEditingExisting
+                      isEditingExisting && !(isTextFile && isLlmBarOpen)
                         ? h.button(
                             [
                               h.Type("button"),
@@ -1683,22 +2256,23 @@ const viewEditorModal = (
                   h.div(
                     [h.Class("modal-footer-right")],
                     [
-                      !isFolder
+                      isTextFile
                         ? h.button(
                             [
                               h.Type("button"),
-                              h.Id("modal-btn-copy-dts"),
+                              h.Id("modal-btn-toggle-llm"),
                               h.Class("btn btn-secondary icon-label-btn"),
-                              h.AriaLabel("/app.d.ts kopieren"),
-                              h.DataAttribute("tip", "/app.d.ts kopieren"),
-                              h.OnClick(Message.ClickedCopyDts()),
+                              h.AriaLabel("LLM-Werkzeuge"),
+                              h.AriaExpanded(isLlmBarOpen),
+                              h.DataAttribute("tip", "LLM-Werkzeuge"),
+                              h.OnClick(Message.ClickedToggleLlmBar()),
                             ],
                             [
                               h.span(
                                 [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                [viewIcon("clipboard", h)],
+                                [viewIcon("puzzle", h)],
                               ),
-                              h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
+                              h.span([h.Class("icon-label-btn-text")], ["LLM"]),
                             ],
                           )
                         : h.empty,
@@ -1736,6 +2310,25 @@ const viewEditorModal = (
                           h.span([h.Class("icon-label-btn-text")], [saveLabel]),
                         ],
                       ),
+                      isTextFile && isLlmBarOpen
+                        ? h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("modal-btn-save-and-open"),
+                              h.Class("btn btn-secondary icon-label-btn"),
+                              h.AriaLabel("Speichern und in neuem Tab anzeigen"),
+                              h.DataAttribute("tip", "Speichern und in neuem Tab anzeigen"),
+                              h.OnClick(Message.ClickedSaveAndOpen()),
+                            ],
+                            [
+                              h.span(
+                                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                [viewIcon("desktop", h)],
+                              ),
+                              h.span([h.Class("icon-label-btn-text")], ["Anzeigen"]),
+                            ],
+                          )
+                        : h.empty,
                     ],
                   ),
                 ],
@@ -1912,10 +2505,13 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           titleText: "Neue Datei erstellen",
           noun: "Datei",
           isFolder: false,
+          isTextFile: true,
+          isLlmBarOpen: state.isLlmBarOpen,
           isEditingExisting: false,
           nameValue: state.name,
           maybeValidationError: state.maybeValidationError,
           maybeAlertBanner: state.maybeAlertBanner,
+          maybePasteError: state.maybePasteError,
           extraBodyNodes: [
             viewTemplatePicker(state, h),
             ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
@@ -1930,10 +2526,13 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           titleText: "Neuen Ordner erstellen",
           noun: "Ordner",
           isFolder: true,
+          isTextFile: false,
+          isLlmBarOpen: false,
           isEditingExisting: false,
           nameValue: name,
           maybeValidationError,
           maybeAlertBanner,
+          maybePasteError: Option.none(),
           extraBodyNodes: [],
         },
         h,
@@ -1945,25 +2544,39 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           titleText: `Ordner bearbeiten: ${originalName}`,
           noun: "Ordner",
           isFolder: true,
+          isTextFile: false,
+          isLlmBarOpen: false,
           isEditingExisting: true,
           nameValue: name,
           maybeValidationError,
           maybeAlertBanner,
+          maybePasteError: Option.none(),
           extraBodyNodes: [],
         },
         h,
       ),
 
-    EditFile: ({ originalName, name, fileMode, maybeValidationError, maybeAlertBanner }) =>
+    EditFile: ({
+      originalName,
+      name,
+      fileMode,
+      maybeValidationError,
+      maybeAlertBanner,
+      maybePasteError,
+      isLlmBarOpen,
+    }) =>
       viewEditorModal(
         {
           titleText: `Datei bearbeiten: ${originalName}`,
           noun: "Datei",
           isFolder: false,
+          isTextFile: fileMode._tag === "Text",
+          isLlmBarOpen,
           isEditingExisting: true,
           nameValue: name,
           maybeValidationError,
           maybeAlertBanner,
+          maybePasteError,
           extraBodyNodes: viewEditorFileBody(fileMode, h),
         },
         h,
