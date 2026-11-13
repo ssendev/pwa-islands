@@ -811,6 +811,59 @@ code {
   transition: all 0.2s;
 }
 
+.modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.modal-header-btn {
+  font-size: 16px;
+}
+
+.modal-overlay.modal-overlay-maximized {
+  padding: 0;
+  overflow: hidden;
+}
+
+.modal-overlay.modal-overlay-maximized::before,
+.modal-overlay.modal-overlay-maximized::after {
+  display: none;
+}
+
+.modal-content.is-maximized {
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+  border: none;
+}
+
+.modal-content.is-maximized > form,
+.modal-content.is-maximized #modal-form {
+  flex: 1;
+  min-height: 0;
+}
+
+.modal-content.is-maximized .modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.modal-content.is-maximized .form-group:has(.form-textarea) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.modal-content.is-maximized .form-textarea {
+  flex: 1;
+  min-height: 240px;
+  resize: none;
+}
+
 .modal-close-btn:hover {
   background: var(--social-bg);
   color: var(--text-h);
@@ -953,7 +1006,7 @@ code {
 .modal-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
   padding: 16px 20px;
@@ -972,25 +1025,18 @@ code {
   flex-wrap: wrap;
 }
 
+.modal-footer-right {
+  margin-left: auto;
+  justify-content: flex-end;
+}
+
+.modal-footer-push-right {
+  margin-left: auto;
+}
+
 /* Wie der Schliessen-Knopf im Kopf: gleiche Hoehe in beiden Leisten. */
 .modal-footer .btn {
   height: 38px;
-  box-sizing: border-box;
-}
-
-.modal-llm-bar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 10px 20px;
-  border-top: 1px solid var(--border);
-  background: var(--social-bg);
-}
-
-.modal-llm-bar .btn {
-  height: 36px;
   box-sizing: border-box;
 }
 
@@ -1074,17 +1120,6 @@ code {
   }
 
   .save-modal-btn .icon-label-btn-text {
-    display: inline;
-    white-space: nowrap;
-  }
-
-  .modal-llm-bar .icon-label-btn {
-    width: auto;
-    height: 36px;
-    padding: 0 10px;
-  }
-
-  .modal-llm-bar .icon-label-btn-text {
     display: inline;
     white-space: nowrap;
   }

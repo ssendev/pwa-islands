@@ -74,6 +74,7 @@ export const Model = defineTaggedUnion({
     maybeAlertBanner: Schema.Option(AlertBanner),
     maybePasteError: Schema.Option(Schema.String),
     isLlmBarOpen: Schema.Boolean,
+    isMaximized: Schema.Boolean,
   },
   CreateFolder: {
     name: Schema.String,
@@ -94,6 +95,7 @@ export const Model = defineTaggedUnion({
     maybeAlertBanner: Schema.Option(AlertBanner),
     maybePasteError: Schema.Option(Schema.String),
     isLlmBarOpen: Schema.Boolean,
+    isMaximized: Schema.Boolean,
   },
   ConfirmDelete: {
     entryName: Schema.String,
@@ -127,6 +129,7 @@ export const makeCreateFile = (
   maybeAlertBanner: Option.none(),
   maybePasteError: Option.none(),
   isLlmBarOpen: false,
+  isMaximized: false,
 })
 
 export const setAlertBanner = (model: Model, maybeAlertBanner: Option.Option<AlertBanner>): Model =>
@@ -259,6 +262,7 @@ export const Message = defineMessageUnion({
     base64Content: Schema.String,
   },
   ClickedToggleLlmBar: {},
+  ClickedToggleMaximize: {},
   ClickedCopyDts: {},
   SucceededCopyApiDtsToClipboard: {},
   FailedCopyApiDtsToClipboard: {
@@ -1362,6 +1366,18 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
+    ClickedToggleMaximize: () => ({
+      model: Model.match(model, {
+        CreateFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
+        EditFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      }),
+      outMessage: OutMessage.None(),
+    }),
+
     ClickedCopyDts: () => ({
       model: setAlertBanner(model, Option.none()),
       commands: [CopyApiDtsToClipboard()],
@@ -1558,6 +1574,7 @@ export const update = (
                 maybeAlertBanner: Option.none(),
                 maybePasteError: Option.none(),
                 isLlmBarOpen: false,
+                isMaximized: false,
               }),
               outMessage: OutMessage.None(),
             }),
@@ -1570,6 +1587,7 @@ export const update = (
                 maybeAlertBanner: Option.none(),
                 maybePasteError: Option.none(),
                 isLlmBarOpen: false,
+                isMaximized: false,
               }),
               outMessage: OutMessage.None(),
             }),
@@ -1651,6 +1669,7 @@ export const update = (
             maybeAlertBanner: banner,
             maybePasteError: Option.none(),
             isLlmBarOpen: state.isLlmBarOpen,
+            isMaximized: state.isMaximized,
           }),
         EditFile: (state) =>
           modifyFields(state, {
@@ -2048,95 +2067,85 @@ const viewModalAlertBanner = (
       ),
   })
 
-const viewLlmBar = (
+const viewLlmButtons = (
   maybePasteError: Option.Option<string>,
   h: Html.HtmlBuilder<Message>,
-): Html.Html =>
-  h.div(
-    [h.Id("modal-llm-bar"), h.Class("modal-llm-bar")],
+): ReadonlyArray<Html.Html> => [
+  h.button(
     [
-      h.button(
-        [
-          h.Type("button"),
-          h.Id("modal-btn-copy-dts"),
-          h.Class("btn btn-secondary icon-label-btn"),
-          h.AriaLabel("/app.d.ts kopieren"),
-          h.DataAttribute("tip", "/app.d.ts kopieren"),
-          h.OnClick(Message.ClickedCopyDts()),
-        ],
-        [
-          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
-          h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
-        ],
-      ),
-      h.button(
-        [
-          h.Type("button"),
-          h.Id("modal-btn-copy-llm"),
-          h.Class("btn btn-secondary icon-label-btn"),
-          h.AriaLabel("Datei, /api.d.ts und Anleitung für KI kopieren"),
-          h.DataAttribute("tip", "Datei, /api.d.ts und Anleitung kopieren"),
-          h.OnClick(Message.ClickedCopyLlmContext()),
-        ],
-        [
-          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
-          h.span([h.Class("icon-label-btn-text")], ["Mit Anleitung"]),
-        ],
-      ),
-      h.button(
-        [
-          h.Type("button"),
-          h.Id("modal-btn-copy-hashes"),
-          h.Class("btn btn-secondary icon-label-btn"),
-          h.AriaLabel("Nur Datei mit Hashes kopieren"),
-          h.DataAttribute("tip", "Nur Datei mit Hashes kopieren"),
-          h.OnClick(Message.ClickedCopyFileHashes()),
-        ],
-        [
-          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
-          h.span([h.Class("icon-label-btn-text")], ["Datei"]),
-        ],
-      ),
-      Option.match(maybePasteError, {
-        onNone: () =>
-          h.button(
-            [
-              h.Type("button"),
-              h.Id("modal-btn-paste-llm"),
-              h.Class("btn btn-secondary icon-label-btn"),
-              h.AriaLabel("KI-Änderungen einfügen"),
-              h.DataAttribute("tip", "KI-Änderungen einfügen"),
-              h.OnClick(Message.ClickedPasteLlmEdits()),
-            ],
-            [
-              h.span(
-                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                [viewIcon("install", h)],
-              ),
-              h.span([h.Class("icon-label-btn-text")], ["Einfügen"]),
-            ],
-          ),
-        onSome: (pasteError) =>
-          h.button(
-            [
-              h.Type("button"),
-              h.Id("modal-btn-paste-llm"),
-              h.Class("btn btn-danger icon-label-btn"),
-              h.AriaLabel(`Fehler beim Einfügen: ${pasteError}`),
-              h.DataAttribute("tip", "Fehler (in Zwischenablage kopiert)"),
-              h.OnClick(Message.ClickedPasteLlmEdits()),
-            ],
-            [
-              h.span(
-                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                [viewIcon("warning", h)],
-              ),
-              h.span([h.Class("icon-label-btn-text")], ["Fehler"]),
-            ],
-          ),
-      }),
+      h.Type("button"),
+      h.Id("modal-btn-copy-dts"),
+      h.Class("btn btn-secondary icon-label-btn"),
+      h.AriaLabel("/app.d.ts kopieren"),
+      h.DataAttribute("tip", "/app.d.ts kopieren"),
+      h.OnClick(Message.ClickedCopyDts()),
     ],
-  )
+    [
+      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+      h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
+    ],
+  ),
+  h.button(
+    [
+      h.Type("button"),
+      h.Id("modal-btn-copy-llm"),
+      h.Class("btn btn-secondary icon-label-btn"),
+      h.AriaLabel("Datei, /api.d.ts und Anleitung für KI kopieren"),
+      h.DataAttribute("tip", "Datei, /api.d.ts und Anleitung kopieren"),
+      h.OnClick(Message.ClickedCopyLlmContext()),
+    ],
+    [
+      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+      h.span([h.Class("icon-label-btn-text")], ["Mit Anleitung"]),
+    ],
+  ),
+  h.button(
+    [
+      h.Type("button"),
+      h.Id("modal-btn-copy-hashes"),
+      h.Class("btn btn-secondary icon-label-btn"),
+      h.AriaLabel("Nur Datei mit Hashes kopieren"),
+      h.DataAttribute("tip", "Nur Datei mit Hashes kopieren"),
+      h.OnClick(Message.ClickedCopyFileHashes()),
+    ],
+    [
+      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+      h.span([h.Class("icon-label-btn-text")], ["Datei"]),
+    ],
+  ),
+  Option.match(maybePasteError, {
+    onNone: () =>
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("modal-btn-paste-llm"),
+          h.Class("btn btn-secondary icon-label-btn"),
+          h.AriaLabel("KI-Änderungen einfügen"),
+          h.DataAttribute("tip", "KI-Änderungen einfügen"),
+          h.OnClick(Message.ClickedPasteLlmEdits()),
+        ],
+        [
+          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("install", h)]),
+          h.span([h.Class("icon-label-btn-text")], ["Einfügen"]),
+        ],
+      ),
+    onSome: (pasteError) =>
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("modal-btn-paste-llm"),
+          h.Class("btn btn-danger icon-label-btn"),
+          h.AriaLabel(`Fehler beim Einfügen: ${pasteError}`),
+          h.DataAttribute("tip", "Fehler (in Zwischenablage kopiert)"),
+          h.OnClick(Message.ClickedPasteLlmEdits()),
+        ],
+        [
+          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("warning", h)]),
+          h.span([h.Class("icon-label-btn-text")], ["Fehler"]),
+        ],
+      ),
+  }),
+]
 
 const viewEditorModal = (
   {
@@ -2145,6 +2154,7 @@ const viewEditorModal = (
     isFolder,
     isTextFile,
     isLlmBarOpen,
+    isMaximized,
     isEditingExisting,
     nameValue,
     maybeValidationError,
@@ -2157,6 +2167,7 @@ const viewEditorModal = (
     readonly isFolder: boolean
     readonly isTextFile: boolean
     readonly isLlmBarOpen: boolean
+    readonly isMaximized: boolean
     readonly isEditingExisting: boolean
     readonly nameValue: string
     readonly maybeValidationError: Option.Option<string>
@@ -2170,27 +2181,46 @@ const viewEditorModal = (
 
   return h.div(
     [
-      h.Class("modal-overlay"),
+      h.Class(isMaximized ? "modal-overlay modal-overlay-maximized" : "modal-overlay"),
       h.Role("dialog"),
       h.AriaModal(true),
       h.AriaLabelledBy("modal-title"),
     ],
     [
       h.div(
-        [h.Class("modal-content")],
+        [h.Class(isMaximized ? "modal-content is-maximized" : "modal-content")],
         [
           h.header(
             [h.Class("modal-header")],
             [
               h.h3([h.Id("modal-title"), h.Class("modal-title")], [titleText]),
-              h.button(
+              h.div(
+                [h.Class("modal-header-actions")],
                 [
-                  h.Type("button"),
-                  h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
-                  h.OnClick(Message.ClickedClose()),
+                  !isFolder
+                    ? h.button(
+                        [
+                          h.Type("button"),
+                          h.Id("modal-btn-maximize"),
+                          h.Class("modal-close-btn modal-header-btn"),
+                          h.AriaLabel(isMaximized ? "Wiederherstellen" : "Maximieren"),
+                          h.AriaPressed(isMaximized ? "true" : "false"),
+                          h.Title(isMaximized ? "Wiederherstellen" : "Maximieren"),
+                          h.OnClick(Message.ClickedToggleMaximize()),
+                        ],
+                        [isMaximized ? "❐" : "⛶"],
+                      )
+                    : h.empty,
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("modal-close-btn"),
+                      h.AriaLabel("Schließen"),
+                      h.OnClick(Message.ClickedClose()),
+                    ],
+                    [viewIcon("close", h)],
+                  ),
                 ],
-                [viewIcon("close", h)],
               ),
             ],
           ),
@@ -2225,15 +2255,14 @@ const viewEditorModal = (
                   ...extraBodyNodes,
                 ],
               ),
-              isTextFile && isLlmBarOpen ? viewLlmBar(maybePasteError, h) : h.empty,
               h.footer(
                 [h.Class("modal-footer")],
                 [
-                  h.div(
-                    [h.Class("modal-footer-left")],
-                    [
-                      isEditingExisting && !(isTextFile && isLlmBarOpen)
-                        ? h.button(
+                  ...(isTextFile && isLlmBarOpen
+                    ? viewLlmButtons(maybePasteError, h)
+                    : isEditingExisting
+                      ? [
+                          h.button(
                             [
                               h.Type("button"),
                               h.Id("modal-btn-delete"),
@@ -2249,88 +2278,86 @@ const viewEditorModal = (
                               ),
                               h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
                             ],
-                          )
-                        : h.empty,
-                    ],
-                  ),
-                  h.div(
-                    [h.Class("modal-footer-right")],
-                    [
-                      isTextFile
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("modal-btn-toggle-llm"),
-                              h.Class("btn btn-secondary icon-label-btn"),
-                              h.AriaLabel("LLM-Werkzeuge"),
-                              h.AriaExpanded(isLlmBarOpen),
-                              h.DataAttribute("tip", "LLM-Werkzeuge"),
-                              h.OnClick(Message.ClickedToggleLlmBar()),
-                            ],
-                            [
-                              h.span(
-                                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                [viewIcon("ai", h)],
-                              ),
-                              h.span([h.Class("icon-label-btn-text")], ["LLM"]),
-                            ],
-                          )
-                        : h.empty,
-                      h.button(
+                          ),
+                        ]
+                      : []),
+                  isTextFile
+                    ? h.button(
                         [
                           h.Type("button"),
-                          h.Id("modal-btn-cancel"),
-                          h.Class("btn btn-secondary icon-label-btn"),
-                          h.AriaLabel("Abbrechen"),
-                          h.DataAttribute("tip", "Abbrechen"),
-                          h.OnClick(Message.ClickedClose()),
+                          h.Id("modal-btn-toggle-llm"),
+                          h.Class("btn btn-secondary icon-label-btn modal-footer-push-right"),
+                          h.AriaLabel("LLM-Werkzeuge"),
+                          h.AriaExpanded(isLlmBarOpen),
+                          h.DataAttribute("tip", "LLM-Werkzeuge"),
+                          h.OnClick(Message.ClickedToggleLlmBar()),
                         ],
                         [
                           h.span(
                             [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                            [viewIcon("close", h)],
+                            [viewIcon("ai", h)],
                           ),
-                          h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
+                          h.span([h.Class("icon-label-btn-text")], ["LLM"]),
                         ],
+                      )
+                    : h.empty,
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Id("modal-btn-cancel"),
+                      h.Class(
+                        isTextFile
+                          ? "btn btn-secondary icon-label-btn"
+                          : "btn btn-secondary icon-label-btn modal-footer-push-right",
                       ),
-                      h.button(
-                        [
-                          h.Type("submit"),
-                          h.Id("modal-btn-save"),
-                          h.Class("btn btn-primary icon-label-btn save-modal-btn"),
-                          h.AriaLabel(saveLabel),
-                          h.DataAttribute("tip", saveLabel),
-                          h.OnClick(Message.ClickedSave(), { defaultAction: "Prevent" }),
-                        ],
-                        [
-                          h.span(
-                            [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                            [viewIcon("save", h)],
-                          ),
-                          h.span([h.Class("icon-label-btn-text")], [saveLabel]),
-                        ],
+                      h.AriaLabel("Abbrechen"),
+                      h.DataAttribute("tip", "Abbrechen"),
+                      h.OnClick(Message.ClickedClose()),
+                    ],
+                    [
+                      h.span(
+                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                        [viewIcon("close", h)],
                       ),
-                      isTextFile && isLlmBarOpen
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("modal-btn-save-and-open"),
-                              h.Class("btn btn-secondary icon-label-btn"),
-                              h.AriaLabel("Speichern und in neuem Tab anzeigen"),
-                              h.DataAttribute("tip", "Speichern und in neuem Tab anzeigen"),
-                              h.OnClick(Message.ClickedSaveAndOpen()),
-                            ],
-                            [
-                              h.span(
-                                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                [viewIcon("desktop", h)],
-                              ),
-                              h.span([h.Class("icon-label-btn-text")], ["Anzeigen"]),
-                            ],
-                          )
-                        : h.empty,
+                      h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
                     ],
                   ),
+                  h.button(
+                    [
+                      h.Type("submit"),
+                      h.Id("modal-btn-save"),
+                      h.Class("btn btn-primary icon-label-btn save-modal-btn"),
+                      h.AriaLabel(saveLabel),
+                      h.DataAttribute("tip", saveLabel),
+                      h.OnClick(Message.ClickedSave(), { defaultAction: "Prevent" }),
+                    ],
+                    [
+                      h.span(
+                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                        [viewIcon("save", h)],
+                      ),
+                      h.span([h.Class("icon-label-btn-text")], [saveLabel]),
+                    ],
+                  ),
+                  isTextFile && isLlmBarOpen
+                    ? h.button(
+                        [
+                          h.Type("button"),
+                          h.Id("modal-btn-save-and-open"),
+                          h.Class("btn btn-secondary icon-label-btn"),
+                          h.AriaLabel("Speichern und in neuem Tab anzeigen"),
+                          h.DataAttribute("tip", "Speichern und in neuem Tab anzeigen"),
+                          h.OnClick(Message.ClickedSaveAndOpen()),
+                        ],
+                        [
+                          h.span(
+                            [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                            [viewIcon("desktop", h)],
+                          ),
+                          h.span([h.Class("icon-label-btn-text")], ["Anzeigen"]),
+                        ],
+                      )
+                    : h.empty,
                 ],
               ),
             ],
@@ -2507,6 +2534,7 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isFolder: false,
           isTextFile: true,
           isLlmBarOpen: state.isLlmBarOpen,
+          isMaximized: state.isMaximized,
           isEditingExisting: false,
           nameValue: state.name,
           maybeValidationError: state.maybeValidationError,
@@ -2528,6 +2556,7 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isFolder: true,
           isTextFile: false,
           isLlmBarOpen: false,
+          isMaximized: false,
           isEditingExisting: false,
           nameValue: name,
           maybeValidationError,
@@ -2546,6 +2575,7 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isFolder: true,
           isTextFile: false,
           isLlmBarOpen: false,
+          isMaximized: false,
           isEditingExisting: true,
           nameValue: name,
           maybeValidationError,
@@ -2564,6 +2594,7 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
       maybeAlertBanner,
       maybePasteError,
       isLlmBarOpen,
+      isMaximized,
     }) =>
       viewEditorModal(
         {
@@ -2572,6 +2603,7 @@ export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
           isFolder: false,
           isTextFile: fileMode._tag === "Text",
           isLlmBarOpen,
+          isMaximized,
           isEditingExisting: true,
           nameValue: name,
           maybeValidationError,

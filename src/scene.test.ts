@@ -132,6 +132,7 @@ describe("PWA Islands Scene Tests", () => {
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           isLlmBarOpen: false,
+          isMaximized: false,
         }),
       }),
     }
@@ -142,7 +143,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-file-preview")).toExist(),
       sceneExpect(selector("#modal-base64-editor")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-toggle-llm")).toBeAbsent(),
-      sceneExpect(selector("#modal-llm-bar")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
       change(selector("#modal-use-base64"), "true"),
       Command.expectExact(Editor.LoadBase64({ entryName: "bild.png", subPath: [] })),
       Command.resolve(
@@ -192,9 +193,9 @@ describe("PWA Islands Scene Tests", () => {
       given(modelWithEditor),
       sceneExpect(selector("#modal-btn-toggle-llm")).toExist(),
       sceneExpect(selector("#modal-btn-toggle-llm")).toContainText("LLM"),
-      sceneExpect(selector("#modal-llm-bar")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
       click(selector("#modal-btn-toggle-llm")),
-      sceneExpect(selector("#modal-llm-bar")).toExist(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toExist(),
       sceneExpect(selector("#modal-btn-copy-dts")).toContainText("/app.d.ts"),
       sceneExpect(selector("#modal-btn-copy-llm")).toContainText("Mit Anleitung"),
       sceneExpect(selector("#modal-btn-copy-hashes")).toContainText("Datei"),
@@ -234,6 +235,7 @@ describe("PWA Islands Scene Tests", () => {
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           isLlmBarOpen: true,
+          isMaximized: false,
         }),
       }),
     }
@@ -278,6 +280,7 @@ describe("PWA Islands Scene Tests", () => {
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           isLlmBarOpen: true,
+          isMaximized: false,
         }),
       }),
     }
@@ -315,6 +318,7 @@ describe("PWA Islands Scene Tests", () => {
       maybeAlertBanner: Option.none(),
       maybePasteError: Option.none(),
       isLlmBarOpen: false,
+      isMaximized: false,
     })
     const modelWithEditFile: Model = {
       ...readyModel,
@@ -331,6 +335,7 @@ describe("PWA Islands Scene Tests", () => {
       maybeAlertBanner: Option.none(),
       maybePasteError: Option.none(),
       isLlmBarOpen: true,
+      isMaximized: false,
     })
 
     scene(
@@ -339,7 +344,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-btn-delete")).toExist(),
       click(selector("#modal-btn-toggle-llm")),
       sceneExpect(selector("#modal-btn-delete")).toBeAbsent(),
-      sceneExpect(selector(".modal-footer-right #modal-btn-save-and-open")).toExist(),
+      sceneExpect(selector(".modal-footer #modal-btn-save-and-open")).toExist(),
       click(selector("#modal-btn-save-and-open")),
       Command.expectExact(Editor.SaveAndOpenChanges({ model: expectedOpenEditModel, subPath: [] })),
       Command.resolve(
@@ -373,7 +378,7 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(modelWithFolderModal),
       sceneExpect(selector("#modal-btn-toggle-llm")).toBeAbsent(),
-      sceneExpect(selector("#modal-llm-bar")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-cancel")).toExist(),
     )
   })
@@ -390,6 +395,7 @@ describe("PWA Islands Scene Tests", () => {
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           isLlmBarOpen: false,
+          isMaximized: false,
         }),
       }),
     }
@@ -401,6 +407,47 @@ describe("PWA Islands Scene Tests", () => {
       click(selector("#modal-btn-delete")),
       sceneExpect(selector(".modal-title")).toHaveText("Eintrag löschen"),
       sceneExpect(text(/wirklich unwiderruflich löschen\?/)).toExist(),
+    )
+  })
+
+  it("toggles maximize state in file editor modal and hides maximize button in folder modal", () => {
+    const modelWithCreateFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.makeCreateFile(),
+      }),
+    }
+    const modelWithFolderModal: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.CreateFolder({
+          name: "Neuer Ordner",
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithCreateFile),
+      sceneExpect(selector("#modal-btn-maximize")).toHaveText("⛶"),
+      sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
+      sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
+      click(selector("#modal-btn-maximize")),
+      sceneExpect(selector("#modal-btn-maximize")).toHaveText("❐"),
+      sceneExpect(selector(".modal-content.is-maximized")).toExist(),
+      sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toExist(),
+      click(selector("#modal-btn-maximize")),
+      sceneExpect(selector("#modal-btn-maximize")).toHaveText("⛶"),
+      sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
+      sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
+    )
+
+    scene(
+      { update, view },
+      given(modelWithFolderModal),
+      sceneExpect(selector("#modal-btn-maximize")).toBeAbsent(),
     )
   })
 

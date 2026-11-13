@@ -1093,6 +1093,7 @@ describe("PWA Islands Story Tests", () => {
             maybeAlertBanner: Option.none(),
             maybePasteError: Option.none(),
             isLlmBarOpen: false,
+            isMaximized: false,
           }),
         }),
       }
