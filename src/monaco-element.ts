@@ -56,6 +56,78 @@ export const languageFromFilename = (filename: string): string => {
 
 const getMonacoTheme = (isDark: boolean): string => (isDark ? "vs-dark" : "vs")
 
+export const computeChangedSpan = (
+  oldText: string,
+  newText: string,
+): { readonly startOffset: number; readonly endOffset: number; readonly text: string } => {
+  const maxPrefix = Math.min(oldText.length, newText.length)
+  let prefixLength = 0
+  while (
+    prefixLength < maxPrefix &&
+    oldText.charCodeAt(prefixLength) === newText.charCodeAt(prefixLength)
+  ) {
+    prefixLength += 1
+  }
+
+  const maxSuffix = Math.min(oldText.length - prefixLength, newText.length - prefixLength)
+  let suffixLength = 0
+  while (
+    suffixLength < maxSuffix &&
+    oldText.charCodeAt(oldText.length - 1 - suffixLength) ===
+      newText.charCodeAt(newText.length - 1 - suffixLength)
+  ) {
+    suffixLength += 1
+  }
+
+  return {
+    startOffset: prefixLength,
+    endOffset: oldText.length - suffixLength,
+    text: newText.slice(prefixLength, newText.length - suffixLength),
+  }
+}
+
+export const applyExternalValueToEditor = (
+  editor: Monaco.editor.IStandaloneCodeEditor,
+  maybeMonaco: Option.Option<typeof Monaco>,
+  currentEditorValue: string,
+  nextValue: string,
+): void => {
+  const model = editor.getModel()
+  if (model === null) {
+    editor.setValue(nextValue)
+    return
+  }
+
+  Option.match(maybeMonaco, {
+    onNone: () => {
+      editor.setValue(nextValue)
+    },
+    onSome: (monacoApi) => {
+      const span = computeChangedSpan(currentEditorValue, nextValue)
+      const startPos = model.getPositionAt(span.startOffset)
+      const endPos = model.getPositionAt(span.endOffset)
+      const range = new monacoApi.Range(
+        startPos.lineNumber,
+        startPos.column,
+        endPos.lineNumber,
+        endPos.column,
+      )
+      editor.pushUndoStop()
+      const applied = editor.executeEdits("external-value", [
+        {
+          range,
+          text: span.text,
+          forceMoveMarkers: true,
+        },
+      ])
+      editor.pushUndoStop()
+      if (!applied) {
+        editor.setValue(nextValue)
+      }
+    },
+  })
+}
+
 export const registerMonacoEditorElement = (): void => {
   if (
     typeof customElements === "undefined" ||
@@ -92,10 +164,11 @@ export const registerMonacoEditorElement = (): void => {
       Option.match(this.maybeEditor, {
         onNone: () => {},
         onSome: (editor) => {
-          if (editor.getValue() !== nextValue) {
+          const currentEditorValue = editor.getValue()
+          if (currentEditorValue !== nextValue) {
             this.isApplyingExternalValue = true
             try {
-              editor.setValue(nextValue)
+              applyExternalValueToEditor(editor, this.maybeMonaco, currentEditorValue, nextValue)
             } finally {
               this.isApplyingExternalValue = false
             }
