@@ -3910,7 +3910,7 @@ const viewLlmChatBar = (
                   h.Disabled(llmChatInput.trim() === ""),
                   h.OnClick(Message.SubmittedLlmChat()),
                 ],
-                [h.span([h.AriaHidden(true)], ["➤"])],
+                [viewIcon("ai", h)],
               ),
         ],
       ),
