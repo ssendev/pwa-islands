@@ -583,6 +583,7 @@ export const Message = defineMessageUnion({
   FailedEditorLlmChat: {
     message: Schema.String,
   },
+  CompletedScrollEditorLlmChatToBottom: {},
   ClickedToggleFileInfo: {},
   ClickedSelectFolder: {},
   ClickedChangeFolder: {},
@@ -1521,6 +1522,16 @@ export const FocusIslandIframe = Command.define("FocusIslandIframe", {
     Effect.catch(() => Effect.succeed(Message.CompletedFocusIslandIframe())),
   ),
 })
+
+export const ScrollEditorLlmChatToBottomIfAtBottom = Command.define(
+  "ScrollEditorLlmChatToBottomIfAtBottom",
+  {
+    messages: [Message.CompletedScrollEditorLlmChatToBottom],
+    execute: Editor.scrollLlmChatToBottomIfAtBottom.pipe(
+      Effect.as(Message.CompletedScrollEditorLlmChatToBottom()),
+    ),
+  },
+)
 
 export const MinimizeWindow = Command.define("MinimizeWindow", {
   messages: [Message.CompletedMinimizeWindow],
@@ -3095,6 +3106,7 @@ export const update = (
         modalState: (current) =>
           Modal.applyEditorLlmChatStream(current, { completedTurns, activeTurn }),
       }),
+      commands: [ScrollEditorLlmChatToBottomIfAtBottom()],
     }),
 
     SucceededEditorLlmChat: ({ messages, maybeUpdatedContent, appliedCount, turns }) => ({
@@ -3107,13 +3119,17 @@ export const update = (
             turns,
           }),
       }),
+      commands: [ScrollEditorLlmChatToBottomIfAtBottom()],
     }),
 
     FailedEditorLlmChat: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
         modalState: (current) => Modal.applyEditorLlmChatFailure(current, errorMessage),
       }),
+      commands: [ScrollEditorLlmChatToBottomIfAtBottom()],
     }),
+
+    CompletedScrollEditorLlmChatToBottom: () => ({ model }),
 
     ClickedToggleFileInfo: () => {
       const nextVisible = !model.showFileInfo

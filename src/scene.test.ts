@@ -1,4 +1,4 @@
-import { Option } from "effect"
+import { Effect, Option } from "effect"
 import {
   Command,
   Subscription,
@@ -13,7 +13,7 @@ import {
   text,
   type,
 } from "foldkit/scene"
-import { describe, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { hashLine } from "./hashline"
 import {
   ActivateOpfsBackend,
@@ -30,6 +30,7 @@ import {
   SavedBackend,
   SaveEditorPreferences,
   SaveHistoryEnabledPreference,
+  ScrollEditorLlmChatToBottomIfAtBottom,
   StorageState,
   TestLlm,
   ToggleFullscreenWindow,
@@ -316,7 +317,10 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
       change(selector("#modal-llm-mode-select"), "Chat"),
-      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      Command.resolveAll(
+        [SaveEditorPreferences, Message.CompletedSaveEditorPreferences()],
+        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
+      ),
       sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Chat"),
       sceneExpect(selector("#modal-llm-chat-input")).toExist(),
       sceneExpect(selector("#modal-llm-model-select")).toExist(),
@@ -368,7 +372,10 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(modelWithSingleThinking),
       change(selector("#modal-llm-mode-select"), "Chat"),
-      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      Command.resolveAll(
+        [SaveEditorPreferences, Message.CompletedSaveEditorPreferences()],
+        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
+      ),
       sceneExpect(selector("#modal-llm-chat-input")).toExist(),
       sceneExpect(selector("#modal-llm-model-select")).toExist(),
       sceneExpect(selector("#modal-llm-thinking-select")).toBeAbsent(),
@@ -391,9 +398,16 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(modelWithLlmEnabled),
       change(selector("#modal-llm-mode-select"), "Chat"),
-      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      Command.resolveAll(
+        [SaveEditorPreferences, Message.CompletedSaveEditorPreferences()],
+        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
+      ),
       type(selector("#modal-llm-chat-input"), "Füge Titel hinzu"),
       keydown(selector("#modal-llm-chat-input"), "Enter"),
+      Command.resolve(
+        Editor.ScrollLlmChatToBottomIfAtBottom,
+        Editor.Message.CompletedScrollLlmChatToBottom(),
+      ),
       sceneExpect(selector(".modal-overlay")).toExist(),
       sceneExpect(selector("#modal-llm-chat-input")).toHaveValue(""),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Füge Titel hinzu"),
@@ -420,6 +434,10 @@ describe("PWA Islands Scene Tests", () => {
             reasoning: "Plane die Änderung",
           },
         }),
+      ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
       ),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Erster Gedanke"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Tool-Aufruf: edit"),
@@ -462,6 +480,10 @@ describe("PWA Islands Scene Tests", () => {
           ],
         }),
       ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
+      ),
       sceneExpect(selector("#modal-file-content")).toHaveValue("<h1>Hallo</h1>"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText(
         "1 Bearbeitung(en) angewendet",
@@ -486,9 +508,16 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(modelWithLlmEnabled),
       change(selector("#modal-llm-mode-select"), "Chat"),
-      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      Command.resolveAll(
+        [SaveEditorPreferences, Message.CompletedSaveEditorPreferences()],
+        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
+      ),
       type(selector("#modal-llm-chat-input"), "Erkläre kurz"),
       click(selector("#modal-btn-send-llm")),
+      Command.resolve(
+        Editor.ScrollLlmChatToBottomIfAtBottom,
+        Editor.Message.CompletedScrollLlmChatToBottom(),
+      ),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
@@ -499,8 +528,16 @@ describe("PWA Islands Scene Tests", () => {
           },
         }),
       ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
+      ),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Teilantwort"),
       click(selector("#modal-btn-send-llm")),
+      Command.resolve(
+        Editor.ScrollLlmChatToBottomIfAtBottom,
+        Editor.Message.CompletedScrollLlmChatToBottom(),
+      ),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Senden"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Erkläre kurz"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Teilantwort"),
@@ -524,9 +561,16 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(modelWithLlmEnabled),
       change(selector("#modal-llm-mode-select"), "Chat"),
-      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      Command.resolveAll(
+        [SaveEditorPreferences, Message.CompletedSaveEditorPreferences()],
+        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
+      ),
       type(selector("#modal-llm-chat-input"), "Erkläre Fehler"),
       click(selector("#modal-btn-send-llm")),
+      Command.resolve(
+        Editor.ScrollLlmChatToBottomIfAtBottom,
+        Editor.Message.CompletedScrollLlmChatToBottom(),
+      ),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
@@ -537,10 +581,18 @@ describe("PWA Islands Scene Tests", () => {
           },
         }),
       ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
+      ),
       Subscription.emit(
         Message.FailedEditorLlmChat({
           message: "HTTP 500",
         }),
+      ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
       ),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Erster Versuch"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("HTTP 500"),
@@ -1561,5 +1613,94 @@ describe("PWA Islands Scene Tests", () => {
         "Alle Versionen wurden gelöscht.",
       ),
     )
+  })
+})
+
+describe("LLM chat auto-scroll", () => {
+  const createChatHistoryElement = ({
+    scrollTop,
+    clientHeight,
+    scrollHeight,
+  }: {
+    readonly scrollTop: number
+    readonly clientHeight: number
+    readonly scrollHeight: number
+  }): HTMLDivElement => {
+    const el = document.createElement("div")
+    el.id = "modal-llm-chat-history"
+    let currentScrollTop = scrollTop
+    let currentScrollHeight = scrollHeight
+    Object.defineProperty(el, "scrollTop", {
+      get: () => currentScrollTop,
+      set: (value: number) => {
+        currentScrollTop = value
+      },
+      configurable: true,
+    })
+    Object.defineProperty(el, "clientHeight", {
+      get: () => clientHeight,
+      configurable: true,
+    })
+    Object.defineProperty(el, "scrollHeight", {
+      get: () => currentScrollHeight,
+      set: (value: number) => {
+        currentScrollHeight = value
+      },
+      configurable: true,
+    })
+    document.body.appendChild(el)
+    return el
+  }
+
+  it("scrollt automatisch mit, wenn der Chat bereits am unteren Rand ist", async () => {
+    document.body.innerHTML = ""
+    const el = createChatHistoryElement({
+      scrollTop: 295,
+      clientHeight: 200,
+      scrollHeight: 500,
+    })
+
+    const runPromise = Effect.runPromise(Editor.scrollLlmChatToBottomIfAtBottom)
+    Object.defineProperty(el, "scrollHeight", {
+      get: () => 640,
+      configurable: true,
+    })
+    await runPromise
+
+    expect(el.scrollTop).toBe(640)
+    document.body.innerHTML = ""
+  })
+
+  it("scrollt nicht mit, wenn der Chat nicht am unteren Rand ist", async () => {
+    document.body.innerHTML = ""
+    const el = createChatHistoryElement({
+      scrollTop: 120,
+      clientHeight: 200,
+      scrollHeight: 500,
+    })
+
+    const runPromise = Effect.runPromise(Editor.scrollLlmChatToBottomIfAtBottom)
+    Object.defineProperty(el, "scrollHeight", {
+      get: () => 640,
+      configurable: true,
+    })
+    await runPromise
+
+    expect(el.scrollTop).toBe(120)
+    document.body.innerHTML = ""
+  })
+
+  it("scrollt ans untere Ende, wenn der Chat-Verlauf neu eingeblendet wird", async () => {
+    document.body.innerHTML = ""
+    const runPromise = Effect.runPromise(Editor.scrollLlmChatToBottomIfAtBottom)
+    const el = createChatHistoryElement({
+      scrollTop: 0,
+      clientHeight: 200,
+      scrollHeight: 420,
+    })
+    await runPromise
+
+    expect(el.scrollTop).toBe(420)
+    document.body.innerHTML = ""
   })
 })

@@ -4,6 +4,7 @@ import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
 import type * as Html from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
+import * as Render from "foldkit/render"
 import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
 import type { ModelOption, ThinkingLevelOption } from "./agent"
@@ -636,6 +637,7 @@ export const Message = defineMessageUnion({
   FailedLlmChat: {
     message: Schema.String,
   },
+  CompletedScrollLlmChatToBottom: {},
   SelectedLlmModel: {
     value: Schema.String,
   },
@@ -819,6 +821,32 @@ export const FocusNameInput = Command.define("FocusNameInput", {
   execute: Dom.focus("#modal-file-name").pipe(
     Effect.as(Message.CompletedFocusNameInput()),
     Effect.catch(() => Effect.succeed(Message.CompletedFocusNameInput())),
+  ),
+})
+
+const LLM_CHAT_SCROLL_BOTTOM_THRESHOLD_PX = 16
+
+const isElementAtBottom = (element: HTMLElement): boolean =>
+  element.scrollTop + element.clientHeight >=
+  element.scrollHeight - LLM_CHAT_SCROLL_BOTTOM_THRESHOLD_PX
+
+export const scrollLlmChatToBottomIfAtBottom: Effect.Effect<void> = Effect.gen(function* () {
+  const beforeElement = document.getElementById("modal-llm-chat-history")
+  const wasAtBottom = beforeElement === null || isElementAtBottom(beforeElement)
+  if (!wasAtBottom) {
+    return
+  }
+  yield* Render.afterCommit
+  const afterElement = document.getElementById("modal-llm-chat-history")
+  if (afterElement !== null) {
+    afterElement.scrollTop = afterElement.scrollHeight
+  }
+})
+
+export const ScrollLlmChatToBottomIfAtBottom = Command.define("ScrollLlmChatToBottomIfAtBottom", {
+  messages: [Message.CompletedScrollLlmChatToBottom],
+  execute: scrollLlmChatToBottomIfAtBottom.pipe(
+    Effect.as(Message.CompletedScrollLlmChatToBottom()),
   ),
 })
 
@@ -2014,13 +2042,20 @@ export const update = (
         ConfirmDelete: () => Option.none(),
         ConfirmOverwrite: () => Option.none(),
       })
-      return {
-        model: nextModel,
-        outMessage: Option.match(maybeNextMode, {
-          onNone: () => OutMessage.None(),
-          onSome: (llmBarMode) => OutMessage.ChangedLlmBarMode({ llmBarMode }),
-        }),
-      }
+      const outMessage = Option.match(maybeNextMode, {
+        onNone: () => OutMessage.None(),
+        onSome: (llmBarMode) => OutMessage.ChangedLlmBarMode({ llmBarMode }),
+      })
+      return nextMode === "Chat"
+        ? {
+            model: nextModel,
+            commands: [ScrollLlmChatToBottomIfAtBottom()],
+            outMessage,
+          }
+        : {
+            model: nextModel,
+            outMessage,
+          }
     },
 
     UpdatedLlmChatInput: ({ value }) => ({
@@ -2060,6 +2095,7 @@ export const update = (
                 LlmChatDisplayEntry.Question({ content: prompt }),
               ],
             }),
+            commands: [ScrollLlmChatToBottomIfAtBottom()],
             outMessage: OutMessage.None(),
           }
         },
@@ -2087,6 +2123,7 @@ export const update = (
                   LlmChatDisplayEntry.Question({ content: prompt }),
                 ],
               }),
+              commands: [ScrollLlmChatToBottomIfAtBottom()],
               outMessage: OutMessage.None(),
             }),
             Binary: () => ({ model, outMessage: OutMessage.None() }),
@@ -2098,8 +2135,16 @@ export const update = (
         ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
 
-    ClickedStopLlmChat: () => ({
-      model: Model.match(model, {
+    ClickedStopLlmChat: () => {
+      const wasSending = Model.match(model, {
+        CreateFile: (state) => state.llmChatState._tag === "Sending",
+        EditFile: (state) => state.llmChatState._tag === "Sending",
+        CreateFolder: () => false,
+        EditFolder: () => false,
+        ConfirmDelete: () => false,
+        ConfirmOverwrite: () => false,
+      })
+      const nextModel = Model.match(model, {
         CreateFile: (state) =>
           state.llmChatState._tag === "Sending"
             ? modifyFields(state, {
@@ -2124,17 +2169,28 @@ export const update = (
         EditFolder: () => model,
         ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
-      }),
-      outMessage: OutMessage.None(),
-    }),
+      })
+      return wasSending
+        ? {
+            model: nextModel,
+            commands: [ScrollLlmChatToBottomIfAtBottom()],
+            outMessage: OutMessage.None(),
+          }
+        : {
+            model: nextModel,
+            outMessage: OutMessage.None(),
+          }
+    },
 
     SucceededLlmChat: (payload) => ({
       model: applyLlmChatSuccess(model, payload),
+      commands: [ScrollLlmChatToBottomIfAtBottom()],
       outMessage: OutMessage.None(),
     }),
 
     FailedLlmChat: ({ message }) => ({
       model: applyLlmChatFailure(model, message),
+      commands: [ScrollLlmChatToBottomIfAtBottom()],
       outMessage: OutMessage.None(),
     }),
 
@@ -2165,13 +2221,28 @@ export const update = (
         ConfirmDelete: () => Option.none(),
         ConfirmOverwrite: () => Option.none(),
       })
-      return {
-        model: nextModel,
-        outMessage: Option.match(maybeMax, {
-          onNone: () => OutMessage.None(),
-          onSome: (isMaximized) => OutMessage.ChangedMaximize({ isMaximized }),
-        }),
-      }
+      const isChatOpen = Model.match(nextModel, {
+        CreateFile: (state) => state.llmBarMode === "Chat",
+        EditFile: (state) => state.llmBarMode === "Chat",
+        CreateFolder: () => false,
+        EditFolder: () => false,
+        ConfirmDelete: () => false,
+        ConfirmOverwrite: () => false,
+      })
+      const outMessage = Option.match(maybeMax, {
+        onNone: () => OutMessage.None(),
+        onSome: (isMaximized) => OutMessage.ChangedMaximize({ isMaximized }),
+      })
+      return isChatOpen
+        ? {
+            model: nextModel,
+            commands: [ScrollLlmChatToBottomIfAtBottom()],
+            outMessage,
+          }
+        : {
+            model: nextModel,
+            outMessage,
+          }
     },
 
     StartedResizeEditorSplit: ({ startScreenX, pointerId }) => {
@@ -2732,6 +2803,11 @@ export const update = (
     }),
 
     CompletedFocusNameInput: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
+    CompletedScrollLlmChatToBottom: () => ({
       model,
       outMessage: OutMessage.None(),
     }),
