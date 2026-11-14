@@ -1,6 +1,7 @@
 // LLM / AGENT
 // Alles rund um den OpenAI-kompatiblen LLM-Zugang lebt hier.
 
+import { Schema } from "effect"
 import {
   DEFAULT_EDIT_FORMAT,
   EditApplyResult,
@@ -9,6 +10,15 @@ import {
   formatToolResultForFormat,
   getEditorEditToolForFormat,
 } from "./edit-format"
+
+export const LlmProvider = Schema.Literals(["openai", "language-model"])
+export type LlmProvider = typeof LlmProvider.Type
+
+export const LANGUAGE_MODEL_OPTION_VALUE = "__language_model__"
+export const LANGUAGE_MODEL_OPTION_LABEL = "Browser-KI"
+
+export const isLanguageModelSelection = (model: string): boolean =>
+  model.trim() === LANGUAGE_MODEL_OPTION_VALUE
 
 export type LlmSettings = {
   enabled: boolean
@@ -30,7 +40,10 @@ export type LlmSelection = {
 
 export type LlmTestMode = "models" | "chat" | "tools"
 
-export type LlmRequestConfig = LlmSettings & LlmSelection
+export type LlmRequestConfig = LlmSettings &
+  LlmSelection & {
+    readonly provider?: LlmProvider
+  }
 
 export type LlmReplyParts = {
   content: string
@@ -320,19 +333,28 @@ const parseLabeledOptions = (raw: string): ReadonlyArray<LabeledOption> => {
 export const parseModelOptions = (raw: string): ReadonlyArray<ModelOption> =>
   parseLabeledOptions(raw)
 
-/** Kombiniert manuelle, entdeckte und das aktive Modell dedupliziert zu Select-Optionen. */
+/** Kombiniert manuelle, entdeckte, optionale Browser-KI und das aktive Modell dedupliziert zu Select-Optionen. */
 export const resolveModelOptions = (
   models: string,
   discoveredModels: ReadonlyArray<string>,
   activeModel: string,
+  includeLanguageModel = false,
 ): ReadonlyArray<ModelOption> => {
   const manualOptions = parseModelOptions(models)
   const trimmedActive = activeModel.trim()
+  const nativeOptions: ReadonlyArray<ModelOption> = includeLanguageModel
+    ? [{ label: LANGUAGE_MODEL_OPTION_LABEL, value: LANGUAGE_MODEL_OPTION_VALUE }]
+    : []
+  const activeOptions: ReadonlyArray<ModelOption> =
+    trimmedActive !== "" && trimmedActive !== LANGUAGE_MODEL_OPTION_VALUE
+      ? [{ label: trimmedActive, value: trimmedActive }]
+      : []
   const seen = new Set<string>()
   return [
     ...manualOptions,
     ...discoveredModels.map((id) => ({ label: id, value: id })),
-    ...(trimmedActive !== "" ? [{ label: trimmedActive, value: trimmedActive }] : []),
+    ...nativeOptions,
+    ...activeOptions,
   ].filter((item) => {
     if (seen.has(item.value)) {
       return false
@@ -574,6 +596,186 @@ const readSseStream = async <T>(
   }
 }
 
+type LanguageModelAvailability =
+  | "unavailable"
+  | "downloadable"
+  | "downloading"
+  | "available"
+  | "no"
+  | "after-download"
+  | "readily"
+
+type LanguageModelInitialPrompt = {
+  readonly role: "system" | "user" | "assistant"
+  readonly content: string
+}
+
+type LanguageModelSession = {
+  prompt(input: string, options?: { readonly signal?: AbortSignal }): Promise<string>
+  promptStreaming(
+    input: string,
+    options?: { readonly signal?: AbortSignal },
+  ): AsyncIterable<string> | ReadableStream<string>
+  destroy(): void
+}
+
+type LanguageModelDownloadMonitor = {
+  addEventListener(
+    type: "downloadprogress",
+    listener: (event: { readonly loaded?: number }) => void,
+  ): void
+}
+
+type LanguageModelGlobal = {
+  availability(): Promise<LanguageModelAvailability>
+  create(options?: {
+    readonly initialPrompts?: ReadonlyArray<LanguageModelInitialPrompt>
+    readonly signal?: AbortSignal
+    readonly monitor?: (monitor: LanguageModelDownloadMonitor) => void
+  }): Promise<LanguageModelSession>
+}
+
+const isObjectOrFunction = (value: unknown): value is Record<string, unknown> =>
+  (typeof value === "object" || typeof value === "function") && value !== null
+
+const getLanguageModelGlobal = (): LanguageModelGlobal | undefined => {
+  if (typeof globalThis === "undefined" || !("LanguageModel" in globalThis)) {
+    return undefined
+  }
+  const candidate: unknown = Reflect.get(globalThis, "LanguageModel")
+  if (
+    !isObjectOrFunction(candidate) ||
+    typeof candidate.availability !== "function" ||
+    typeof candidate.create !== "function"
+  ) {
+    return undefined
+  }
+  return candidate as unknown as LanguageModelGlobal
+}
+
+export const detectLanguageModelAvailability = async (): Promise<boolean> => {
+  const api = getLanguageModelGlobal()
+  if (!api) {
+    return false
+  }
+  try {
+    const availability = await api.availability()
+    return availability !== "unavailable" && availability !== "no"
+  } catch {
+    return false
+  }
+}
+
+const resolveProvider = (config: LlmRequestConfig): LlmProvider =>
+  config.provider ?? (isLanguageModelSelection(config.model) ? "language-model" : "openai")
+
+const isReadableStream = (
+  value: AsyncIterable<string> | ReadableStream<string>,
+): value is ReadableStream<string> =>
+  isRecord(value) && typeof (value as { getReader?: unknown }).getReader === "function"
+
+const readLanguageModelStream = async (
+  stream: AsyncIterable<string> | ReadableStream<string>,
+  onChunk: (accumulated: string) => void,
+): Promise<string> => {
+  if (isReadableStream(stream)) {
+    const reader = stream.getReader()
+    const pump = async (acc: string): Promise<string> => {
+      const { done, value } = await reader.read()
+      if (done) {
+        return acc
+      }
+      const next = typeof value === "string" && value !== "" ? acc + value : acc
+      if (next !== acc) {
+        onChunk(next)
+      }
+      return pump(next)
+    }
+    try {
+      return await pump("")
+    } finally {
+      reader.releaseLock()
+    }
+  }
+  const iterator = stream[Symbol.asyncIterator]()
+  const pump = async (acc: string): Promise<string> => {
+    const { done, value } = await iterator.next()
+    if (done) {
+      return acc
+    }
+    const next = typeof value === "string" && value !== "" ? acc + value : acc
+    if (next !== acc) {
+      onChunk(next)
+    }
+    return pump(next)
+  }
+  return pump("")
+}
+
+const runLanguageModelPrompt = async ({
+  initialPrompts,
+  prompt,
+  streaming,
+  onUpdate,
+  signal,
+}: {
+  readonly initialPrompts: ReadonlyArray<LanguageModelInitialPrompt>
+  readonly prompt: string
+  readonly streaming: boolean
+  readonly onUpdate?: (parts: LlmReplyParts) => void
+  readonly signal?: AbortSignal
+}): Promise<string> => {
+  const api = getLanguageModelGlobal()
+  if (!api) {
+    throw new Error("Die Browser-KI (LanguageModel-API) wird von diesem Browser nicht unterstützt.")
+  }
+  const availability = await api.availability()
+  if (availability === "unavailable" || availability === "no") {
+    throw new Error("Die Browser-KI (LanguageModel-API) ist auf diesem Gerät nicht verfügbar.")
+  }
+  const needsDownload =
+    availability === "downloadable" ||
+    availability === "downloading" ||
+    availability === "after-download"
+  if (needsDownload) {
+    onUpdate?.({ content: "Lade Browser-KI-Modell herunter …", reasoning: "" })
+  }
+  const session = await api.create({
+    ...(initialPrompts.length > 0 ? { initialPrompts } : {}),
+    ...(signal ? { signal } : {}),
+    ...(needsDownload && onUpdate
+      ? {
+          monitor(monitor) {
+            monitor.addEventListener("downloadprogress", (event) => {
+              const percent =
+                typeof event.loaded === "number" && Number.isFinite(event.loaded)
+                  ? Math.round(event.loaded * 100)
+                  : undefined
+              onUpdate({
+                content:
+                  percent !== undefined
+                    ? `Lade Browser-KI-Modell herunter (${percent} %) …`
+                    : "Lade Browser-KI-Modell herunter …",
+                reasoning: "",
+              })
+            })
+          },
+        }
+      : {}),
+  })
+  try {
+    if (!streaming) {
+      return await session.prompt(prompt, signal ? { signal } : undefined)
+    }
+    const stream = session.promptStreaming(prompt, signal ? { signal } : undefined)
+    return await readLanguageModelStream(stream, (content) => {
+      onUpdate?.({ content, reasoning: "" })
+    })
+  } finally {
+    session.destroy()
+  }
+}
+
 /**
  * Sendet eine Chat-Anfrage im Streaming-Modus und ruft `onUpdate` bei jedem Chunk
  * mit dem bis dahin akkumulierten Antworttext und Reasoning auf.
@@ -584,6 +786,16 @@ export const streamChatParts = async (
   onUpdate: (parts: LlmReplyParts) => void,
   signal?: AbortSignal,
 ): Promise<LlmReplyParts> => {
+  if (resolveProvider(config) === "language-model") {
+    const content = await runLanguageModelPrompt({
+      initialPrompts: [],
+      prompt,
+      streaming: true,
+      onUpdate,
+      ...(signal ? { signal } : {}),
+    })
+    return { content, reasoning: "" }
+  }
   const requestBody = buildChatRequestBody({ ...config, streaming: true }, prompt)
   const response = await fetch(joinUrl(config.baseUrl, "/chat/completions"), {
     method: "POST",
@@ -791,6 +1003,27 @@ export const testLlmConnection = async (
   config: LlmRequestConfig,
   mode?: LlmTestMode,
 ): Promise<LlmTestResult> => {
+  if (resolveProvider(config) === "language-model") {
+    if (mode === "models") {
+      throw new Error("Modellliste wird von der Browser-KI (LanguageModel-API) nicht unterstützt.")
+    }
+    if (mode === "tools") {
+      throw new Error("Tool-Calls werden von der Browser-KI (LanguageModel-API) nicht unterstützt.")
+    }
+    const content = await runLanguageModelPrompt({
+      initialPrompts: [],
+      prompt: "Antworte nur mit: ok",
+      streaming: config.streaming,
+    })
+    if (content.trim() === "") {
+      throw new Error("Unerwartete Antwort: leere Chat-Antwort")
+    }
+    return {
+      content: content.trim(),
+      reasoning: "",
+      models: [],
+    }
+  }
   if (mode === "models") {
     const models = await listModels(config)
     return {
@@ -937,6 +1170,34 @@ const extractNonStreamingEditorResponse = (
   return { content, reasoning: reasoning.trim(), toolCalls }
 }
 
+const toLanguageModelPrompts = (
+  messages: ReadonlyArray<EditorChatMessage>,
+): {
+  readonly initialPrompts: ReadonlyArray<LanguageModelInitialPrompt>
+  readonly prompt: string
+} => {
+  const mapped: ReadonlyArray<LanguageModelInitialPrompt> = messages.map((msg) => {
+    if (msg._tag === "System") {
+      return { role: "system" as const, content: msg.content }
+    }
+    if (msg._tag === "Assistant") {
+      return { role: "assistant" as const, content: msg.content }
+    }
+    return { role: "user" as const, content: msg.content }
+  })
+  const last = mapped[mapped.length - 1]
+  if (last && last.role === "user") {
+    return {
+      initialPrompts: mapped.slice(0, -1),
+      prompt: last.content,
+    }
+  }
+  return {
+    initialPrompts: mapped,
+    prompt: "",
+  }
+}
+
 export const requestEditorChatCompletion = async (
   config: LlmRequestConfig,
   messages: ReadonlyArray<EditorChatMessage>,
@@ -947,6 +1208,21 @@ export const requestEditorChatCompletion = async (
   readonly reasoning: string
   readonly toolCalls: ReadonlyArray<EditorChatToolCall>
 }> => {
+  if (resolveProvider(config) === "language-model") {
+    const { initialPrompts, prompt } = toLanguageModelPrompts(messages)
+    const content = await runLanguageModelPrompt({
+      initialPrompts,
+      prompt,
+      streaming: config.streaming,
+      ...(onUpdate ? { onUpdate } : {}),
+      ...(signal ? { signal } : {}),
+    })
+    return {
+      content,
+      reasoning: "",
+      toolCalls: [],
+    }
+  }
   const activeModel = resolveTestModel(config)
   if (activeModel === "") {
     throw new Error("Kein Modell ausgewählt oder angegeben")
@@ -1081,6 +1357,27 @@ const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): s
     .filter((entry) => entry !== "")
     .join("\n\n")
 
+const extractEditBlockFromText = (raw: string): string => {
+  const match = raw.match(/```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)```/)
+  if (match && typeof match[1] === "string") {
+    return match[1]
+  }
+  return raw
+}
+
+const hasEditAttemptForFormat = (format: EditFormat, text: string): boolean => {
+  if (/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?```/.test(text)) {
+    return true
+  }
+  if (format === "hashline") {
+    return /^(REPLACE|INSERT_AFTER|INSERT_BEFORE|DELETE)\s+\d+:/m.test(text)
+  }
+  if (format === "search-replace") {
+    return text.includes("<<<<<<< SEARCH")
+  }
+  return /^@@/m.test(text)
+}
+
 export const runEditorChatTurn = async ({
   config,
   fileName,
@@ -1125,7 +1422,11 @@ export const runEditorChatTurn = async ({
         : []
 
     const editCall = reply.toolCalls.find((call) => call.name === "edit")
-    if (!editCall) {
+    const hasInlineEdit =
+      !editCall &&
+      resolveProvider(config) === "language-model" &&
+      hasEditAttemptForFormat(config.editFormat, reply.content)
+    if (!editCall && !hasInlineEdit) {
       return {
         messages: [...messages, assistantMsg],
         appliedCount: 0,
@@ -1133,14 +1434,17 @@ export const runEditorChatTurn = async ({
       }
     }
 
-    const editsText = extractEditorToolArgs(editCall.arguments)
+    const editsText = editCall
+      ? extractEditorToolArgs(editCall.arguments)
+      : extractEditBlockFromText(reply.content)
+    const feedbackToolCallId = editCall ? editCall.id : "language-model-edit"
     const applyResult = applyEditsForFormat(config.editFormat, currentContent, editsText)
 
     return EditApplyResult.match(applyResult, {
       Ok: ({ content: nextContent, appliedCount, updatedSnippet }) => {
         const toolMsg: EditorChatMessage = {
           _tag: "Tool",
-          toolCallId: editCall.id,
+          toolCallId: feedbackToolCallId,
           content: formatToolResultForFormat(config.editFormat, fileName, updatedSnippet),
         }
         return {
@@ -1153,7 +1457,7 @@ export const runEditorChatTurn = async ({
       Error: ({ message: errorMessage }) => {
         const toolMsg: EditorChatMessage = {
           _tag: "Tool",
-          toolCallId: editCall.id,
+          toolCallId: feedbackToolCallId,
           content: `Fehler beim Anwenden der Änderungen: ${errorMessage}`,
         }
         const nextMessages = [...messages, assistantMsg, toolMsg]

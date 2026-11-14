@@ -7,7 +7,7 @@ import { defineMessageUnion } from "foldkit/message"
 import * as Render from "foldkit/render"
 import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
-import type { ModelOption, ThinkingLevelOption } from "./agent"
+import { type ModelOption, type ThinkingLevelOption, isLanguageModelSelection } from "./agent"
 import {
   BinaryEdit,
   EditorFileMode,
@@ -3802,7 +3802,8 @@ const viewLlmChatModelControls = (
 ): ReadonlyArray<Html.Html> => {
   const { llmModelOptions, llmSelectedModel, llmThinkingLevels, llmSelectedThinkingLevel } =
     viewInputs
-  const hasMultipleThinkingLevels = Array.length(llmThinkingLevels) > 1
+  const hasMultipleThinkingLevels =
+    Array.length(llmThinkingLevels) > 1 && !isLanguageModelSelection(llmSelectedModel)
   const isSending = llmChatState._tag === "Sending"
 
   return [

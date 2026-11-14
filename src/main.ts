@@ -74,8 +74,11 @@ import {
 } from "./route"
 import {
   type EditorChatMessage,
+  LANGUAGE_MODEL_OPTION_VALUE,
   THINKING_PRESETS,
+  detectLanguageModelAvailability,
   emptyLlmSettings,
+  isLanguageModelSelection,
   listModels,
   parseModelList,
   parseThinkingLevels,
@@ -319,6 +322,7 @@ export const Model = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
   hasTauri: Schema.Boolean,
+  hasLanguageModel: Schema.Boolean,
   isWindowsOrLinux: Schema.Boolean,
   isWindows: Schema.Boolean,
   isWindowFocused: Schema.Boolean,
@@ -541,6 +545,7 @@ export const Message = defineMessageUnion({
   UpdatedLlmThinkingLevels: { value: Schema.String },
   UpdatedLlmThinkingLevel: { value: Schema.String },
   UpdatedLlmExtraArgs: { value: Schema.String },
+  CompletedDetectLanguageModel: { isAvailable: Schema.Boolean },
   CompletedLoadLlmSettings: {
     enabled: Schema.Boolean,
     editFormat: EditFormat,
@@ -818,6 +823,13 @@ export const SaveFileInfoPreference = Command.define("SaveFileInfoPreference", {
       Effect.map(() => Message.CompletedSaveFileInfoPreference()),
       Effect.catch(() => Effect.succeed(Message.CompletedSaveFileInfoPreference())),
     ),
+})
+
+export const DetectLanguageModel = Command.define("DetectLanguageModel", {
+  messages: [Message.CompletedDetectLanguageModel],
+  execute: Effect.promise(() => detectLanguageModelAvailability()).pipe(
+    Effect.map((isAvailable) => Message.CompletedDetectLanguageModel({ isAvailable })),
+  ),
 })
 
 export const LoadLlmSettings = Command.define("LoadLlmSettings", {
@@ -1816,6 +1828,7 @@ export const init = (
         hasDirectoryPicker: false,
         hasOPFS: false,
         hasTauri: false,
+        hasLanguageModel: false,
         isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
         isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
         isWindowFocused: true,
@@ -1881,6 +1894,7 @@ export const init = (
       hasDirectoryPicker: flags.hasDirectoryPicker,
       hasOPFS: flags.hasOPFS,
       hasTauri: flags.hasTauri,
+      hasLanguageModel: false,
       isWindowsOrLinux: flags.isWindowsOrLinux ?? (flags.hasTauri && isWindowsOrLinux()),
       isWindows: flags.isWindows ?? (flags.hasTauri && isWindows()),
       isWindowFocused: true,
@@ -1941,6 +1955,7 @@ export const init = (
       LoadFileInfoPreference(),
       LoadLlmSettings(),
       LoadEditorPreferences(),
+      DetectLanguageModel(),
     ],
   }
 }
@@ -2200,6 +2215,21 @@ const handleUseFsa = (
       ],
     }),
   })
+}
+
+const isChatAvailable = (model: Model): boolean => model.llmEnabled || model.hasLanguageModel
+
+const resolveEffectiveLlmModel = (model: Model): string => {
+  const modelOptions = resolveModelOptions(
+    model.llmEnabled ? model.llmModels : "",
+    model.llmEnabled ? model.llmDiscoveredModels : [],
+    model.llmEnabled ? model.llmModel : "",
+    model.hasLanguageModel,
+  )
+  if (model.llmEnabled && model.llmModel.trim() !== "") {
+    return model.llmModel.trim()
+  }
+  return modelOptions[0]?.value ?? ""
 }
 
 const maybeLoadEditorLlmModels = (
@@ -2965,7 +2995,9 @@ export const update = (
       const effectiveModel =
         model.llmDraftModel.trim() !== ""
           ? model.llmDraftModel.trim()
-          : (parseModelList(model.llmDraftModels)[0] ?? model.llmDiscoveredModels[0] ?? "")
+          : (parseModelList(model.llmDraftModels)[0] ??
+            model.llmDiscoveredModels[0] ??
+            (model.hasLanguageModel ? LANGUAGE_MODEL_OPTION_VALUE : ""))
       const config = {
         enabled: model.llmDraftEnabled,
         editFormat: model.llmDraftEditFormat,
@@ -2980,10 +3012,11 @@ export const update = (
         model: effectiveModel,
         thinkingLevel: model.llmDraftThinkingLevel,
       }
+      const isNativeModel = isLanguageModelSelection(effectiveModel)
       if (
         (mode === "chat" || mode === "tools") &&
         config.streaming &&
-        resolveTestModel(config) !== ""
+        ((isNativeModel && mode === "chat") || (!isNativeModel && resolveTestModel(config) !== ""))
       ) {
         return {
           model: modifyFields(model, {
@@ -3021,6 +3054,12 @@ export const update = (
 
     FailedTestLlm: ({ message }) => ({
       model: modifyFields(model, { llmTestState: () => LlmTestState.Failed({ message }) }),
+    }),
+
+    CompletedDetectLanguageModel: ({ isAvailable }) => ({
+      model: modifyFields(model, {
+        hasLanguageModel: () => isAvailable,
+      }),
     }),
 
     CompletedLoadLlmSettings: ({
@@ -3476,7 +3515,7 @@ export const update = (
       const modalResult = Modal.update(model.modalState, modalMessage, {
         subPath,
         existingEntries,
-        llmEnabled: model.llmEnabled,
+        llmEnabled: isChatAvailable(model),
         llmEditFormat: model.llmEditFormat,
         editorDefaults: {
           isMaximized: model.editorIsMaximized,
@@ -4042,13 +4081,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           return editor.llmChatState._tag === "Sending" ? editor.llmChatState : undefined
         })()
 
-        const modelOptions = resolveModelOptions(
-          model.llmModels,
-          model.llmDiscoveredModels,
-          model.llmModel,
-        )
-        const effectiveModel =
-          model.llmModel.trim() !== "" ? model.llmModel.trim() : (modelOptions[0]?.value ?? "")
+        const effectiveModel = resolveEffectiveLlmModel(model)
 
         return {
           isSending: sending !== undefined,
@@ -4056,7 +4089,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           fileName: sending?.fileName ?? "",
           content: sending?.content ?? "",
           messages: sending?.messages ?? [],
-          enabled: model.llmEnabled,
+          enabled: isChatAvailable(model),
           editFormat: model.llmEditFormat,
           baseUrl: model.llmBaseUrl,
           apiKey: model.llmApiKey,
@@ -4093,7 +4126,10 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                         return [
                           {
                             _tag: "System" as const,
-                            content: formatSystemPromptForFormat(deps.editFormat),
+                            content: formatSystemPromptForFormat(
+                              deps.editFormat,
+                              !isLanguageModelSelection(deps.model),
+                            ),
                           },
                           { _tag: "User" as const, content: formatApiDtsMessage(apiDts) },
                           {
@@ -4742,6 +4778,14 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           h.span([], ["Chat-API aktivieren"]),
                         ],
                       ),
+                      model.hasLanguageModel
+                        ? h.p(
+                            [h.Id("llm-native-detected-hint"), h.Class("form-hint")],
+                            [
+                              "Browser-KI (LanguageModel-API) erkannt – Chat im Editor ist automatisch aktiv.",
+                            ],
+                          )
+                        : h.empty,
                     ],
                   ),
                   ...(model.llmDraftEnabled
@@ -4950,15 +4994,17 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             model.llmDraftModels,
                             model.llmDiscoveredModels,
                             model.llmDraftModel,
+                            model.hasLanguageModel,
                           )
                           const availableLevels = parseThinkingLevels(model.llmDraftThinkingLevels)
-                          const hasThinking =
-                            model.llmDraftThinkingParam.trim() !== "" && availableLevels.length > 0
-
                           const selectedModel =
                             model.llmDraftModel.trim() !== ""
                               ? model.llmDraftModel.trim()
                               : (modelOptions[0]?.value ?? "")
+                          const hasThinking =
+                            model.llmDraftThinkingParam.trim() !== "" &&
+                            availableLevels.length > 0 &&
+                            !isLanguageModelSelection(selectedModel)
 
                           return h.div(
                             [h.Class("form-row")],
@@ -5053,12 +5099,18 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   : mode === "chat"
                                     ? "Chat testen"
                                     : "Tools testen"
+                              const isNativeSelected = isLanguageModelSelection(model.llmDraftModel)
+                              const isDisabled =
+                                isRunning ||
+                                (mode === "chat"
+                                  ? model.llmDraftBaseUrl.trim() === "" && !isNativeSelected
+                                  : model.llmDraftBaseUrl.trim() === "" || isNativeSelected)
                               return h.button(
                                 [
                                   h.Type("button"),
                                   h.Id(`btn-test-llm-${mode}`),
                                   h.Class("btn btn-secondary"),
-                                  h.Disabled(model.llmDraftBaseUrl.trim() === "" || isRunning),
+                                  h.Disabled(isDisabled),
                                   h.OnClick(Message.ClickedTestLlm({ mode })),
                                 ],
                                 [label],
@@ -5504,14 +5556,16 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
 
 const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
   const llmModelOptions = resolveModelOptions(
-    model.llmModels,
-    model.llmDiscoveredModels,
-    model.llmModel,
+    model.llmEnabled ? model.llmModels : "",
+    model.llmEnabled ? model.llmDiscoveredModels : [],
+    model.llmEnabled ? model.llmModel : "",
+    model.hasLanguageModel,
   )
-  const llmSelectedModel =
-    model.llmModel.trim() !== "" ? model.llmModel.trim() : (llmModelOptions[0]?.value ?? "")
+  const llmSelectedModel = resolveEffectiveLlmModel(model)
   const llmThinkingLevels =
-    model.llmThinkingParam.trim() !== "" ? parseThinkingLevels(model.llmThinkingLevels) : []
+    model.llmEnabled && model.llmThinkingParam.trim() !== ""
+      ? parseThinkingLevels(model.llmThinkingLevels)
+      : []
 
   return h.submodel({
     slotId: "modal",
@@ -5522,7 +5576,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
       hasOPFS: model.hasOPFS,
       hasTauri: model.hasTauri,
       llm: {
-        llmEnabled: model.llmEnabled,
+        llmEnabled: isChatAvailable(model),
         llmModelOptions,
         llmSelectedModel,
         llmThinkingLevels,

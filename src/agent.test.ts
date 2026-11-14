@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   buildChatRequestBody,
+  detectLanguageModelAvailability,
   emptyLlmSelection,
   emptyLlmSettings,
   extractChatReply,
@@ -754,5 +755,226 @@ describe("runEditorChatTurn", () => {
       toolCallId: "call_ok",
       content: expect.stringContaining("Änderungen angewendet"),
     })
+  })
+})
+
+describe("LanguageModel-API", () => {
+  it("erkennt LanguageModel auch dann, wenn es wie im Browser eine Konstruktor-Funktion ist", async () => {
+    class FakeLanguageModel {
+      static availability = vi.fn(async () => "available")
+      static create = vi.fn()
+    }
+    vi.stubGlobal("LanguageModel", FakeLanguageModel)
+
+    await expect(detectLanguageModelAvailability()).resolves.toBe(true)
+    expect(FakeLanguageModel.availability).toHaveBeenCalledTimes(1)
+  })
+
+  it("wirft eine verständliche Fehlermeldung, wenn LanguageModel im Browser fehlt", async () => {
+    vi.stubGlobal("LanguageModel", undefined)
+
+    await expect(
+      testLlmConnection(
+        {
+          ...emptyLlmSettings,
+          ...emptyLlmSelection,
+          enabled: true,
+          provider: "language-model",
+          streaming: false,
+        },
+        "chat",
+      ),
+    ).rejects.toThrow("LanguageModel-API")
+  })
+
+  it("wirft bei availability === 'unavailable'", async () => {
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "unavailable"),
+      create: vi.fn(),
+    })
+
+    await expect(
+      testLlmConnection(
+        {
+          ...emptyLlmSettings,
+          ...emptyLlmSelection,
+          enabled: true,
+          provider: "language-model",
+          streaming: false,
+        },
+        "chat",
+      ),
+    ).rejects.toThrow("nicht verfügbar")
+  })
+
+  it("testet Chat über LanguageModel.create und session.prompt und zerstört die Session", async () => {
+    const destroy = vi.fn()
+    const prompt = vi.fn(async () => "ok")
+    const create = vi.fn(async () => ({ prompt, promptStreaming: vi.fn(), destroy }))
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "available"),
+      create,
+    })
+
+    const result = await testLlmConnection(
+      {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        enabled: true,
+        provider: "language-model",
+        streaming: false,
+      },
+      "chat",
+    )
+
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(prompt).toHaveBeenCalledWith("Antworte nur mit: ok", undefined)
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(result.content).toBe("ok")
+  })
+
+  it("streamt Chunks über session.promptStreaming", async () => {
+    const destroy = vi.fn()
+    const promptStreaming = vi.fn(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield "o"
+        yield "k"
+      },
+    }))
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "available"),
+      create: vi.fn(async () => ({ prompt: vi.fn(), promptStreaming, destroy })),
+    })
+
+    const updates: Array<string> = []
+    const result = await streamChatParts(
+      {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        enabled: true,
+        provider: "language-model",
+        streaming: true,
+      },
+      "Sag ok",
+      (parts) => updates.push(parts.content),
+    )
+
+    expect(updates).toEqual(["o", "ok"])
+    expect(result).toEqual({ content: "ok", reasoning: "" })
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it("informiert über Download-Fortschritt, wenn availability === 'downloading' ist", async () => {
+    const destroy = vi.fn()
+    const promptStreaming = vi.fn(() => ({
+      async *[Symbol.asyncIterator]() {
+        yield "ok"
+      },
+    }))
+    const create = vi.fn(
+      async (options?: {
+        monitor?: (m: {
+          addEventListener: (type: string, cb: (e: { loaded: number }) => void) => void
+        }) => void
+      }) => {
+        options?.monitor?.({
+          addEventListener: (_type, cb) => {
+            cb({ loaded: 0.42 })
+          },
+        })
+        return { prompt: vi.fn(), promptStreaming, destroy }
+      },
+    )
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "downloading"),
+      create,
+    })
+
+    const updates: Array<string> = []
+    const result = await streamChatParts(
+      {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        enabled: true,
+        provider: "language-model",
+        streaming: true,
+      },
+      "Sag ok",
+      (parts) => updates.push(parts.content),
+    )
+
+    expect(updates).toEqual([
+      "Lade Browser-KI-Modell herunter …",
+      "Lade Browser-KI-Modell herunter (42 %) …",
+      "ok",
+    ])
+    expect(result).toEqual({ content: "ok", reasoning: "" })
+    expect(destroy).toHaveBeenCalledTimes(1)
+  })
+
+  it("wendet Hashline-Edits aus Markdown-Codeblock über LanguageModel-API an", async () => {
+    const { hashLine } = await import("./hashline")
+    const original = "<p>Alt</p>"
+    const h1 = hashLine(original)
+    const destroy = vi.fn()
+    const prompt = vi.fn(
+      async () =>
+        `Hier ist die Änderung:\n\`\`\`hashline\nREPLACE 1:${h1}\n<p>Neu</p>\nEND\n\`\`\``,
+    )
+    const create = vi.fn(async () => ({ prompt, promptStreaming: vi.fn(), destroy }))
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "available"),
+      create,
+    })
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        enabled: true,
+        provider: "language-model",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: original,
+      initialMessages: [
+        { _tag: "System", content: "hash-sys" },
+        { _tag: "User", content: "Ändere Alt zu Neu" },
+      ],
+    })
+
+    expect(create).toHaveBeenCalledWith({
+      initialPrompts: [{ role: "system", content: "hash-sys" }],
+    })
+    expect(prompt).toHaveBeenCalledWith("Ändere Alt zu Neu", undefined)
+    expect(destroy).toHaveBeenCalledTimes(1)
+    expect(result.updatedContent).toBe("<p>Neu</p>")
+    expect(result.appliedCount).toBe(1)
+  })
+
+  it("gibt reine Textantwort ohne Edit-Block unverändert als Chat-Antwort zurück", async () => {
+    const destroy = vi.fn()
+    const prompt = vi.fn(async () => "Diese Datei enthält einen Absatz.")
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "available"),
+      create: vi.fn(async () => ({ prompt, promptStreaming: vi.fn(), destroy })),
+    })
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        enabled: true,
+        provider: "language-model",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: "<p>Alt</p>",
+      initialMessages: [{ _tag: "User", content: "Was steht in der Datei?" }],
+    })
+
+    expect(result.updatedContent).toBeUndefined()
+    expect(result.appliedCount).toBe(0)
+    expect(result.turns[0]?.content).toBe("Diese Datei enthält einen Absatz.")
   })
 })

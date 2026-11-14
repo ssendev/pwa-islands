@@ -46,12 +46,14 @@ const HASHLINE_COMMAND_LINES = [
   "```",
 ]
 
-export const formatHashlineSystemPrompt = (): string =>
+export const formatHashlineSystemPrompt = (useToolCalls = true): string =>
   [
     "## Anleitung für die Antwort (Hash-Anchored Line Edits)",
     "",
     "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
-    "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:",
+    useToolCalls
+      ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:"
+      : "Antworte **nur** mit einem Markdown-Codeblock (` ```hashline `) mit folgenden Befehlen:",
     "",
     ...HASHLINE_COMMAND_LINES,
   ].join("\n")

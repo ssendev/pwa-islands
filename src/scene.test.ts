@@ -68,6 +68,7 @@ const readyModel: Model = {
   hasDirectoryPicker: true,
   hasOPFS: true,
   hasTauri: false,
+  hasLanguageModel: false,
   isWindowsOrLinux: true,
   isWindows: false,
   isWindowFocused: true,
@@ -1257,6 +1258,76 @@ describe("PWA Islands Scene Tests", () => {
         "Kurzer Gedanke",
       ),
       sceneExpect(selector("#llm-test-result .llm-response-content")).toContainText("ok"),
+    )
+  })
+
+  it("aktiviert Chat im Editor automatisch, wenn LanguageModel-API erkannt wurde, und bietet natives Modell neben API-Modellen an", () => {
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        hasLanguageModel: true,
+        llmEnabled: false,
+        editorLlmBarMode: "Chat",
+        modalState: ModalState.Editor({
+          editor: {
+            ...Editor.makeCreateFile(),
+            llmBarMode: "Chat",
+          },
+        }),
+      }),
+      sceneExpect(selector("#modal-llm-mode-select option[value='Chat']")).toExist(),
+      sceneExpect(selector("#modal-llm-chat-input")).toExist(),
+      sceneExpect(selector("#modal-llm-model-select")).toHaveValue("__language_model__"),
+      sceneExpect(
+        selector("#modal-llm-model-select option[value='__language_model__']"),
+      ).toContainText("Browser-KI"),
+    )
+
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        hasLanguageModel: true,
+        llmEnabled: true,
+        llmModels: "gpt-4o, qwen3",
+        llmModel: "gpt-4o",
+        editorLlmBarMode: "Chat",
+        modalState: ModalState.Editor({
+          editor: {
+            ...Editor.makeCreateFile(),
+            llmBarMode: "Chat",
+          },
+        }),
+      }),
+      sceneExpect(selector("#modal-llm-model-select option[value='gpt-4o']")).toExist(),
+      sceneExpect(selector("#modal-llm-model-select option[value='qwen3']")).toExist(),
+      sceneExpect(selector("#modal-llm-model-select option[value='__language_model__']")).toExist(),
+      change(selector("#modal-llm-model-select"), "__language_model__"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      sceneExpect(selector("#modal-llm-model-select")).toHaveValue("__language_model__"),
+    )
+  })
+
+  it("zeigt bei aktivierter API in den Einstellungen sowohl API-Modelle als auch das native Modell zur Auswahl", () => {
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        hasLanguageModel: true,
+        isSettingsDialogOpen: true,
+        llmDraftEnabled: true,
+        llmDraftBaseUrl: "",
+        llmDraftModels: "gpt-4o-mini",
+      }),
+      sceneExpect(selector("#llm-native-detected-hint")).toExist(),
+      sceneExpect(selector("#llm-active-model option[value='gpt-4o-mini']")).toExist(),
+      sceneExpect(selector("#llm-active-model option[value='__language_model__']")).toExist(),
+      sceneExpect(selector("#btn-test-llm-chat")).toBeDisabled(),
+      change(selector("#llm-active-model"), "__language_model__"),
+      sceneExpect(selector("#btn-test-llm-chat")).toBeEnabled(),
+      sceneExpect(selector("#btn-test-llm-models")).toBeDisabled(),
+      sceneExpect(selector("#btn-test-llm-tools")).toBeDisabled(),
     )
   })
 

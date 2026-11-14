@@ -120,14 +120,16 @@ const UNIFIED_DIFF_INSTRUCTIONS = [
   "```",
 ]
 
-export const formatSystemPromptForFormat = (format: EditFormat): string =>
+export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = true): string =>
   Match.value(format).pipe(
-    Match.when("hashline", () => formatHashlineSystemPrompt()),
+    Match.when("hashline", () => formatHashlineSystemPrompt(useToolCalls)),
     Match.when("search-replace", () =>
       [
         "## Anleitung für die Antwort (Search & Replace)",
         "",
-        "Verwende für Änderungen an der Datei das Werkzeug `edit` mit `SEARCH`/`REPLACE`-Blöcken:",
+        useToolCalls
+          ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit `SEARCH`/`REPLACE`-Blöcken:"
+          : "Antworte **nur** mit einem Markdown-Codeblock mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
         "",
         ...SEARCH_REPLACE_INSTRUCTIONS,
       ].join("\n"),
@@ -136,7 +138,9 @@ export const formatSystemPromptForFormat = (format: EditFormat): string =>
       [
         "## Anleitung für die Antwort (Vereinfachter Unified Diff)",
         "",
-        "Verwende für Änderungen an der Datei das Werkzeug `edit` mit einem vereinfachten Unified Diff:",
+        useToolCalls
+          ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit einem vereinfachten Unified Diff:"
+          : "Antworte **nur** mit einem Markdown-Codeblock (` ```diff `) im vereinfachten Unified-Diff-Format:",
         "",
         ...UNIFIED_DIFF_INSTRUCTIONS,
       ].join("\n"),

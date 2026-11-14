@@ -91,6 +91,7 @@ const readyModel: Model = {
   hasDirectoryPicker: true,
   hasOPFS: true,
   hasTauri: false,
+  hasLanguageModel: false,
   isWindowsOrLinux: true,
   isWindows: false,
   isWindowFocused: true,
@@ -206,7 +207,7 @@ describe("PWA Islands Story Tests", () => {
           },
         }),
       )
-      expect(result.commands).toHaveLength(4)
+      expect(result.commands).toHaveLength(5)
     })
   })
 
@@ -2435,6 +2436,54 @@ describe("PWA Islands Story Tests", () => {
         Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
         model((m) => {
           expect(m.editorSplitPercent).toBe(50)
+        }),
+      )
+    })
+
+    it("aktiviert Chat im Editor automatisch nach CompletedDetectLanguageModel und erlaubt Wechsel zwischen API-Modellen und nativem Modell", () => {
+      story(
+        update,
+        given(readyModel),
+        message(Message.CompletedDetectLanguageModel({ isAvailable: true })),
+        model((m) => {
+          expect(m.hasLanguageModel).toBe(true)
+        }),
+        message(Message.ClickedOpenSettingsDialog()),
+        message(Message.ToggledLlmEnabled({ isChecked: true })),
+        message(Message.SelectedLlmModel({ value: "__language_model__" })),
+        message(Message.ClickedTestLlm({ mode: "chat" })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.llmTestState).toEqual(
+            LlmTestState.Streaming({ mode: "chat", content: "", reasoning: "" }),
+          )
+        }),
+        message(Message.ClickedSaveSettingsDialog()),
+        Command.expectExact(
+          SaveLlmSettings({
+            enabled: true,
+            editFormat: "hashline",
+            baseUrl: "",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          }),
+          SaveEditorPreferences({
+            isMaximized: false,
+            llmBarMode: "Closed",
+            llmModel: "__language_model__",
+            llmThinkingLevel: "",
+            editorSplitPercent: 62,
+          }),
+        ),
+        Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
+        Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+        model((m) => {
+          expect(m.llmModel).toBe("__language_model__")
         }),
       )
     })
