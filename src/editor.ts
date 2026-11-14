@@ -4025,7 +4025,7 @@ const viewEditorModal = (
                 [h.Id("modal-title"), h.Class("modal-title")],
                 isNameToggleable
                   ? [
-                      "Datei bearbeiten: ",
+                      h.span([h.Class("modal-title-prefix")], ["Datei bearbeiten: "]),
                       h.button(
                         [
                           h.Type("button"),

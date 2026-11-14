@@ -1417,6 +1417,10 @@ code {
 }
 
 @media (max-width: 520px) {
+  .modal-title-prefix {
+    display: none;
+  }
+
   .icon-label-btn .icon-label-btn-text {
     display: none;
   }
