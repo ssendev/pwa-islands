@@ -138,6 +138,54 @@ export const closePreview = (state: ModalState): ModalState =>
     Help: () => state,
   })
 
+export const isConfirmingDelete = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: ({ editor }) => Editor.isConfirmingDelete(editor),
+    ImportConflict: () => false,
+    Help: () => false,
+  })
+
+export const cancelDelete = (state: ModalState): ModalState =>
+  ModalState.match(state, {
+    Closed: () => state,
+    Editor: ({ editor }) => ModalState.Editor({ editor: Editor.cancelDelete(editor) }),
+    ImportConflict: () => state,
+    Help: () => state,
+  })
+
+export const isHistoryOpen = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: ({ editor }) => Editor.isHistoryOpen(editor),
+    ImportConflict: () => false,
+    Help: () => false,
+  })
+
+export const closeHistory = (state: ModalState): ModalState =>
+  ModalState.match(state, {
+    Closed: () => state,
+    Editor: ({ editor }) => ModalState.Editor({ editor: Editor.closeHistory(editor) }),
+    ImportConflict: () => state,
+    Help: () => state,
+  })
+
+export const isConfirmingOverwrite = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: ({ editor }) => Editor.isConfirmingOverwrite(editor),
+    ImportConflict: () => false,
+    Help: () => false,
+  })
+
+export const cancelOverwrite = (state: ModalState): ModalState =>
+  ModalState.match(state, {
+    Closed: () => state,
+    Editor: ({ editor }) => ModalState.Editor({ editor: Editor.cancelOverwrite(editor) }),
+    ImportConflict: () => state,
+    Help: () => state,
+  })
+
 const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
   quickstart: "Quickstart: Mit KI bearbeiten",
   api: "PWA Islands bauen",

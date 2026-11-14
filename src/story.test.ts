@@ -1250,6 +1250,157 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
+    it("closes only the topmost stacked modal on Escape (confirm delete, history + preview, confirm overwrite, settings dialog)", () => {
+      const modelWithDeleteConfirm: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: Editor.Model.EditFile({
+            originalName: "index.html",
+            name: "index.html",
+            fileMode: EditorFileMode.Text({ content: "<p>Hello</p>" }),
+            maybeValidationError: Option.none(),
+            maybePasteError: Option.none(),
+            llmBarMode: "Closed",
+            llmChatInput: "",
+            llmChatMessages: [],
+            llmChatDisplay: [],
+            llmChatState: Editor.LlmChatState.Idle(),
+            isMaximized: false,
+            isEditingName: false,
+            isPreviewOpen: false,
+            editorSplitPercent: 62,
+            editorSplitDrag: Option.none(),
+            canUndo: false,
+            canRedo: false,
+            historyState: Editor.HistoryState.Closed(),
+            isConfirmingDelete: true,
+          }),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithDeleteConfirm),
+        message(Message.PressedEscape()),
+        Command.expectNone(),
+        model((m) => {
+          expect(Modal.isOpen(m.modalState)).toBe(true)
+          expect(Modal.isConfirmingDelete(m.modalState)).toBe(false)
+        }),
+        message(Message.PressedEscape()),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), Modal.RevokeActivePreviewUrl()),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        Command.resolve(
+          Modal.RevokeActivePreviewUrl,
+          Modal.Message.CompletedRevokeActivePreviewUrl(),
+        ),
+        model((m) => {
+          expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+
+      const modelWithHistoryPreview: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: Editor.Model.EditFile({
+            originalName: "index.html",
+            name: "index.html",
+            fileMode: EditorFileMode.Text({ content: "<p>Hello</p>" }),
+            maybeValidationError: Option.none(),
+            maybePasteError: Option.none(),
+            llmBarMode: "Closed",
+            llmChatInput: "",
+            llmChatMessages: [],
+            llmChatDisplay: [],
+            llmChatState: Editor.LlmChatState.Idle(),
+            isMaximized: false,
+            isEditingName: false,
+            isPreviewOpen: false,
+            editorSplitPercent: 62,
+            editorSplitDrag: Option.none(),
+            canUndo: false,
+            canRedo: false,
+            historyState: Editor.HistoryState.Open({
+              entries: [],
+              isConfirmingClear: false,
+              isHistoryEnabled: true,
+              maybePreviewContent: Option.some("<p>Old</p>"),
+            }),
+            isConfirmingDelete: false,
+          }),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithHistoryPreview),
+        message(Message.PressedEscape()),
+        Command.expectNone(),
+        model((m) => {
+          expect(Modal.isPreviewOpen(m.modalState)).toBe(false)
+          expect(Modal.isHistoryOpen(m.modalState)).toBe(true)
+        }),
+        message(Message.PressedEscape()),
+        Command.expectNone(),
+        model((m) => {
+          expect(Modal.isHistoryOpen(m.modalState)).toBe(false)
+          expect(Modal.isOpen(m.modalState)).toBe(true)
+        }),
+        message(Message.PressedEscape()),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), Modal.RevokeActivePreviewUrl()),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        Command.resolve(
+          Modal.RevokeActivePreviewUrl,
+          Modal.Message.CompletedRevokeActivePreviewUrl(),
+        ),
+        model((m) => {
+          expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+
+      const modelWithOverwriteAndSettings: Model = {
+        ...readyModel,
+        isSettingsDialogOpen: true,
+        modalState: ModalState.Editor({
+          editor: Editor.Model.ConfirmOverwrite({
+            targetName: "existing.html",
+            source: Editor.OverwriteSource.CreateFile({
+              content: "<h1>Neu</h1>",
+              selectedTemplateId: "blank",
+              userTemplates: [],
+            }),
+          }),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithOverwriteAndSettings),
+        message(Message.PressedEscape()),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.isSettingsDialogOpen).toBe(false)
+          expect(Modal.isConfirmingOverwrite(m.modalState)).toBe(true)
+        }),
+        message(Message.PressedEscape()),
+        Command.expectNone(),
+        model((m) => {
+          expect(Modal.isConfirmingOverwrite(m.modalState)).toBe(false)
+          expect(Modal.isCreatingFile(m.modalState)).toBe(true)
+        }),
+        message(Message.PressedEscape()),
+        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), Modal.RevokeActivePreviewUrl()),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        Command.resolve(
+          Modal.RevokeActivePreviewUrl,
+          Modal.Message.CompletedRevokeActivePreviewUrl(),
+        ),
+        model((m) => {
+          expect(m.modalState).toEqual(ModalState.Closed())
+        }),
+      )
+    })
+
     it("handles copying LLM context in the Editor modal and shows a global toast", () => {
       const modelWithEditor: Model = {
         ...readyModel,

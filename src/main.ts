@@ -3520,6 +3520,27 @@ export const update = (
           ...(shouldNavigateBack ? { commands: [NavigateHistoryBack()] } : {}),
         }
       }
+      if (Modal.isConfirmingDelete(model.modalState)) {
+        return {
+          model: modifyFields(model, {
+            modalState: Modal.cancelDelete,
+          }),
+        }
+      }
+      if (Modal.isHistoryOpen(model.modalState)) {
+        return {
+          model: modifyFields(model, {
+            modalState: Modal.closeHistory,
+          }),
+        }
+      }
+      if (Modal.isConfirmingOverwrite(model.modalState)) {
+        return {
+          model: modifyFields(model, {
+            modalState: Modal.cancelOverwrite,
+          }),
+        }
+      }
       if (Modal.isLlmModeMenuOpen(model.modalState)) {
         return {
           model: modifyFields(model, {

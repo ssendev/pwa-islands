@@ -497,6 +497,100 @@ export const closePreview = (model: Model): Model =>
     ConfirmOverwrite: () => model,
   })
 
+export const isConfirmingDelete = (model: Model): boolean =>
+  Model.match(model, {
+    EditFolder: (folder) => folder.isConfirmingDelete,
+    EditFile: (file) => file.isConfirmingDelete,
+    CreateFile: () => false,
+    CreateFolder: () => false,
+    ConfirmOverwrite: () => false,
+  })
+
+export const cancelDelete = (model: Model): Model =>
+  Model.match(model, {
+    EditFolder: (folder) => modifyFields(folder, { isConfirmingDelete: () => false }),
+    EditFile: (file) => modifyFields(file, { isConfirmingDelete: () => false }),
+    CreateFile: () => model,
+    CreateFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+export const isHistoryOpen = (model: Model): boolean =>
+  Model.match(model, {
+    EditFile: (file) => file.historyState._tag !== "Closed",
+    CreateFile: () => false,
+    CreateFolder: () => false,
+    EditFolder: () => false,
+    ConfirmOverwrite: () => false,
+  })
+
+export const closeHistory = (model: Model): Model =>
+  Model.match(model, {
+    EditFile: (file) => modifyFields(file, { historyState: () => HistoryState.Closed() }),
+    CreateFile: () => model,
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+export const isConfirmingOverwrite = (model: Model): boolean => model._tag === "ConfirmOverwrite"
+
+export const cancelOverwrite = (model: Model): Model =>
+  Model.match(model, {
+    ConfirmOverwrite: ({ targetName, source }) =>
+      OverwriteSource.match(source, {
+        CreateFile: ({ content, selectedTemplateId, userTemplates }) =>
+          Model.CreateFile({
+            name: targetName,
+            content,
+            selectedTemplateId,
+            userTemplates,
+            isSavingTemplate: false,
+            isDeletingTemplate: false,
+            newTemplateLabel: "",
+            maybeValidationError: Option.none(),
+            maybePasteError: Option.none(),
+            llmBarMode: "Closed",
+            isLlmModeMenuOpen: false,
+            llmChatInput: "",
+            llmChatMessages: [],
+            llmChatDisplay: [],
+            llmChatState: LlmChatState.Idle(),
+            isMaximized: false,
+            isPreviewOpen: false,
+            editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+            editorSplitDrag: Option.none(),
+          }),
+        EditFile: ({ originalName, fileMode }) =>
+          Model.EditFile({
+            originalName,
+            name: targetName,
+            fileMode,
+            maybeValidationError: Option.none(),
+            maybePasteError: Option.none(),
+            llmBarMode: "Closed",
+            isLlmModeMenuOpen: false,
+            llmChatInput: "",
+            llmChatMessages: [],
+            llmChatDisplay: [],
+            llmChatState: LlmChatState.Idle(),
+            isMaximized: false,
+            isEditingName: false,
+            isPreviewOpen: false,
+            editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+            editorSplitDrag: Option.none(),
+            canUndo: false,
+            canRedo: false,
+            historyState: HistoryState.Closed(),
+            isConfirmingDelete: false,
+          }),
+      }),
+    CreateFile: () => model,
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    EditFile: () => model,
+  })
+
 const getTextFileContext = (
   model: Model,
 ): Option.Option<{ readonly fileName: string; readonly content: string }> =>
@@ -2590,65 +2684,10 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
-    ClickedCancelOverwrite: () =>
-      Model.match(model, {
-        ConfirmOverwrite: ({ targetName, source }) =>
-          OverwriteSource.match(source, {
-            CreateFile: ({ content, selectedTemplateId, userTemplates }) => ({
-              model: Model.CreateFile({
-                name: targetName,
-                content,
-                selectedTemplateId,
-                userTemplates,
-                isSavingTemplate: false,
-                isDeletingTemplate: false,
-                newTemplateLabel: "",
-                maybeValidationError: Option.none(),
-                maybePasteError: Option.none(),
-                llmBarMode: "Closed",
-                isLlmModeMenuOpen: false,
-                llmChatInput: "",
-                llmChatMessages: [],
-                llmChatDisplay: [],
-                llmChatState: LlmChatState.Idle(),
-                isMaximized: false,
-                isPreviewOpen: false,
-                editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
-                editorSplitDrag: Option.none(),
-              }),
-              outMessage: OutMessage.None(),
-            }),
-            EditFile: ({ originalName, fileMode }) => ({
-              model: Model.EditFile({
-                originalName,
-                name: targetName,
-                fileMode,
-                maybeValidationError: Option.none(),
-                maybePasteError: Option.none(),
-                llmBarMode: "Closed",
-                isLlmModeMenuOpen: false,
-                llmChatInput: "",
-                llmChatMessages: [],
-                llmChatDisplay: [],
-                llmChatState: LlmChatState.Idle(),
-                isMaximized: false,
-                isEditingName: false,
-                isPreviewOpen: false,
-                editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
-                editorSplitDrag: Option.none(),
-                canUndo: false,
-                canRedo: false,
-                historyState: HistoryState.Closed(),
-                isConfirmingDelete: false,
-              }),
-              outMessage: OutMessage.None(),
-            }),
-          }),
-        CreateFile: () => ({ model, outMessage: OutMessage.None() }),
-        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
-        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
-        EditFile: () => ({ model, outMessage: OutMessage.None() }),
-      }),
+    ClickedCancelOverwrite: () => ({
+      model: cancelOverwrite(model),
+      outMessage: OutMessage.None(),
+    }),
 
     ClickedDelete: () =>
       Model.match(model, {
@@ -2700,20 +2739,10 @@ export const update = (
         ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
 
-    ClickedCancelDelete: () =>
-      Model.match(model, {
-        EditFolder: (folder) => ({
-          model: modifyFields(folder, { isConfirmingDelete: () => false }),
-          outMessage: OutMessage.None(),
-        }),
-        EditFile: (file) => ({
-          model: modifyFields(file, { isConfirmingDelete: () => false }),
-          outMessage: OutMessage.None(),
-        }),
-        CreateFile: () => ({ model, outMessage: OutMessage.None() }),
-        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
-        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
-      }),
+    ClickedCancelDelete: () => ({
+      model: cancelDelete(model),
+      outMessage: OutMessage.None(),
+    }),
 
     ClickedClose: () => ({
       model,
@@ -2897,17 +2926,10 @@ export const update = (
       }
     },
 
-    ClickedCloseHistory: () => {
-      if (model._tag !== "EditFile") {
-        return { model, outMessage: OutMessage.None() }
-      }
-      return {
-        model: modifyFields(model, {
-          historyState: () => HistoryState.Closed(),
-        }),
-        outMessage: OutMessage.None(),
-      }
-    },
+    ClickedCloseHistory: () => ({
+      model: closeHistory(model),
+      outMessage: OutMessage.None(),
+    }),
 
     SucceededLoadFullHistory: ({ entries, isHistoryEnabled }) => {
       if (model._tag !== "EditFile") {
