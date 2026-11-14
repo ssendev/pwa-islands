@@ -1522,7 +1522,9 @@ describe("PWA Islands Scene Tests", () => {
       change(selector("#editor-history-enabled-checkbox"), "true"),
       Command.resolve(Editor.SaveHistoryEnabled, Editor.Message.CompletedSaveHistoryEnabled()),
       sceneExpect(selector("#modal-btn-undo")).toExist(),
+      sceneExpect(selector("#modal-btn-undo")).toBeDisabled(),
       sceneExpect(selector("#modal-btn-redo")).toExist(),
+      sceneExpect(selector("#modal-btn-redo")).toBeDisabled(),
     )
   })
 

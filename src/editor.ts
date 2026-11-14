@@ -2714,6 +2714,8 @@ export const update = (
             originalName: () => savedName,
             name: () => savedName,
             maybeOpfsHistoryCursor: () => Option.none(),
+            hasHistoryEntries: (current) =>
+              model.fileMode._tag === "Text" && model.isHistoryEnabled !== false ? true : current,
           }),
           outMessage: OutMessage.EntriesUpdated({
             entries,
@@ -2830,7 +2832,10 @@ export const update = (
           outMessage: OutMessage.None(),
         }
       }
-      if (Option.exists(model.maybeOpfsHistoryCursor, (cursor) => cursor <= 0)) {
+      if (
+        model.hasHistoryEntries === false ||
+        Option.exists(model.maybeOpfsHistoryCursor, (cursor) => cursor <= 0)
+      ) {
         return { model, outMessage: OutMessage.None() }
       }
       return {
@@ -4814,7 +4819,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                     ? {
                         canUndo:
                           Array.isReadonlyArrayNonEmpty(undoStack) ||
-                          !Option.exists(maybeOpfsHistoryCursor, (cursor) => cursor <= 0),
+                          ((hasHistoryEntries ?? true) &&
+                            !Option.exists(maybeOpfsHistoryCursor, (cursor) => cursor <= 0)),
                         canRedo: Array.isReadonlyArrayNonEmpty(redoStack),
                         showStepButtons:
                           (isHistoryEnabled ?? true) ||
