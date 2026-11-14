@@ -1,12 +1,71 @@
+import { invoke } from "@tauri-apps/api/core"
 import { Option } from "effect"
-import { describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
+  appendFileHistory,
+  clearFileHistory,
   encodeHistoryRecord,
   hashHistoryContent,
+  loadFileHistoryEntryAt,
+  loadFileHistoryIndex,
+  loadPreviousFileHistoryEntry,
   readAllHistoryMeta,
   readHistoryRecordAt,
+  truncateLatestFileHistoryEntry,
   type SliceReader,
 } from "./history"
+
+const tauriFiles = new Map<string, Uint8Array>()
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
+    const subPath = (args?.subPath as ReadonlyArray<string> | undefined) ?? []
+    const fileName = (args?.fileName as string | undefined) ?? ""
+    const key = [...subPath, fileName].join("/")
+    if (cmd === "tauri_history_append") {
+      const incoming = new Uint8Array((args?.data as Array<number>) ?? [])
+      const existing = tauriFiles.get(key) ?? new Uint8Array(0)
+      const combined = new Uint8Array(existing.byteLength + incoming.byteLength)
+      combined.set(existing, 0)
+      combined.set(incoming, existing.byteLength)
+      tauriFiles.set(key, combined)
+      return undefined
+    }
+    if (cmd === "tauri_history_size") {
+      return tauriFiles.get(key)?.byteLength ?? 0
+    }
+    if (cmd === "tauri_history_read_slice") {
+      const bytes = tauriFiles.get(key) ?? new Uint8Array(0)
+      const start = Math.min((args?.start as number) ?? 0, bytes.byteLength)
+      const end = Math.min((args?.end as number) ?? 0, bytes.byteLength)
+      if (end <= start) {
+        return new ArrayBuffer(0)
+      }
+      return bytes.slice(start, end).buffer
+    }
+    if (cmd === "tauri_history_truncate") {
+      const size = (args?.size as number) ?? 0
+      if (size === 0) {
+        tauriFiles.delete(key)
+      } else {
+        const existing = tauriFiles.get(key)
+        if (existing) {
+          tauriFiles.set(key, existing.slice(0, size))
+        }
+      }
+      return undefined
+    }
+    if (cmd === "tauri_history_clear") {
+      tauriFiles.delete(key)
+      return undefined
+    }
+    if (cmd === "tauri_history_read_index") {
+      const bytes = tauriFiles.get(key) ?? new Uint8Array(0)
+      return readAllHistoryMeta(makeSliceReader(bytes), bytes.byteLength)
+    }
+    throw new Error(`Unexpected invoke command: ${cmd}`)
+  }),
+}))
 
 const makeSliceReader = (bytes: Uint8Array): SliceReader => {
   return async (start, end) => {
@@ -129,5 +188,57 @@ describe("history binary format", () => {
 
     expect(Option.isNone(await readHistoryRecordAt(makeSliceReader(badBuffer), 5))).toBe(true)
     expect(Option.isNone(await readHistoryRecordAt(makeSliceReader(badBuffer), 16))).toBe(true)
+  })
+})
+
+describe("tauri history backend", () => {
+  beforeEach(() => {
+    tauriFiles.clear()
+    ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
+  })
+
+  afterEach(() => {
+    delete (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__
+  })
+
+  it("appends, indexes, navigates, truncates, and clears history via Tauri commands", async () => {
+    const subPath = ["apps", "demo"]
+    const fileName = "index.html"
+
+    expect(await loadFileHistoryIndex(subPath, fileName)).toEqual([])
+    expect(
+      Option.isNone(await loadPreviousFileHistoryEntry(subPath, fileName, Option.none())),
+    ).toBe(true)
+
+    await appendFileHistory(subPath, fileName, "v1", 1000)
+    await appendFileHistory(subPath, fileName, "v2", 2000)
+
+    vi.mocked(invoke).mockClear()
+    const index = await loadFileHistoryIndex(subPath, fileName)
+    expect(index.map((entry) => entry.timestampMs)).toEqual([2000, 1000])
+    expect(vi.mocked(invoke)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("tauri_history_read_index", {
+      subPath,
+      fileName,
+    })
+
+    const latest = await loadPreviousFileHistoryEntry(subPath, fileName, Option.none())
+    expect(Option.isSome(latest)).toBe(true)
+    if (Option.isSome(latest)) {
+      expect(latest.value.content).toBe("v2")
+    }
+
+    const atV1 = await loadFileHistoryEntryAt(subPath, fileName, index[1].endOffset)
+    expect(Option.isSome(atV1)).toBe(true)
+    if (Option.isSome(atV1)) {
+      expect(atV1.value.content).toBe("v1")
+    }
+
+    await truncateLatestFileHistoryEntry(subPath, fileName)
+    const afterTruncate = await loadFileHistoryIndex(subPath, fileName)
+    expect(afterTruncate.map((entry) => entry.timestampMs)).toEqual([1000])
+
+    await clearFileHistory(subPath, fileName)
+    expect(await loadFileHistoryIndex(subPath, fileName)).toEqual([])
   })
 })

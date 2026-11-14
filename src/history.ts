@@ -1,7 +1,10 @@
+import { invoke } from "@tauri-apps/api/core"
 import { Option } from "effect"
+import { supportsTauri } from "./files"
 
 export const OPFS_HISTORY_FOLDER = "pwa-islands-history"
 
+// Binärformat-Vertrag: muss exakt mit `src-tauri/src/lib.rs` (`HISTORY_TRAILER_SIZE_BYTES = 16`, LE) übereinstimmen
 const TRAILER_SIZE_BYTES = 16
 const FNV_OFFSET_BASIS = 0x811c9dc5
 const FNV_PRIME = 0x01000193
@@ -181,25 +184,139 @@ const getOpfsHistoryDirectory = async (
   }
 }
 
-const getOpfsHistoryFileHandle = async (
+interface HistoryFileStore {
+  readonly getSize: () => Promise<number>
+  readonly readSlice: SliceReader
+  readonly readIndex: () => Promise<ReadonlyArray<HistoryEntryMeta>>
+  readonly append: (record: Uint8Array) => Promise<void>
+  readonly truncate: (size: number) => Promise<void>
+  readonly clear: () => Promise<void>
+}
+
+const getTauriHistoryFileStore = (
+  subPath: ReadonlyArray<string>,
+  fileName: string,
+): Option.Option<HistoryFileStore> => {
+  const pathSegments = [...subPath]
+  return Option.some({
+    getSize: () =>
+      invoke<number>("tauri_history_size", {
+        subPath: pathSegments,
+        fileName,
+      }),
+    readSlice: (start, end) =>
+      invoke<ArrayBuffer>("tauri_history_read_slice", {
+        subPath: pathSegments,
+        fileName,
+        start,
+        end,
+      }),
+    readIndex: () =>
+      invoke<ReadonlyArray<HistoryEntryMeta>>("tauri_history_read_index", {
+        subPath: pathSegments,
+        fileName,
+      }),
+    append: (record) =>
+      invoke("tauri_history_append", {
+        subPath: pathSegments,
+        fileName,
+        data: globalThis.Array.from(record),
+      }),
+    truncate: (size) =>
+      invoke("tauri_history_truncate", {
+        subPath: pathSegments,
+        fileName,
+        size,
+      }),
+    clear: () =>
+      invoke("tauri_history_clear", {
+        subPath: pathSegments,
+        fileName,
+      }),
+  })
+}
+
+const getOpfsHistoryFileStore = async (
   subPath: ReadonlyArray<string>,
   fileName: string,
   create: boolean,
-): Promise<Option.Option<FileSystemFileHandle>> => {
+): Promise<Option.Option<HistoryFileStore>> => {
   const maybeDir = await getOpfsHistoryDirectory(subPath, create)
   if (Option.isNone(maybeDir)) {
     return Option.none()
   }
+  const dir = maybeDir.value
+  let fileHandle: FileSystemFileHandle
   try {
-    const fileHandle = await maybeDir.value.getFileHandle(fileName, { create })
-    return Option.some(fileHandle)
+    fileHandle = await dir.getFileHandle(fileName, { create })
   } catch {
     return Option.none()
   }
+  let cachedFilePromise: Promise<File> | undefined
+  const getFile = () => {
+    if (cachedFilePromise === undefined) {
+      cachedFilePromise = fileHandle.getFile()
+    }
+    return cachedFilePromise
+  }
+  const clear = async () => {
+    try {
+      await dir.removeEntry(fileName)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "NotFoundError") {
+        return
+      }
+      throw error
+    }
+  }
+  const getSize = async () => (await getFile()).size
+  const readSlice: SliceReader = async (start, end) =>
+    (await getFile()).slice(start, end).arrayBuffer()
+  return Option.some({
+    getSize,
+    readSlice,
+    readIndex: async () => {
+      const size = await getSize()
+      return size === 0 ? [] : readAllHistoryMeta(readSlice, size)
+    },
+    append: async (record) => {
+      const file = await fileHandle.getFile()
+      const writable = await fileHandle.createWritable({ keepExistingData: true })
+      try {
+        await writable.seek(file.size)
+        await writable.write(new Uint8Array(record))
+      } finally {
+        await writable.close()
+      }
+    },
+    truncate: async (size) => {
+      if (size === 0) {
+        await clear()
+        return
+      }
+      const writable = await fileHandle.createWritable({ keepExistingData: true })
+      try {
+        await writable.truncate(size)
+      } finally {
+        await writable.close()
+      }
+    },
+    clear,
+  })
 }
 
+const getHistoryFileStore = async (
+  subPath: ReadonlyArray<string>,
+  fileName: string,
+  create: boolean,
+): Promise<Option.Option<HistoryFileStore>> =>
+  supportsTauri()
+    ? getTauriHistoryFileStore(subPath, fileName)
+    : getOpfsHistoryFileStore(subPath, fileName, create)
+
 /**
- * Hängt den alten Dateiinhalt inkl. Bearbeitungszeitstempel an `pwa-islands-history/<pfad>` im OPFS an.
+ * Hängt den alten Dateiinhalt inkl. Bearbeitungszeitstempel an die Verlaufsdatei
+ * (in Tauri im internen App-Speicher, im Browser im OPFS) an.
  */
 export const appendFileHistory = async (
   subPath: ReadonlyArray<string>,
@@ -207,20 +324,12 @@ export const appendFileHistory = async (
   oldContent: string,
   timestampMs: number,
 ): Promise<void> => {
-  const maybeFileHandle = await getOpfsHistoryFileHandle(subPath, fileName, true)
-  if (Option.isNone(maybeFileHandle)) {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, true)
+  if (Option.isNone(maybeStore)) {
     return
   }
-  const fileHandle = maybeFileHandle.value
-  const file = await fileHandle.getFile()
   const record = encodeHistoryRecord(oldContent, timestampMs)
-  const writable = await fileHandle.createWritable({ keepExistingData: true })
-  try {
-    await writable.seek(file.size)
-    await writable.write(new Uint8Array(record))
-  } finally {
-    await writable.close()
-  }
+  await maybeStore.value.append(record)
 }
 
 /**
@@ -231,101 +340,86 @@ export const loadPreviousFileHistoryEntry = async (
   fileName: string,
   maybeCursor: Option.Option<number>,
 ): Promise<Option.Option<HistoryRecord>> => {
-  const maybeFileHandle = await getOpfsHistoryFileHandle(subPath, fileName, false)
-  if (Option.isNone(maybeFileHandle)) {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, false)
+  if (Option.isNone(maybeStore)) {
     return Option.none()
   }
-  const file = await maybeFileHandle.value.getFile()
+  const totalSize = await maybeStore.value.getSize()
+  if (totalSize === 0) {
+    return Option.none()
+  }
   const cursor = Option.match(maybeCursor, {
-    onNone: () => file.size,
-    onSome: (offset) => Math.min(offset, file.size),
+    onNone: () => totalSize,
+    onSome: (offset) => Math.min(offset, totalSize),
   })
-  return readHistoryRecordAt((start, end) => file.slice(start, end).arrayBuffer(), cursor)
+  return readHistoryRecordAt(maybeStore.value.readSlice, cursor)
 }
 
 /**
- * Lädt nur Offsets, Größen und Zeitstempel aller gespeicherten Versionen einer Datei aus dem OPFS (neueste zuerst).
+ * Lädt nur Offsets, Größen und Zeitstempel aller gespeicherten Versionen einer Datei (neueste zuerst).
  */
 export const loadFileHistoryIndex = async (
   subPath: ReadonlyArray<string>,
   fileName: string,
 ): Promise<ReadonlyArray<HistoryEntryMeta>> => {
-  const maybeFileHandle = await getOpfsHistoryFileHandle(subPath, fileName, false)
-  if (Option.isNone(maybeFileHandle)) {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, false)
+  if (Option.isNone(maybeStore)) {
     return []
   }
-  const file = await maybeFileHandle.value.getFile()
-  return readAllHistoryMeta((start, end) => file.slice(start, end).arrayBuffer(), file.size)
+  return maybeStore.value.readIndex()
 }
 
 /**
- * Springt direkt zu `endOffset` in der OPFS-Verlaufsdatei, prüft den Header erneut und lädt den Inhalt.
+ * Springt direkt zu `endOffset` in der Verlaufsdatei, prüft den Header erneut und lädt den Inhalt.
  */
 export const loadFileHistoryEntryAt = async (
   subPath: ReadonlyArray<string>,
   fileName: string,
   endOffset: number,
 ): Promise<Option.Option<HistoryRecord>> => {
-  const maybeFileHandle = await getOpfsHistoryFileHandle(subPath, fileName, false)
-  if (Option.isNone(maybeFileHandle)) {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, false)
+  if (Option.isNone(maybeStore)) {
     return Option.none()
   }
-  const file = await maybeFileHandle.value.getFile()
-  if (endOffset > file.size) {
+  const totalSize = await maybeStore.value.getSize()
+  if (endOffset > totalSize) {
     return Option.none()
   }
-  return readHistoryRecordAt((start, end) => file.slice(start, end).arrayBuffer(), endOffset)
+  return readHistoryRecordAt(maybeStore.value.readSlice, endOffset)
 }
 
 /**
- * Entfernt nur den neuesten Eintrag am Dateiende durch Trunkieren der OPFS-Verlaufsdatei.
+ * Entfernt nur den neuesten Eintrag am Dateiende durch Trunkieren der Verlaufsdatei.
  */
 export const truncateLatestFileHistoryEntry = async (
   subPath: ReadonlyArray<string>,
   fileName: string,
 ): Promise<void> => {
-  const maybeFileHandle = await getOpfsHistoryFileHandle(subPath, fileName, false)
-  if (Option.isNone(maybeFileHandle)) {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, false)
+  if (Option.isNone(maybeStore)) {
     return
   }
-  const fileHandle = maybeFileHandle.value
-  const file = await fileHandle.getFile()
-  const maybeMeta = await readHistoryMetaAt(
-    (start, end) => file.slice(start, end).arrayBuffer(),
-    file.size,
-  )
+  const totalSize = await maybeStore.value.getSize()
+  if (totalSize === 0) {
+    return
+  }
+  const maybeMeta = await readHistoryMetaAt(maybeStore.value.readSlice, totalSize)
   if (Option.isNone(maybeMeta)) {
     return
   }
-  if (maybeMeta.value.offset === 0) {
-    await clearFileHistory(subPath, fileName)
-    return
-  }
-  const writable = await fileHandle.createWritable({ keepExistingData: true })
-  try {
-    await writable.truncate(maybeMeta.value.offset)
-  } finally {
-    await writable.close()
-  }
+  await maybeStore.value.truncate(maybeMeta.value.offset)
 }
 
 /**
- * Löscht die gespeicherte Versionshistorie einer Datei im OPFS.
+ * Löscht die gespeicherte Versionshistorie einer Datei.
  */
 export const clearFileHistory = async (
   subPath: ReadonlyArray<string>,
   fileName: string,
 ): Promise<void> => {
-  const maybeDir = await getOpfsHistoryDirectory(subPath, false)
-  if (Option.isNone(maybeDir)) {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, false)
+  if (Option.isNone(maybeStore)) {
     return
   }
-  try {
-    await maybeDir.value.removeEntry(fileName)
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "NotFoundError") {
-      return
-    }
-    throw error
-  }
+  await maybeStore.value.clear()
 }

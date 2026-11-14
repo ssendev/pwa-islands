@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 use tauri::http::{header, Response as HttpResponse, StatusCode};
@@ -638,6 +639,222 @@ fn tauri_fs_exists(sub_path: String) -> Result<bool, String> {
   Ok(path.exists())
 }
 
+const HISTORY_FOLDER_NAME: &str = "pwa-islands-history";
+// Binärformat-Vertrag: muss exakt mit `src/history.ts` (`TRAILER_SIZE_BYTES = 16`, LE) übereinstimmen:
+// [UTF-8 Inhalt] [contentHash: u32 LE (4B)] [timestampMs: f64 LE (8B)] [byteLength: u32 LE (4B)]
+const HISTORY_TRAILER_SIZE_BYTES: u64 = 16;
+
+#[derive(Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryEntryMeta {
+  offset: u64,
+  end_offset: u64,
+  timestamp_ms: f64,
+  byte_length: u32,
+  content_hash: u32,
+}
+
+fn validate_history_segment(segment: &str) -> Result<&str, String> {
+  let trimmed = segment.trim();
+  if trimmed.is_empty() || trimmed == "." || trimmed == ".." || trimmed.contains('/') || trimmed.contains('\\') {
+    return Err("Ungültiges Pfadsegment für den Versionsverlauf.".to_string());
+  }
+  Ok(trimmed)
+}
+
+fn resolve_history_path_under(base_dir: &Path, sub_path: &[String], file_name: &str) -> Result<PathBuf, String> {
+  let mut resolved = base_dir.join(HISTORY_FOLDER_NAME);
+  for segment in sub_path {
+    resolved.push(validate_history_segment(segment)?);
+  }
+  resolved.push(validate_history_segment(file_name)?);
+  Ok(resolved)
+}
+
+fn resolve_history_path(app: &tauri::AppHandle, sub_path: &[String], file_name: &str) -> Result<PathBuf, String> {
+  let base_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| format!("Konnte App-Datenordner nicht ermitteln: {e}"))?;
+  resolve_history_path_under(&base_dir, sub_path, file_name)
+}
+
+fn history_append_at_path(path: &Path, data: &[u8]) -> Result<(), String> {
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent).map_err(|e| format!("Fehler beim Erstellen des Verlaufsordners: {e}"))?;
+  }
+  let mut file = fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(path)
+    .map_err(|e| format!("Fehler beim Öffnen der Verlaufsdatei: {e}"))?;
+  file
+    .write_all(data)
+    .map_err(|e| format!("Fehler beim Schreiben in die Verlaufsdatei: {e}"))?;
+  Ok(())
+}
+
+fn history_size_at_path(path: &Path) -> Result<u64, String> {
+  if !path.is_file() {
+    return Ok(0);
+  }
+  let metadata = fs::metadata(path).map_err(|e| format!("Fehler beim Lesen der Verlaufsgröße: {e}"))?;
+  Ok(metadata.len())
+}
+
+fn history_read_slice_at_path(path: &Path, start: u64, end: u64) -> Result<Vec<u8>, String> {
+  if !path.is_file() || end <= start {
+    return Ok(Vec::new());
+  }
+  let mut file = fs::File::open(path).map_err(|e| format!("Fehler beim Öffnen der Verlaufsdatei: {e}"))?;
+  let file_len = file
+    .metadata()
+    .map_err(|e| format!("Fehler beim Lesen der Verlaufsgröße: {e}"))?
+    .len();
+  let clamped_start = start.min(file_len);
+  let clamped_end = end.min(file_len);
+  if clamped_end <= clamped_start {
+    return Ok(Vec::new());
+  }
+  let length = usize::try_from(clamped_end - clamped_start)
+    .map_err(|_| "Verlaufsbereich ist zu groß zum Lesen.".to_string())?;
+  file
+    .seek(SeekFrom::Start(clamped_start))
+    .map_err(|e| format!("Fehler beim Positionieren in der Verlaufsdatei: {e}"))?;
+  let mut buffer = vec![0u8; length];
+  file
+    .read_exact(&mut buffer)
+    .map_err(|e| format!("Fehler beim Lesen der Verlaufsdatei: {e}"))?;
+  Ok(buffer)
+}
+
+fn history_truncate_at_path(path: &Path, size: u64) -> Result<(), String> {
+  if !path.is_file() {
+    return Ok(());
+  }
+  if size == 0 {
+    return history_clear_at_path(path);
+  }
+  let file = fs::OpenOptions::new()
+    .write(true)
+    .open(path)
+    .map_err(|e| format!("Fehler beim Öffnen der Verlaufsdatei: {e}"))?;
+  file
+    .set_len(size)
+    .map_err(|e| format!("Fehler beim Kürzen der Verlaufsdatei: {e}"))?;
+  Ok(())
+}
+
+fn history_clear_at_path(path: &Path) -> Result<(), String> {
+  match fs::remove_file(path) {
+    Ok(()) => Ok(()),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    Err(e) => Err(format!("Fehler beim Löschen der Verlaufsdatei: {e}")),
+  }
+}
+
+fn history_read_index_at_path(path: &Path) -> Result<Vec<HistoryEntryMeta>, String> {
+  if !path.is_file() {
+    return Ok(Vec::new());
+  }
+  let mut file = fs::File::open(path).map_err(|e| format!("Fehler beim Öffnen der Verlaufsdatei: {e}"))?;
+  let mut cursor = file
+    .metadata()
+    .map_err(|e| format!("Fehler beim Lesen der Verlaufsgröße: {e}"))?
+    .len();
+  let mut entries = Vec::new();
+  let mut trailer = [0u8; 16];
+
+  while cursor >= HISTORY_TRAILER_SIZE_BYTES {
+    let trailer_start = cursor - HISTORY_TRAILER_SIZE_BYTES;
+    file
+      .seek(SeekFrom::Start(trailer_start))
+      .map_err(|e| format!("Fehler beim Positionieren in der Verlaufsdatei: {e}"))?;
+    file
+      .read_exact(&mut trailer)
+      .map_err(|e| format!("Fehler beim Lesen der Verlaufsdatei: {e}"))?;
+
+    let content_hash = u32::from_le_bytes([trailer[0], trailer[1], trailer[2], trailer[3]]);
+    let timestamp_ms = f64::from_le_bytes([
+      trailer[4], trailer[5], trailer[6], trailer[7], trailer[8], trailer[9], trailer[10],
+      trailer[11],
+    ]);
+    let byte_length = u32::from_le_bytes([trailer[12], trailer[13], trailer[14], trailer[15]]);
+
+    let Some(start_offset) = trailer_start.checked_sub(u64::from(byte_length)) else {
+      break;
+    };
+
+    entries.push(HistoryEntryMeta {
+      offset: start_offset,
+      end_offset: cursor,
+      timestamp_ms,
+      byte_length,
+      content_hash,
+    });
+    cursor = start_offset;
+  }
+
+  Ok(entries)
+}
+
+#[tauri::command]
+fn tauri_history_append(
+  app: tauri::AppHandle,
+  sub_path: Vec<String>,
+  file_name: String,
+  data: Vec<u8>,
+) -> Result<(), String> {
+  let path = resolve_history_path(&app, &sub_path, &file_name)?;
+  history_append_at_path(&path, &data)
+}
+
+#[tauri::command]
+fn tauri_history_size(app: tauri::AppHandle, sub_path: Vec<String>, file_name: String) -> Result<u64, String> {
+  let path = resolve_history_path(&app, &sub_path, &file_name)?;
+  history_size_at_path(&path)
+}
+
+#[tauri::command]
+fn tauri_history_read_slice(
+  app: tauri::AppHandle,
+  sub_path: Vec<String>,
+  file_name: String,
+  start: u64,
+  end: u64,
+) -> Result<Response, String> {
+  let path = resolve_history_path(&app, &sub_path, &file_name)?;
+  let bytes = history_read_slice_at_path(&path, start, end)?;
+  Ok(Response::new(bytes))
+}
+
+#[tauri::command]
+fn tauri_history_truncate(
+  app: tauri::AppHandle,
+  sub_path: Vec<String>,
+  file_name: String,
+  size: u64,
+) -> Result<(), String> {
+  let path = resolve_history_path(&app, &sub_path, &file_name)?;
+  history_truncate_at_path(&path, size)
+}
+
+#[tauri::command]
+fn tauri_history_clear(app: tauri::AppHandle, sub_path: Vec<String>, file_name: String) -> Result<(), String> {
+  let path = resolve_history_path(&app, &sub_path, &file_name)?;
+  history_clear_at_path(&path)
+}
+
+#[tauri::command]
+fn tauri_history_read_index(
+  app: tauri::AppHandle,
+  sub_path: Vec<String>,
+  file_name: String,
+) -> Result<Vec<HistoryEntryMeta>, String> {
+  let path = resolve_history_path(&app, &sub_path, &file_name)?;
+  history_read_index_at_path(&path)
+}
+
 #[tauri::command]
 fn tauri_fs_get_root() -> Result<Option<String>, String> {
   let guard = storage_root_lock()
@@ -885,6 +1102,12 @@ pub fn run() {
       tauri_fs_rename,
       tauri_fs_copy,
       tauri_fs_exists,
+      tauri_history_append,
+      tauri_history_size,
+      tauri_history_read_slice,
+      tauri_history_truncate,
+      tauri_history_clear,
+      tauri_history_read_index,
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");
@@ -1081,5 +1304,104 @@ mod tests {
     assert_eq!(res_with_index.body().as_ref(), b"<h1>Subfolder Index</h1>");
 
     let _ = fs::remove_dir_all(&subfolder);
+  }
+
+  #[test]
+  fn test_history_storage_lifecycle_and_path_validation() {
+    let base_dir = std::env::temp_dir().join("pwa-islands-history-rust-tests");
+    let _ = fs::remove_dir_all(&base_dir);
+    fs::create_dir_all(&base_dir).unwrap();
+
+    assert!(resolve_history_path_under(&base_dir, &["..".to_string()], "index.html").is_err());
+    assert!(resolve_history_path_under(&base_dir, &[], "../secret.html").is_err());
+    assert!(resolve_history_path_under(&base_dir, &["a/b".to_string()], "index.html").is_err());
+
+    let path = resolve_history_path_under(&base_dir, &["apps".to_string()], "index.html").unwrap();
+    assert_eq!(history_size_at_path(&path).unwrap(), 0);
+    assert!(history_read_slice_at_path(&path, 0, 10).unwrap().is_empty());
+
+    history_append_at_path(&path, b"hello").unwrap();
+    history_append_at_path(&path, b"world!").unwrap();
+    assert_eq!(history_size_at_path(&path).unwrap(), 11);
+    assert_eq!(history_read_slice_at_path(&path, 5, 11).unwrap(), b"world!");
+    assert_eq!(history_read_slice_at_path(&path, 0, 50).unwrap(), b"helloworld!");
+
+    history_truncate_at_path(&path, 5).unwrap();
+    assert_eq!(history_size_at_path(&path).unwrap(), 5);
+    assert_eq!(history_read_slice_at_path(&path, 0, 5).unwrap(), b"hello");
+
+    history_truncate_at_path(&path, 0).unwrap();
+    assert_eq!(history_size_at_path(&path).unwrap(), 0);
+    assert!(!path.exists());
+
+    history_append_at_path(&path, b"abc").unwrap();
+    history_clear_at_path(&path).unwrap();
+    assert!(!path.exists());
+    history_clear_at_path(&path).unwrap();
+
+    let _ = fs::remove_dir_all(&base_dir);
+  }
+
+  fn encode_test_history_record(content: &str, timestamp_ms: f64) -> Vec<u8> {
+    let bytes = content.as_bytes();
+    let hash = bytes.iter().fold(0x811c9dc5u32, |acc, &b| {
+      (acc ^ u32::from(b)).wrapping_mul(0x01000193)
+    });
+    let mut record = Vec::with_capacity(bytes.len() + 16);
+    record.extend_from_slice(bytes);
+    record.extend_from_slice(&hash.to_le_bytes());
+    record.extend_from_slice(&timestamp_ms.to_le_bytes());
+    record.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    record
+  }
+
+  #[test]
+  fn test_history_read_index_parity_and_edge_cases() {
+    let base_dir = std::env::temp_dir().join("pwa-islands-history-index-tests");
+    let _ = fs::remove_dir_all(&base_dir);
+    fs::create_dir_all(&base_dir).unwrap();
+    let path = resolve_history_path_under(&base_dir, &["apps".to_string()], "index.html").unwrap();
+
+    assert!(history_read_index_at_path(&path).unwrap().is_empty());
+
+    let r1 = encode_test_history_record("Version 1", 1000.0);
+    let r2 = encode_test_history_record("Version 2 mit Umlauten: äöüß", 2000.0);
+    let r3 = encode_test_history_record("", 3000.0);
+    history_append_at_path(&path, &r1).unwrap();
+    history_append_at_path(&path, &r2).unwrap();
+    history_append_at_path(&path, &r3).unwrap();
+
+    let index = history_read_index_at_path(&path).unwrap();
+    assert_eq!(index.len(), 3);
+    assert_eq!(index[0].timestamp_ms, 3000.0);
+    assert_eq!(index[0].byte_length, 0);
+    assert_eq!(index[0].content_hash, 0x811c9dc5);
+    assert_eq!(index[1].timestamp_ms, 2000.0);
+    assert_eq!(index[1].byte_length as usize, "Version 2 mit Umlauten: äöüß".len());
+    assert_eq!(index[2].offset, 0);
+    assert_eq!(index[2].timestamp_ms, 1000.0);
+
+    let json = serde_json::to_value(&index[2]).unwrap();
+    assert_eq!(
+      json,
+      serde_json::json!({
+        "offset": 0,
+        "endOffset": r1.len(),
+        "timestampMs": 1000.0,
+        "byteLength": "Version 1".len(),
+        "contentHash": index[2].content_hash,
+      })
+    );
+
+    // Out-of-bounds length stops gracefully without error
+    let corrupt_path = resolve_history_path_under(&base_dir, &[], "corrupt.html").unwrap();
+    let mut bad_trailer = Vec::new();
+    bad_trailer.extend_from_slice(&0u32.to_le_bytes());
+    bad_trailer.extend_from_slice(&1234.0f64.to_le_bytes());
+    bad_trailer.extend_from_slice(&999u32.to_le_bytes());
+    history_append_at_path(&corrupt_path, &bad_trailer).unwrap();
+    assert!(history_read_index_at_path(&corrupt_path).unwrap().is_empty());
+
+    let _ = fs::remove_dir_all(&base_dir);
   }
 }
