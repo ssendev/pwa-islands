@@ -12,6 +12,7 @@ export const monacoEditorElement = CustomElement.define({
   },
   events: {
     "content-changed": Schema.Struct({ value: Schema.String }),
+    "history-changed": Schema.Struct({ canUndo: Schema.Boolean, canRedo: Schema.Boolean }),
     "save-requested": Schema.Struct({}),
   },
 })
@@ -129,6 +130,22 @@ export const applyExternalValueToEditor = (
   })
 }
 
+export const triggerMonacoHistoryAction = (elementId: string, action: "undo" | "redo"): void => {
+  if (typeof document === "undefined") {
+    return
+  }
+  const element = document.getElementById(elementId)
+  if (element === null) {
+    return
+  }
+  const host = element as HTMLElement & { undo?: () => void; redo?: () => void }
+  if (action === "undo" && typeof host.undo === "function") {
+    host.undo()
+  } else if (action === "redo" && typeof host.redo === "function") {
+    host.redo()
+  }
+}
+
 export const registerMonacoEditorElement = (): void => {
   if (
     typeof customElements === "undefined" ||
@@ -142,6 +159,8 @@ export const registerMonacoEditorElement = (): void => {
     private currentFilename = ""
     private isApplyingExternalValue = false
     private isDisconnected = false
+    private lastCanUndo = false
+    private lastCanRedo = false
     private maybeEditor: Option.Option<Monaco.editor.IStandaloneCodeEditor> = Option.none()
     private maybeMonaco: Option.Option<typeof Monaco> = Option.none()
     private maybeContentDisposable: Option.Option<Monaco.IDisposable> = Option.none()
@@ -173,9 +192,49 @@ export const registerMonacoEditorElement = (): void => {
             } finally {
               this.isApplyingExternalValue = false
             }
+            this.syncHistoryState(editor)
           }
         },
       })
+    }
+
+    undo(): void {
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.trigger("toolbar", "undo", null)
+          editor.focus()
+        },
+      })
+    }
+
+    redo(): void {
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.trigger("toolbar", "redo", null)
+          editor.focus()
+        },
+      })
+    }
+
+    private syncHistoryState(editor: Monaco.editor.IStandaloneCodeEditor): void {
+      const model = editor.getModel()
+      if (model === null) {
+        return
+      }
+      const canUndo = model.canUndo()
+      const canRedo = model.canRedo()
+      if (canUndo !== this.lastCanUndo || canRedo !== this.lastCanRedo) {
+        this.lastCanUndo = canUndo
+        this.lastCanRedo = canRedo
+        this.dispatchEvent(
+          new CustomEvent("history-changed", {
+            detail: { canUndo, canRedo },
+            bubbles: true,
+          }),
+        )
+      }
     }
 
     get filename(): string {
@@ -224,6 +283,8 @@ export const registerMonacoEditorElement = (): void => {
 
     disconnectedCallback(): void {
       this.isDisconnected = true
+      this.lastCanUndo = false
+      this.lastCanRedo = false
       Option.match(this.maybeMediaQuery, {
         onNone: () => {},
         onSome: (mediaQuery) => {
@@ -285,6 +346,7 @@ export const registerMonacoEditorElement = (): void => {
             bubbles: true,
           }),
         )
+        this.syncHistoryState(editor)
       })
       this.maybeContentDisposable = Option.some(disposable)
 

@@ -33,12 +33,11 @@ import {
   hashAndMeasureHistoryContent,
   loadFileHistoryEntryAt,
   loadFileHistoryIndex,
-  loadPreviousFileHistoryEntry,
   truncateLatestFileHistoryEntry,
 } from "./history"
 import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
-import { monacoEditorElement } from "./monaco-element"
+import { monacoEditorElement, triggerMonacoHistoryAction } from "./monaco-element"
 import { buildEditUrl, buildNewUrl } from "./route"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -204,9 +203,8 @@ export const Model = defineTaggedUnion({
     isPreviewOpen: Schema.Boolean,
     editorSplitPercent: Schema.Number,
     editorSplitDrag: Schema.Option(EditorSplitDrag),
-    undoStack: Schema.Array(Schema.String),
-    redoStack: Schema.Array(Schema.String),
-    maybeOpfsHistoryCursor: Schema.Option(Schema.Number),
+    canUndo: Schema.Boolean,
+    canRedo: Schema.Boolean,
     historyState: HistoryState,
     isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
@@ -303,24 +301,6 @@ const sendingEntriesToDisplay = (chatState: LlmChatState): ReadonlyArray<LlmChat
     : completed
 }
 
-const pushUndoSnapshot = (
-  state: EditFileModel,
-  nextContent: string,
-  onlyIfStackEmpty: boolean,
-): {
-  readonly undoStack: ReadonlyArray<string>
-  readonly redoStack: ReadonlyArray<string>
-} => {
-  if (state.fileMode._tag !== "Text" || state.fileMode.content === nextContent) {
-    return { undoStack: state.undoStack, redoStack: state.redoStack }
-  }
-  const nextUndoStack =
-    onlyIfStackEmpty && Array.isReadonlyArrayNonEmpty(state.undoStack)
-      ? state.undoStack
-      : [...state.undoStack, state.fileMode.content]
-  return { undoStack: nextUndoStack, redoStack: [] }
-}
-
 export const applyLlmChatStream = (
   model: Model,
   {
@@ -404,24 +384,17 @@ export const applyLlmChatSuccess = (
         llmChatDisplay: (current) => [...current, ...newDisplayEntries],
         llmChatState: () => LlmChatState.Idle(),
       }),
-    EditFile: (state) => {
-      const historyUpdate = Option.match(maybeUpdatedContent, {
-        onNone: () => ({ undoStack: state.undoStack, redoStack: state.redoStack }),
-        onSome: (nextContent) => pushUndoSnapshot(state, nextContent, false),
-      })
-      return modifyFields(state, {
+    EditFile: (state) =>
+      modifyFields(state, {
         fileMode: (current) =>
           Option.match(maybeUpdatedContent, {
             onSome: (nextContent) => EditorFileMode.Text({ content: nextContent }),
             onNone: () => current,
           }),
-        undoStack: () => historyUpdate.undoStack,
-        redoStack: () => historyUpdate.redoStack,
         llmChatMessages: () => messages,
         llmChatDisplay: (current) => [...current, ...newDisplayEntries],
         llmChatState: () => LlmChatState.Idle(),
-      })
-    },
+      }),
     CreateFolder: () => model,
     EditFolder: () => model,
     ConfirmOverwrite: () => model,
@@ -605,15 +578,11 @@ const applyTextContentUpdate = (model: Model, content: string): Model =>
       }),
     EditFile: (state) =>
       EditorFileMode.match(state.fileMode, {
-        Text: () => {
-          const historyUpdate = pushUndoSnapshot(state, content, false)
-          return modifyFields(state, {
+        Text: () =>
+          modifyFields(state, {
             fileMode: () => EditorFileMode.Text({ content }),
-            undoStack: () => historyUpdate.undoStack,
-            redoStack: () => historyUpdate.redoStack,
             maybePasteError: () => Option.none(),
-          })
-        },
+          }),
         Binary: () => state,
       }),
     CreateFolder: () => model,
@@ -758,16 +727,11 @@ export const Message = defineMessageUnion({
   ClickedToggleEditName: {},
   ClickedUndo: {},
   ClickedRedo: {},
-  SucceededLoadPreviousHistoryEntry: {
-    maybeEntry: Schema.Option(
-      Schema.Struct({
-        content: Schema.String,
-        startOffset: Schema.Number,
-      }),
-    ),
-  },
-  FailedLoadPreviousHistoryEntry: {
-    message: Schema.String,
+  CompletedTriggerEditorUndo: {},
+  CompletedTriggerEditorRedo: {},
+  ChangedEditorHistoryState: {
+    canUndo: Schema.Boolean,
+    canRedo: Schema.Boolean,
   },
   ClickedOpenHistory: {},
   ClickedCloseHistory: {},
@@ -1300,38 +1264,20 @@ export const StartEditorSplitDrag = Command.define("StartEditorSplitDrag", {
     }),
 })
 
-export const LoadPreviousHistoryEntry = Command.define("LoadPreviousHistoryEntry", {
-  args: {
-    subPath: Schema.Array(Schema.String),
-    fileName: Schema.String,
-    maybeCursor: Schema.Option(Schema.Number),
-  },
-  messages: [Message.SucceededLoadPreviousHistoryEntry, Message.FailedLoadPreviousHistoryEntry],
-  execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        const maybeRecord = await loadPreviousFileHistoryEntry(
-          args.subPath,
-          args.fileName,
-          args.maybeCursor,
-        )
-        return Message.SucceededLoadPreviousHistoryEntry({
-          maybeEntry: Option.map(maybeRecord, (record) => ({
-            content: record.content,
-            startOffset: record.startOffset,
-          })),
-        })
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.succeed(
-          Message.FailedLoadPreviousHistoryEntry({
-            message: `Ältere Version konnte nicht geladen werden: ${error.message}`,
-          }),
-        ),
-      ),
-    ),
+export const TriggerEditorUndo = Command.define("TriggerEditorUndo", {
+  messages: [Message.CompletedTriggerEditorUndo],
+  execute: Effect.sync(() => {
+    triggerMonacoHistoryAction("modal-file-content", "undo")
+    return Message.CompletedTriggerEditorUndo()
+  }),
+})
+
+export const TriggerEditorRedo = Command.define("TriggerEditorRedo", {
+  messages: [Message.CompletedTriggerEditorRedo],
+  execute: Effect.sync(() => {
+    triggerMonacoHistoryAction("modal-file-content", "redo")
+    return Message.CompletedTriggerEditorRedo()
+  }),
 })
 
 export const LoadFullHistory = Command.define("LoadFullHistory", {
@@ -1797,15 +1743,11 @@ export const update = (
         EditFolder: () => model,
         EditFile: (state) =>
           EditorFileMode.match(state.fileMode, {
-            Text: () => {
-              const historyUpdate = pushUndoSnapshot(state, content, true)
-              return modifyFields(state, {
+            Text: () =>
+              modifyFields(state, {
                 fileMode: () => EditorFileMode.Text({ content }),
-                undoStack: () => historyUpdate.undoStack,
-                redoStack: () => historyUpdate.redoStack,
                 maybePasteError: () => Option.none(),
-              })
-            },
+              }),
             Binary: () => state,
           }),
         ConfirmOverwrite: () => model,
@@ -2694,9 +2636,8 @@ export const update = (
                 isPreviewOpen: false,
                 editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
                 editorSplitDrag: Option.none(),
-                undoStack: [],
-                redoStack: [],
-                maybeOpfsHistoryCursor: Option.none(),
+                canUndo: false,
+                canRedo: false,
                 historyState: HistoryState.Closed(),
                 isConfirmingDelete: false,
               }),
@@ -2786,7 +2727,6 @@ export const update = (
           model: modifyFields(model, {
             originalName: () => savedName,
             name: () => savedName,
-            maybeOpfsHistoryCursor: () => Option.none(),
             hasHistoryEntries: (current) =>
               model.fileMode._tag === "Text" && model.isHistoryEnabled !== false ? true : current,
           }),
@@ -2820,9 +2760,8 @@ export const update = (
             isPreviewOpen: model.isPreviewOpen,
             editorSplitPercent: model.editorSplitPercent,
             editorSplitDrag: Option.none(),
-            undoStack: [],
-            redoStack: [],
-            maybeOpfsHistoryCursor: Option.none(),
+            canUndo: false,
+            canRedo: false,
             historyState: HistoryState.Closed(),
             isConfirmingDelete: false,
           }),
@@ -2899,102 +2838,46 @@ export const update = (
       if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
         return { model, outMessage: OutMessage.None() }
       }
-      const currentContent = model.fileMode.content
-      if (Array.isReadonlyArrayNonEmpty(model.undoStack)) {
-        const previousContent = model.undoStack[model.undoStack.length - 1]
-        const nextUndoStack = model.undoStack.slice(0, -1)
-        const nextRedoStack = [...model.redoStack, currentContent]
-        return {
-          model: modifyFields(model, {
-            fileMode: () => EditorFileMode.Text({ content: previousContent }),
-            undoStack: () => nextUndoStack,
-            redoStack: () => nextRedoStack,
-          }),
-          outMessage: OutMessage.None(),
-        }
-      }
-      if (
-        model.hasHistoryEntries === false ||
-        Option.exists(model.maybeOpfsHistoryCursor, (cursor) => cursor <= 0)
-      ) {
-        return { model, outMessage: OutMessage.None() }
-      }
       return {
         model,
-        commands: [
-          LoadPreviousHistoryEntry({
-            subPath: context.subPath,
-            fileName: model.originalName,
-            maybeCursor: model.maybeOpfsHistoryCursor,
-          }),
-        ],
+        commands: [TriggerEditorUndo()],
         outMessage: OutMessage.None(),
       }
     },
 
     ClickedRedo: () => {
-      if (
-        model._tag !== "EditFile" ||
-        model.fileMode._tag !== "Text" ||
-        Array.isReadonlyArrayEmpty(model.redoStack)
-      ) {
+      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
         return { model, outMessage: OutMessage.None() }
       }
-      const currentContent = model.fileMode.content
-      const nextContent = model.redoStack[model.redoStack.length - 1]
-      const nextRedoStack = model.redoStack.slice(0, -1)
-      const nextUndoStack = [...model.undoStack, currentContent]
       return {
-        model: modifyFields(model, {
-          fileMode: () => EditorFileMode.Text({ content: nextContent }),
-          undoStack: () => nextUndoStack,
-          redoStack: () => nextRedoStack,
-        }),
+        model,
+        commands: [TriggerEditorRedo()],
         outMessage: OutMessage.None(),
       }
     },
 
-    SucceededLoadPreviousHistoryEntry: ({ maybeEntry }) => {
+    CompletedTriggerEditorUndo: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
+    CompletedTriggerEditorRedo: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
+    ChangedEditorHistoryState: ({ canUndo, canRedo }) => {
       if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
         return { model, outMessage: OutMessage.None() }
       }
-      const currentContent = model.fileMode.content
-      return Option.match(maybeEntry, {
-        onNone: () => ({
-          model: modifyFields(model, {
-            maybeOpfsHistoryCursor: () => Option.some(0),
-          }),
-          outMessage: OutMessage.ShowAlert({
-            banner: {
-              message: "Keine ältere Version vorhanden.",
-              variant: "info",
-            },
-            closeModal: false,
-            replaceUrl: false,
-          }),
+      return {
+        model: modifyFields(model, {
+          canUndo: () => canUndo,
+          canRedo: () => canRedo,
         }),
-        onSome: ({ content, startOffset }) => ({
-          model: modifyFields(model, {
-            fileMode: () => EditorFileMode.Text({ content }),
-            redoStack: (stack) => [...stack, currentContent],
-            maybeOpfsHistoryCursor: () => Option.some(startOffset),
-          }),
-          outMessage: OutMessage.None(),
-        }),
-      })
+        outMessage: OutMessage.None(),
+      }
     },
-
-    FailedLoadPreviousHistoryEntry: ({ message: errorMessage }) => ({
-      model,
-      outMessage: OutMessage.ShowAlert({
-        banner: {
-          message: errorMessage,
-          variant: "danger",
-        },
-        closeModal: false,
-        replaceUrl: false,
-      }),
-    }),
 
     ClickedOpenHistory: () => {
       if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
@@ -3141,19 +3024,13 @@ export const update = (
             replaceUrl: false,
           }),
         }),
-        onSome: (content) => {
-          const historyUpdate = pushUndoSnapshot(model, content, false)
-          return {
-            model: modifyFields(model, {
-              fileMode: () => EditorFileMode.Text({ content }),
-              undoStack: () => historyUpdate.undoStack,
-              redoStack: () => historyUpdate.redoStack,
-              maybeOpfsHistoryCursor: () => Option.none(),
-              historyState: () => HistoryState.Closed(),
-            }),
-            outMessage: OutMessage.None(),
-          }
-        },
+        onSome: (content) => ({
+          model: modifyFields(model, {
+            fileMode: () => EditorFileMode.Text({ content }),
+            historyState: () => HistoryState.Closed(),
+          }),
+          outMessage: OutMessage.None(),
+        }),
       })
     },
 
@@ -3304,7 +3181,6 @@ export const update = (
         model.historyState._tag === "Open" ? model.historyState.isHistoryEnabled : true
       return {
         model: modifyFields(model, {
-          maybeOpfsHistoryCursor: () => Option.some(0),
           hasHistoryEntries: () => false,
           historyState: () =>
             HistoryState.Open({
@@ -3359,7 +3235,6 @@ export const update = (
       const nextEntries = openState.entries.slice(1)
       return {
         model: modifyFields(model, {
-          maybeOpfsHistoryCursor: () => Option.none(),
           hasHistoryEntries: () => nextEntries.length > 0,
           historyState: () =>
             HistoryState.Open({
@@ -3608,6 +3483,7 @@ const viewEditorFileBody = (
               monacoEditor.OnContentChanged((detail) =>
                 Message.UpdatedTextContent({ content: detail.value }),
               ),
+              monacoEditor.OnHistoryChanged((detail) => Message.ChangedEditorHistoryState(detail)),
               monacoEditor.OnSaveRequested(() => Message.ClickedSave()),
               h.Id("modal-file-content"),
               h.Class("monaco-editor-host"),
@@ -4306,8 +4182,8 @@ const viewEditorModal = (
                                     h.Type("button"),
                                     h.Id("modal-btn-undo"),
                                     h.Class("btn btn-secondary btn-icon"),
-                                    h.AriaLabel("Zurück"),
-                                    h.Title("Zurück (Ältere Version)"),
+                                    h.AriaLabel("Rückgängig"),
+                                    h.Title("Rückgängig (Strg+Z)"),
                                     h.Disabled(!historyControls.canUndo),
                                     h.OnClick(Message.ClickedUndo()),
                                   ],
@@ -4331,8 +4207,8 @@ const viewEditorModal = (
                                     h.Type("button"),
                                     h.Id("modal-btn-redo"),
                                     h.Class("btn btn-secondary btn-icon"),
-                                    h.AriaLabel("Vor"),
-                                    h.Title("Vor (Neuere Version)"),
+                                    h.AriaLabel("Wiederholen"),
+                                    h.Title("Wiederholen (Strg+Y)"),
                                     h.Disabled(!historyControls.canRedo),
                                     h.OnClick(Message.ClickedRedo()),
                                   ],
@@ -4944,12 +4820,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         isPreviewOpen: previewOpen,
         editorSplitPercent,
         editorSplitDrag,
-        undoStack,
-        redoStack,
-        maybeOpfsHistoryCursor,
+        canUndo,
+        canRedo,
         historyState,
-        isHistoryEnabled,
-        hasHistoryEntries,
         isConfirmingDelete,
       }) =>
         h.div(
@@ -4980,16 +4853,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 historyControls:
                   fileMode._tag === "Text"
                     ? {
-                        canUndo:
-                          Array.isReadonlyArrayNonEmpty(undoStack) ||
-                          ((hasHistoryEntries ?? true) &&
-                            !Option.exists(maybeOpfsHistoryCursor, (cursor) => cursor <= 0)),
-                        canRedo: Array.isReadonlyArrayNonEmpty(redoStack),
-                        showStepButtons:
-                          (isHistoryEnabled ?? true) ||
-                          (hasHistoryEntries ?? true) ||
-                          Array.isReadonlyArrayNonEmpty(undoStack) ||
-                          Array.isReadonlyArrayNonEmpty(redoStack),
+                        canUndo,
+                        canRedo,
+                        showStepButtons: true,
                       }
                     : undefined,
               },
