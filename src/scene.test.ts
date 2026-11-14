@@ -1386,4 +1386,44 @@ describe("PWA Islands Scene Tests", () => {
       ),
     )
   })
+
+  it("schließt den Editor beim Speichern nicht, wenn er maximiert ist", () => {
+    const modelWithMaximizedEditFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: true,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithMaximizedEditFile),
+      click(selector("#modal-btn-save")),
+      Command.resolve(Editor.SaveChanges, Editor.Message.SucceededSaveChanges({ entries: [] })),
+      sceneExpect(selector(".modal-overlay")).toExist(),
+      sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Original</p>"),
+      sceneExpect(selector(".modal-body .alert-info")).toContainText("Gespeichert."),
+    )
+  })
 })

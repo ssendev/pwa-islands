@@ -2602,10 +2602,59 @@ export const update = (
       outMessage: OutMessage.CloseModal({ replaceUrl: true }),
     }),
 
-    SucceededSaveChanges: ({ entries }) => ({
-      model,
-      outMessage: OutMessage.EntriesUpdated({ entries, closeModal: true }),
-    }),
+    SucceededSaveChanges: ({ entries }) => {
+      if (model._tag === "EditFile" && model.isMaximized) {
+        const savedName = model.name.trim()
+        return {
+          model: modifyFields(model, {
+            originalName: () => savedName,
+            name: () => savedName,
+            maybeOpfsHistoryCursor: () => Option.none(),
+            maybeAlertBanner: () =>
+              Option.some({
+                message: "Gespeichert.",
+                variant: "info",
+              }),
+          }),
+          outMessage: OutMessage.EntriesUpdated({ entries, closeModal: false }),
+        }
+      }
+      if (model._tag === "CreateFile" && model.isMaximized) {
+        const savedName = model.name.trim()
+        return {
+          model: Model.EditFile({
+            originalName: savedName,
+            name: savedName,
+            fileMode: EditorFileMode.Text({ content: model.content }),
+            maybeValidationError: Option.none(),
+            maybeAlertBanner: Option.some({
+              message: "Gespeichert.",
+              variant: "info",
+            }),
+            maybePasteError: Option.none(),
+            llmBarMode: model.llmBarMode,
+            llmChatInput: model.llmChatInput,
+            llmChatMessages: model.llmChatMessages,
+            llmChatDisplay: model.llmChatDisplay,
+            llmChatState: model.llmChatState,
+            isMaximized: true,
+            isEditingName: false,
+            isPreviewOpen: model.isPreviewOpen,
+            editorSplitPercent: model.editorSplitPercent,
+            editorSplitDrag: Option.none(),
+            undoStack: [],
+            redoStack: [],
+            maybeOpfsHistoryCursor: Option.none(),
+            historyState: HistoryState.Closed(),
+          }),
+          outMessage: OutMessage.EntriesUpdated({ entries, closeModal: false }),
+        }
+      }
+      return {
+        model,
+        outMessage: OutMessage.EntriesUpdated({ entries, closeModal: true }),
+      }
+    },
 
     FailedSaveChanges: ({ message: errorMessage }) => ({
       model: setAlertBanner(
