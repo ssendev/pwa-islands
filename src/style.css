@@ -2448,6 +2448,30 @@ code {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+
+.editor-history-header-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.editor-history-toggle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.editor-history-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .editor-history-toolbar {
@@ -2455,6 +2479,18 @@ code {
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+@media (max-width: 520px) {
+  .editor-history-toolbar .icon-label-btn {
+    width: auto;
+    height: auto;
+    padding: 8px 16px;
+  }
+
+  .editor-history-toolbar .icon-label-btn-text {
+    display: inline;
+  }
 }
 
 .editor-history-empty {
@@ -2470,19 +2506,23 @@ code {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 55vh;
-  overflow-y: auto;
 }
 
 .editor-history-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--social-bg);
+}
+
+.editor-history-item.is-current {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
 }
 
 .editor-history-meta {
@@ -2492,7 +2532,7 @@ code {
   flex-wrap: wrap;
   gap: 10px;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 180px;
 }
 
 .editor-history-date {

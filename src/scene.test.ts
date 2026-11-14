@@ -34,6 +34,7 @@ import {
   view,
   LlmTestState,
 } from "./main"
+import * as History from "./history"
 import * as Editor from "./editor"
 import * as Help from "./help"
 import * as Modal from "./modal"
@@ -1333,13 +1334,13 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolve(
         Editor.LoadFullHistory,
         Editor.Message.SucceededLoadFullHistory({
+          isHistoryEnabled: true,
           entries: [
             {
               offset: 10,
               endOffset: 35,
               timestampMs: 1731580000000,
-              byteLength: 13,
-              contentHash: 111,
+              ...History.hashAndMeasureHistoryContent("<p>Vorher</p>"),
             },
             {
               offset: 0,
@@ -1351,6 +1352,29 @@ describe("PWA Islands Scene Tests", () => {
           ],
         }),
       ),
+      sceneExpect(selector("#editor-history-overlay")).toExist(),
+      sceneExpect(selector(".editor-history-item.is-current")).toExist(),
+      sceneExpect(selector("#editor-history-enabled-checkbox")).toBeChecked(),
+      change(selector("#editor-history-enabled-checkbox"), "false"),
+      Command.resolve(Editor.SaveHistoryEnabled, Editor.Message.CompletedSaveHistoryEnabled()),
+      sceneExpect(selector("#editor-history-enabled-checkbox")).not.toBeChecked(),
+      change(selector("#editor-history-enabled-checkbox"), "true"),
+      Command.resolve(Editor.SaveHistoryEnabled, Editor.Message.CompletedSaveHistoryEnabled()),
+      sceneExpect(selector("#editor-history-enabled-checkbox")).toBeChecked(),
+      click(selector(".editor-history-preview-btn")),
+      Command.resolve(
+        Editor.LoadHistoryPreviewAt,
+        Editor.Message.SucceededLoadHistoryPreviewAt({
+          maybeContent: Option.some("<h1>Alte Vorschau</h1>"),
+        }),
+      ),
+      sceneExpect(selector("#editor-preview-overlay")).toExist(),
+      sceneExpect(selector("#editor-preview-iframe")).toHaveAttr(
+        "srcdoc",
+        "<h1>Alte Vorschau</h1>",
+      ),
+      click(selector("#editor-preview-close")),
+      sceneExpect(selector("#editor-preview-overlay")).toBeAbsent(),
       sceneExpect(selector("#editor-history-overlay")).toExist(),
       click(selector(".editor-history-restore-btn")),
       Command.resolve(
@@ -1365,6 +1389,7 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolve(
         Editor.LoadFullHistory,
         Editor.Message.SucceededLoadFullHistory({
+          isHistoryEnabled: true,
           entries: [
             {
               offset: 10,
@@ -1397,6 +1422,58 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector(".editor-history-empty")).toContainText(
         "Noch keine gespeicherten Versionen vorhanden.",
       ),
+    )
+  })
+
+  it("blendet Zurück und Vor aus, wenn Versionsspeichern aus und kein Verlauf vorhanden ist", () => {
+    const modelWithEmptyHistory: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "app.html",
+          name: "app.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Hallo</p>" }),
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: 42,
+          editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
+          isHistoryEnabled: false,
+          hasHistoryEntries: false,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithEmptyHistory),
+      sceneExpect(selector("#modal-btn-undo")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-redo")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-history")).toExist(),
+      click(selector("#modal-btn-history")),
+      Command.resolve(
+        Editor.LoadFullHistory,
+        Editor.Message.SucceededLoadFullHistory({
+          isHistoryEnabled: false,
+          entries: [],
+        }),
+      ),
+      change(selector("#editor-history-enabled-checkbox"), "true"),
+      Command.resolve(Editor.SaveHistoryEnabled, Editor.Message.CompletedSaveHistoryEnabled()),
+      sceneExpect(selector("#modal-btn-undo")).toExist(),
+      sceneExpect(selector("#modal-btn-redo")).toExist(),
     )
   })
 

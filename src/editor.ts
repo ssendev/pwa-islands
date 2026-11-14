@@ -41,8 +41,10 @@ import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
   clampEditorSplitPercent,
   deleteUserTemplate,
+  getStoredHistoryEnabled,
   getStoredUserTemplates,
   sanitizeTemplateName,
+  storeHistoryEnabled,
   saveUserTemplate,
 } from "./storage"
 import { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate } from "./templates"
@@ -151,6 +153,8 @@ export const HistoryState = defineTaggedUnion({
   Open: {
     entries: Schema.Array(HistoryEntry),
     isConfirmingClear: Schema.Boolean,
+    isHistoryEnabled: Schema.Boolean,
+    maybePreviewContent: Schema.Option(Schema.String),
   },
   Error: {
     message: Schema.String,
@@ -212,6 +216,8 @@ export const Model = defineTaggedUnion({
     redoStack: Schema.Array(Schema.String),
     maybeOpfsHistoryCursor: Schema.Option(Schema.Number),
     historyState: HistoryState,
+    isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
+    hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
   },
   ConfirmDelete: {
     entryName: Schema.String,
@@ -489,7 +495,11 @@ export const applyLlmChatFailure = (model: Model, message: string): Model => {
 export const isPreviewOpen = (model: Model): boolean =>
   Model.match(model, {
     CreateFile: (state) => state.isPreviewOpen,
-    EditFile: (state) => state.isPreviewOpen && state.fileMode._tag === "Text",
+    EditFile: (state) =>
+      state.fileMode._tag === "Text" &&
+      (state.isPreviewOpen ||
+        (state.historyState._tag === "Open" &&
+          Option.isSome(state.historyState.maybePreviewContent))),
     CreateFolder: () => false,
     EditFolder: () => false,
     ConfirmDelete: () => false,
@@ -499,7 +509,20 @@ export const isPreviewOpen = (model: Model): boolean =>
 export const closePreview = (model: Model): Model =>
   Model.match(model, {
     CreateFile: (state) => modifyFields(state, { isPreviewOpen: () => false }),
-    EditFile: (state) => modifyFields(state, { isPreviewOpen: () => false }),
+    EditFile: (state) =>
+      state.historyState._tag === "Open" && Option.isSome(state.historyState.maybePreviewContent)
+        ? modifyFields(state, {
+            historyState: (historyState) =>
+              historyState._tag === "Open"
+                ? HistoryState.Open({
+                    entries: historyState.entries,
+                    isConfirmingClear: historyState.isConfirmingClear,
+                    isHistoryEnabled: historyState.isHistoryEnabled,
+                    maybePreviewContent: Option.none(),
+                  })
+                : historyState,
+          })
+        : modifyFields(state, { isPreviewOpen: () => false }),
     CreateFolder: () => model,
     EditFolder: () => model,
     ConfirmDelete: () => model,
@@ -744,7 +767,12 @@ export const Message = defineMessageUnion({
   ClickedCloseHistory: {},
   SucceededLoadFullHistory: {
     entries: Schema.Array(HistoryEntry),
+    isHistoryEnabled: Schema.Boolean,
   },
+  ToggledHistoryEnabled: {
+    isEnabled: Schema.Boolean,
+  },
+  CompletedSaveHistoryEnabled: {},
   FailedLoadFullHistory: {
     message: Schema.String,
   },
@@ -755,6 +783,15 @@ export const Message = defineMessageUnion({
     maybeContent: Schema.Option(Schema.String),
   },
   FailedLoadHistoryEntryAt: {
+    message: Schema.String,
+  },
+  ClickedPreviewHistoryEntry: {
+    endOffset: Schema.Number,
+  },
+  SucceededLoadHistoryPreviewAt: {
+    maybeContent: Schema.Option(Schema.String),
+  },
+  FailedLoadHistoryPreviewAt: {
     message: Schema.String,
   },
   ClickedRequestClearHistory: {},
@@ -917,6 +954,9 @@ const recordPreviousFileVersion = async (
   timestampMs: number,
 ): Promise<void> => {
   try {
+    if (!(await getStoredHistoryEnabled())) {
+      return
+    }
     const buffer = await storage.readFileBuffer(subPath, readFromName)
     const oldContent = new TextDecoder("utf-8").decode(buffer)
     await appendFileHistory(subPath, historyTargetName, oldContent, timestampMs)
@@ -1266,8 +1306,11 @@ export const LoadFullHistory = Command.define("LoadFullHistory", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const entries = await loadFileHistoryIndex(args.subPath, args.fileName)
-        return Message.SucceededLoadFullHistory({ entries })
+        const [entries, isHistoryEnabled] = await Promise.all([
+          loadFileHistoryIndex(args.subPath, args.fileName),
+          getStoredHistoryEnabled(),
+        ])
+        return Message.SucceededLoadFullHistory({ entries, isHistoryEnabled })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
     }).pipe(
@@ -1279,6 +1322,21 @@ export const LoadFullHistory = Command.define("LoadFullHistory", {
         ),
       ),
     ),
+})
+
+export const SaveHistoryEnabled = Command.define("SaveHistoryEnabled", {
+  args: {
+    isEnabled: Schema.Boolean,
+  },
+  messages: [Message.CompletedSaveHistoryEnabled],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        await storeHistoryEnabled(args.isEnabled)
+        return Message.CompletedSaveHistoryEnabled()
+      },
+      catch: () => undefined,
+    }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedSaveHistoryEnabled()))),
 })
 
 export const LoadHistoryEntryAt = Command.define("LoadHistoryEntryAt", {
@@ -1322,6 +1380,37 @@ export const LoadHistoryEntryAt = Command.define("LoadHistoryEntryAt", {
         Effect.succeed(
           Message.FailedLoadHistoryEntryAt({
             message: `Version konnte nicht geladen werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const LoadHistoryPreviewAt = Command.define("LoadHistoryPreviewAt", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+    endOffset: Schema.Number,
+  },
+  messages: [Message.SucceededLoadHistoryPreviewAt, Message.FailedLoadHistoryPreviewAt],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const maybeRecord = await loadFileHistoryEntryAt(
+          args.subPath,
+          args.fileName,
+          args.endOffset,
+        )
+        return Message.SucceededLoadHistoryPreviewAt({
+          maybeContent: Option.map(maybeRecord, (record) => record.content),
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedLoadHistoryPreviewAt({
+            message: `Vorschau konnte nicht geladen werden: ${error.message}`,
           }),
         ),
       ),
@@ -2846,17 +2935,51 @@ export const update = (
       }
     },
 
-    SucceededLoadFullHistory: ({ entries }) => {
+    SucceededLoadFullHistory: ({ entries, isHistoryEnabled }) => {
       if (model._tag !== "EditFile") {
         return { model, outMessage: OutMessage.None() }
       }
       return {
         model: modifyFields(model, {
-          historyState: () => HistoryState.Open({ entries, isConfirmingClear: false }),
+          isHistoryEnabled: () => isHistoryEnabled,
+          hasHistoryEntries: () => entries.length > 0,
+          historyState: () =>
+            HistoryState.Open({
+              entries,
+              isConfirmingClear: false,
+              isHistoryEnabled,
+              maybePreviewContent: Option.none(),
+            }),
         }),
         outMessage: OutMessage.None(),
       }
     },
+
+    ToggledHistoryEnabled: ({ isEnabled }) => {
+      if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const openState = model.historyState
+      return {
+        model: modifyFields(model, {
+          isHistoryEnabled: () => isEnabled,
+          historyState: () =>
+            HistoryState.Open({
+              entries: openState.entries,
+              isConfirmingClear: openState.isConfirmingClear,
+              isHistoryEnabled: isEnabled,
+              maybePreviewContent: openState.maybePreviewContent,
+            }),
+        }),
+        commands: [SaveHistoryEnabled({ isEnabled })],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    CompletedSaveHistoryEnabled: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
 
     FailedLoadFullHistory: ({ message: errorMessage }) => {
       if (model._tag !== "EditFile") {
@@ -2877,6 +3000,8 @@ export const update = (
       const currentContent = model.fileMode.content
       const { contentHash: currentHash, byteLength: currentByteLength } =
         hashAndMeasureHistoryContent(currentContent)
+      const isHistoryEnabled =
+        model.historyState._tag === "Open" ? model.historyState.isHistoryEnabled : true
       const isCurrentInHistory =
         model.historyState._tag === "Open" &&
         Array.some(
@@ -2892,9 +3017,8 @@ export const update = (
             subPath: context.subPath,
             fileName: model.originalName,
             endOffset,
-            maybeSaveCurrentContent: isCurrentInHistory
-              ? Option.none()
-              : Option.some(currentContent),
+            maybeSaveCurrentContent:
+              !isHistoryEnabled || isCurrentInHistory ? Option.none() : Option.some(currentContent),
           }),
         ],
         outMessage: OutMessage.None(),
@@ -2942,6 +3066,63 @@ export const update = (
       }
     },
 
+    ClickedPreviewHistoryEntry: ({ endOffset }) => {
+      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model,
+        commands: [
+          LoadHistoryPreviewAt({
+            subPath: context.subPath,
+            fileName: model.originalName,
+            endOffset,
+          }),
+        ],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    SucceededLoadHistoryPreviewAt: ({ maybeContent }) => {
+      if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const openState = model.historyState
+      return Option.match(maybeContent, {
+        onNone: () => ({
+          model: modifyFields(model, {
+            historyState: () =>
+              HistoryState.Error({ message: "Version konnte nicht geladen werden." }),
+          }),
+          outMessage: OutMessage.None(),
+        }),
+        onSome: (content) => ({
+          model: modifyFields(model, {
+            historyState: () =>
+              HistoryState.Open({
+                entries: openState.entries,
+                isConfirmingClear: openState.isConfirmingClear,
+                isHistoryEnabled: openState.isHistoryEnabled,
+                maybePreviewContent: Option.some(content),
+              }),
+          }),
+          outMessage: OutMessage.None(),
+        }),
+      })
+    },
+
+    FailedLoadHistoryPreviewAt: ({ message: errorMessage }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Error({ message: errorMessage }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
     ClickedRequestClearHistory: () => {
       if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
         return { model, outMessage: OutMessage.None() }
@@ -2953,6 +3134,8 @@ export const update = (
             HistoryState.Open({
               entries: openState.entries,
               isConfirmingClear: true,
+              isHistoryEnabled: openState.isHistoryEnabled,
+              maybePreviewContent: openState.maybePreviewContent,
             }),
         }),
         outMessage: OutMessage.None(),
@@ -2970,6 +3153,8 @@ export const update = (
             HistoryState.Open({
               entries: openState.entries,
               isConfirmingClear: false,
+              isHistoryEnabled: openState.isHistoryEnabled,
+              maybePreviewContent: openState.maybePreviewContent,
             }),
         }),
         outMessage: OutMessage.None(),
@@ -2996,10 +3181,19 @@ export const update = (
       if (model._tag !== "EditFile") {
         return { model, outMessage: OutMessage.None() }
       }
+      const isHistoryEnabled =
+        model.historyState._tag === "Open" ? model.historyState.isHistoryEnabled : true
       return {
         model: modifyFields(model, {
           maybeOpfsHistoryCursor: () => Option.some(0),
-          historyState: () => HistoryState.Open({ entries: [], isConfirmingClear: false }),
+          hasHistoryEntries: () => false,
+          historyState: () =>
+            HistoryState.Open({
+              entries: [],
+              isConfirmingClear: false,
+              isHistoryEnabled,
+              maybePreviewContent: Option.none(),
+            }),
         }),
         outMessage: OutMessage.None(),
       }
@@ -3037,11 +3231,19 @@ export const update = (
       if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
         return { model, outMessage: OutMessage.None() }
       }
-      const nextEntries = model.historyState.entries.slice(1)
+      const openState = model.historyState
+      const nextEntries = openState.entries.slice(1)
       return {
         model: modifyFields(model, {
           maybeOpfsHistoryCursor: () => Option.none(),
-          historyState: () => HistoryState.Open({ entries: nextEntries, isConfirmingClear: false }),
+          hasHistoryEntries: () => nextEntries.length > 0,
+          historyState: () =>
+            HistoryState.Open({
+              entries: nextEntries,
+              isConfirmingClear: false,
+              isHistoryEnabled: openState.isHistoryEnabled,
+              maybePreviewContent: Option.none(),
+            }),
         }),
         outMessage: OutMessage.None(),
       }
@@ -3757,6 +3959,7 @@ const viewEditorModal = (
     readonly historyControls?: {
       readonly canUndo: boolean
       readonly canRedo: boolean
+      readonly showStepButtons: boolean
     }
   },
   h: Html.HtmlBuilder<Message>,
@@ -3937,18 +4140,20 @@ const viewEditorModal = (
                         h.div(
                           [h.Class("editor-history-nav"), h.Role("group"), h.AriaLabel("Verlauf")],
                           [
-                            h.button(
-                              [
-                                h.Type("button"),
-                                h.Id("modal-btn-undo"),
-                                h.Class("btn btn-secondary btn-icon"),
-                                h.AriaLabel("Zurück"),
-                                h.Title("Zurück (Ältere Version)"),
-                                h.Disabled(!historyControls.canUndo),
-                                h.OnClick(Message.ClickedUndo()),
-                              ],
-                              [viewIcon("undo", h)],
-                            ),
+                            historyControls.showStepButtons
+                              ? h.button(
+                                  [
+                                    h.Type("button"),
+                                    h.Id("modal-btn-undo"),
+                                    h.Class("btn btn-secondary btn-icon"),
+                                    h.AriaLabel("Zurück"),
+                                    h.Title("Zurück (Ältere Version)"),
+                                    h.Disabled(!historyControls.canUndo),
+                                    h.OnClick(Message.ClickedUndo()),
+                                  ],
+                                  [viewIcon("undo", h)],
+                                )
+                              : h.empty,
                             h.button(
                               [
                                 h.Type("button"),
@@ -3960,18 +4165,20 @@ const viewEditorModal = (
                               ],
                               [viewIcon("history", h)],
                             ),
-                            h.button(
-                              [
-                                h.Type("button"),
-                                h.Id("modal-btn-redo"),
-                                h.Class("btn btn-secondary btn-icon"),
-                                h.AriaLabel("Vor"),
-                                h.Title("Vor (Neuere Version)"),
-                                h.Disabled(!historyControls.canRedo),
-                                h.OnClick(Message.ClickedRedo()),
-                              ],
-                              [viewIcon("redo", h)],
-                            ),
+                            historyControls.showStepButtons
+                              ? h.button(
+                                  [
+                                    h.Type("button"),
+                                    h.Id("modal-btn-redo"),
+                                    h.Class("btn btn-secondary btn-icon"),
+                                    h.AriaLabel("Vor"),
+                                    h.Title("Vor (Neuere Version)"),
+                                    h.Disabled(!historyControls.canRedo),
+                                    h.OnClick(Message.ClickedRedo()),
+                                  ],
+                                  [viewIcon("redo", h)],
+                                )
+                              : h.empty,
                           ],
                         ),
                       ]
@@ -4242,11 +4449,13 @@ const formatHistoryHash = (contentHash: number): string =>
 
 const viewHistoryOverlay = (
   historyState: HistoryState,
+  currentContent: string,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   if (historyState._tag === "Closed") {
     return h.empty
   }
+  const currentVersion = hashAndMeasureHistoryContent(currentContent)
 
   return h.div(
     [
@@ -4263,7 +4472,30 @@ const viewHistoryOverlay = (
           h.header(
             [h.Class("modal-header")],
             [
-              h.h3([h.Class("modal-title")], ["Versionsverlauf"]),
+              h.div(
+                [h.Class("editor-history-header-title")],
+                [
+                  h.h3([h.Class("modal-title")], ["Versionsverlauf"]),
+                  historyState._tag === "Open"
+                    ? h.label(
+                        [h.Class("form-check editor-history-toggle")],
+                        [
+                          h.input([
+                            h.Type("checkbox"),
+                            h.Id("editor-history-enabled-checkbox"),
+                            h.Checked(historyState.isHistoryEnabled),
+                            h.OnChange(() =>
+                              Message.ToggledHistoryEnabled({
+                                isEnabled: !historyState.isHistoryEnabled,
+                              }),
+                            ),
+                          ]),
+                          h.span([], ["Speichern"]),
+                        ],
+                      )
+                    : h.empty,
+                ],
+              ),
               h.button(
                 [
                   h.Type("button"),
@@ -4363,10 +4595,19 @@ const viewHistoryOverlay = (
                               ),
                           h.ul(
                             [h.Class("editor-history-list")],
-                            Array.map(nonEmptyEntries, (entry) =>
-                              h.keyed("li")(
+                            Array.map(nonEmptyEntries, (entry) => {
+                              const isCurrentVersion =
+                                entry.contentHash === currentVersion.contentHash &&
+                                entry.byteLength === currentVersion.byteLength
+                              return h.keyed("li")(
                                 String(entry.offset),
-                                [h.Class("editor-history-item")],
+                                [
+                                  h.Class(
+                                    isCurrentVersion
+                                      ? "editor-history-item is-current"
+                                      : "editor-history-item",
+                                  ),
+                                ],
                                 [
                                   h.div(
                                     [h.Class("editor-history-meta")],
@@ -4385,21 +4626,38 @@ const viewHistoryOverlay = (
                                       ),
                                     ],
                                   ),
-                                  h.button(
+                                  h.div(
+                                    [h.Class("editor-history-actions")],
                                     [
-                                      h.Type("button"),
-                                      h.Class("btn btn-secondary editor-history-restore-btn"),
-                                      h.OnClick(
-                                        Message.ClickedRestoreHistoryEntry({
-                                          endOffset: entry.endOffset,
-                                        }),
+                                      h.button(
+                                        [
+                                          h.Type("button"),
+                                          h.Class("btn btn-secondary editor-history-preview-btn"),
+                                          h.OnClick(
+                                            Message.ClickedPreviewHistoryEntry({
+                                              endOffset: entry.endOffset,
+                                            }),
+                                          ),
+                                        ],
+                                        ["Anzeigen"],
+                                      ),
+                                      h.button(
+                                        [
+                                          h.Type("button"),
+                                          h.Class("btn btn-secondary editor-history-restore-btn"),
+                                          h.OnClick(
+                                            Message.ClickedRestoreHistoryEntry({
+                                              endOffset: entry.endOffset,
+                                            }),
+                                          ),
+                                        ],
+                                        ["Wiederherstellen"],
                                       ),
                                     ],
-                                    ["Wiederherstellen"],
                                   ),
                                 ],
-                              ),
-                            ),
+                              )
+                            }),
                           ),
                         ],
                       ),
@@ -4526,6 +4784,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         redoStack,
         maybeOpfsHistoryCursor,
         historyState,
+        isHistoryEnabled,
+        hasHistoryEntries,
       }) =>
         h.div(
           [h.Class("editor-modal-host")],
@@ -4559,6 +4819,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                           Array.isReadonlyArrayNonEmpty(undoStack) ||
                           !Option.exists(maybeOpfsHistoryCursor, (cursor) => cursor <= 0),
                         canRedo: Array.isReadonlyArrayNonEmpty(redoStack),
+                        showStepButtons:
+                          (isHistoryEnabled ?? true) ||
+                          (hasHistoryEntries ?? true) ||
+                          Array.isReadonlyArrayNonEmpty(undoStack) ||
+                          Array.isReadonlyArrayNonEmpty(redoStack),
                       }
                     : undefined,
               },
@@ -4567,7 +4832,12 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             previewOpen && fileMode._tag === "Text"
               ? viewPreviewOverlay(fileMode.content, h)
               : h.empty,
-            fileMode._tag === "Text" ? viewHistoryOverlay(historyState, h) : h.empty,
+            fileMode._tag === "Text"
+              ? viewHistoryOverlay(historyState, fileMode.content, h)
+              : h.empty,
+            historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
+              ? viewPreviewOverlay(historyState.maybePreviewContent.value, h)
+              : h.empty,
           ],
         ),
 

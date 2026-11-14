@@ -410,6 +410,17 @@ export const truncateLatestFileHistoryEntry = async (
   await maybeStore.value.truncate(maybeMeta.value.offset)
 }
 
+export const hasFileHistory = async (
+  subPath: ReadonlyArray<string>,
+  fileName: string,
+): Promise<boolean> => {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, false)
+  if (Option.isNone(maybeStore)) {
+    return false
+  }
+  return (await maybeStore.value.getSize()) > 0
+}
+
 /**
  * Löscht die gespeicherte Versionshistorie einer Datei.
  */

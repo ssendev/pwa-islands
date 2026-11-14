@@ -23,10 +23,15 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
+import { hasFileHistory } from "./history"
 import { viewIcon } from "./icons"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
 import { StarterTemplate } from "./templates"
-import { DEFAULT_EDITOR_SPLIT_PERCENT, getStoredUserTemplates } from "./storage"
+import {
+  DEFAULT_EDITOR_SPLIT_PERCENT,
+  getStoredHistoryEnabled,
+  getStoredUserTemplates,
+} from "./storage"
 import type { StorageBackend } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
@@ -345,7 +350,11 @@ export const resolveModalForRoute = async (
             }
           }
 
-          const fileMode = await loadEditorFileModeForEntry(storage, subPath, targetEntry.name)
+          const [fileMode, isHistoryEnabled, hasHistoryEntries] = await Promise.all([
+            loadEditorFileModeForEntry(storage, subPath, targetEntry.name),
+            getStoredHistoryEnabled(),
+            hasFileHistory(subPath, targetEntry.name),
+          ])
           return {
             maybeModalState: Option.some(
               ModalState.Editor({
@@ -370,6 +379,8 @@ export const resolveModalForRoute = async (
                   redoStack: [],
                   maybeOpfsHistoryCursor: Option.none(),
                   historyState: Editor.HistoryState.Closed(),
+                  isHistoryEnabled,
+                  hasHistoryEntries,
                 }),
               }),
             ),
@@ -393,6 +404,8 @@ export const Message = defineMessageUnion({
   SucceededInspectFileForEditor: {
     originalName: Schema.String,
     fileMode: EditorFileMode,
+    isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
+    hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
   },
   FailedInspectFileForEditor: {
     message: Schema.String,
@@ -460,10 +473,16 @@ export const InspectFileForEditor = Command.define("InspectFileForEditor", {
     Effect.tryPromise({
       try: async () => {
         const storage = requireActiveStorage()
-        const fileMode = await loadEditorFileModeForEntry(storage, args.subPath, args.entryName)
+        const [fileMode, isHistoryEnabled, hasHistoryEntries] = await Promise.all([
+          loadEditorFileModeForEntry(storage, args.subPath, args.entryName),
+          getStoredHistoryEnabled(),
+          hasFileHistory(args.subPath, args.entryName),
+        ])
         return Message.SucceededInspectFileForEditor({
           originalName: args.entryName,
           fileMode,
+          isHistoryEnabled,
+          hasHistoryEntries,
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -740,7 +759,12 @@ export const update = (
         })),
       ),
 
-    SucceededInspectFileForEditor: ({ originalName, fileMode }) => ({
+    SucceededInspectFileForEditor: ({
+      originalName,
+      fileMode,
+      isHistoryEnabled,
+      hasHistoryEntries,
+    }) => ({
       model: ModalState.Editor({
         editor: Editor.Model.EditFile({
           originalName,
@@ -764,6 +788,8 @@ export const update = (
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isHistoryEnabled: isHistoryEnabled ?? true,
+          hasHistoryEntries: hasHistoryEntries ?? true,
         }),
       }),
       commands: [FocusModalNameInput()],

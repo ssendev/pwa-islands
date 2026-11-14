@@ -13,6 +13,7 @@ export const HANDLE_KEY = "selected_folder"
 export const USER_TEMPLATES_KEY = "user_templates"
 export const STORAGE_TYPE_KEY = "selected_storage_type"
 export const FILE_INFO_VISIBLE_KEY = "file_info_visible"
+export const HISTORY_ENABLED_KEY = "history_enabled"
 export const ISLAND_PARAM = "pwaislands"
 
 // NOTE: OPFS has a single root per origin; files are placed in a subfolder
@@ -159,6 +160,36 @@ export async function storeFileInfoVisible(visible: boolean): Promise<void> {
     const tx = db.transaction(STORE_NAME, "readwrite")
     const store = tx.objectStore(STORE_NAME)
     const req = store.put(visible, FILE_INFO_VISIBLE_KEY)
+
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+// NOTE: Defaults to true so version saving is active unless explicitly disabled
+export async function getStoredHistoryEnabled(): Promise<boolean> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const store = tx.objectStore(STORE_NAME)
+      const req = store.get(HISTORY_ENABLED_KEY)
+
+      req.onsuccess = () => resolve(req.result !== false)
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Verlaufs-Einstellung:", error)
+    return true
+  }
+}
+
+export async function storeHistoryEnabled(enabled: boolean): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const store = tx.objectStore(STORE_NAME)
+    const req = store.put(enabled, HISTORY_ENABLED_KEY)
 
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
