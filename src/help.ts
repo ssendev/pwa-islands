@@ -285,7 +285,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                           [h.Class("help-topic-body")],
                           [
                             h.p(
-                              [],
+                              [h.Class("help-text")],
                               [
                                 "Tipp: Klicke in der Werkzeugleiste auf ",
                                 h.strong([], ["Neue Datei erstellen (+)"]),
@@ -297,7 +297,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                               ],
                             ),
                             h.p(
-                              [],
+                              [h.Class("help-text")],
                               [
                                 h.strong([], ["Mit Chat-API: "]),
                                 "Wenn in den ",
@@ -312,7 +312,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                               ],
                             ),
                             h.p(
-                              [],
+                              [h.Class("help-text")],
                               [
                                 h.strong(
                                   [],
@@ -332,7 +332,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                               ],
                             ),
                             h.ol(
-                              [],
+                              [h.Class("help-list")],
                               [
                                 h.li(
                                   [],
@@ -352,13 +352,13 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                     "Wähle ",
                                     h.strong([], ["Mit Anleitung"]),
                                     " (kopiert Kurzanleitung im gewählten Format, ",
-                                    h.code([], ["/api.d.ts"]),
+                                    h.code([h.Class("help-path")], ["/api.d.ts"]),
                                     " und die Datei) oder ",
                                     h.strong([], ["Datei"]),
                                     " (nur die Datei – bei ",
                                     h.em([], ["Hash-Anchored Edits"]),
                                     " mit ",
-                                    h.code([], ["ZEILE:HASH|"]),
+                                    h.code([h.Class("help-path")], ["ZEILE:HASH|"]),
                                     "-Präfixen, sonst als normaler Codeblock). Über ",
                                     h.strong([], ["/app.d.ts"]),
                                     " kopierst du bei Bedarf nur die API-Typen.",
