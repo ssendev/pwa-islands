@@ -3268,6 +3268,13 @@ export const update = (
         }
         return { model }
       }
+      if (Modal.isPreviewOpen(model.modalState)) {
+        return {
+          model: modifyFields(model, {
+            modalState: Modal.closePreview,
+          }),
+        }
+      }
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {

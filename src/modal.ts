@@ -79,6 +79,22 @@ export const isOpen = (state: ModalState): boolean =>
 
 export const close = (): ModalState => ModalState.Closed()
 
+export const isPreviewOpen = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: ({ editor }) => Editor.isPreviewOpen(editor),
+    ImportConflict: () => false,
+    Help: () => false,
+  })
+
+export const closePreview = (state: ModalState): ModalState =>
+  ModalState.match(state, {
+    Closed: () => state,
+    Editor: ({ editor }) => ModalState.Editor({ editor: Editor.closePreview(editor) }),
+    ImportConflict: () => state,
+    Help: () => state,
+  })
+
 const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
   quickstart: "Quickstart: Mit KI bearbeiten",
   api: "PWA Islands bauen",
@@ -347,6 +363,7 @@ export const resolveModalForRoute = async (
                   llmChatState: Editor.LlmChatState.Idle(),
                   isMaximized: false,
                   isEditingName: false,
+                  isPreviewOpen: false,
                   editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
                   editorSplitDrag: Option.none(),
                 }),
@@ -735,6 +752,7 @@ export const update = (
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: context.editorDefaults?.isMaximized ?? false,
           isEditingName: false,
+          isPreviewOpen: false,
           editorSplitPercent:
             context.editorDefaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
           editorSplitDrag: Option.none(),

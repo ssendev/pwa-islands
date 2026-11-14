@@ -384,12 +384,12 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                 h.li(
                                   [],
                                   [
-                                    h.strong([], ["Speichern & testen: "]),
+                                    h.strong([], ["Testen: "]),
                                     "Mit ",
                                     h.strong([], ["Anzeigen"]),
                                     " (rechts neben ",
                                     h.strong([], ["Speichern"]),
-                                    ") wird die Datei gespeichert und in einem neuen Tab geöffnet, während der Editor für weitere Edits offen bleibt.",
+                                    ") wird der aktuelle Inhalt ohne Speichern als Vollfenster-Vorschau geöffnet, während der Editor im Hintergrund für weitere Edits offen bleibt.",
                                   ],
                                 ),
                                 h.li(

@@ -1117,6 +1117,34 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
+    it("opens and closes full-window preview without saving and closes preview on Escape", () => {
+      const modelWithCreate: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: modifyFields(Editor.makeCreateFile(), {
+            content: () => "<h1>Hallo</h1>",
+          }),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithCreate),
+        message(editorMsg(Editor.Message.ClickedOpenPreview())),
+        Command.expectNone(),
+        model((m) => {
+          expect(Modal.isOpen(m.modalState)).toBe(true)
+          expect(Modal.isPreviewOpen(m.modalState)).toBe(true)
+        }),
+        message(Message.PressedEscape()),
+        Command.expectNone(),
+        model((m) => {
+          expect(Modal.isOpen(m.modalState)).toBe(true)
+          expect(Modal.isPreviewOpen(m.modalState)).toBe(false)
+        }),
+      )
+    })
+
     it("prompts delete confirmation and deletes modal entry", () => {
       const modelWithEditFile: Model = {
         ...readyModel,
@@ -1135,6 +1163,7 @@ describe("PWA Islands Story Tests", () => {
             llmChatState: Editor.LlmChatState.Idle(),
             isMaximized: false,
             isEditingName: false,
+            isPreviewOpen: false,
             editorSplitPercent: 62,
             editorSplitDrag: Option.none(),
           }),
@@ -2426,6 +2455,7 @@ describe("PWA Islands Story Tests", () => {
                   llmChatState: Editor.LlmChatState.Idle(),
                   isMaximized: false,
                   isEditingName: false,
+                  isPreviewOpen: false,
                   editorSplitPercent: 62,
                   editorSplitDrag: Option.none(),
                 }),

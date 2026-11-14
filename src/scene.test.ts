@@ -174,6 +174,7 @@ describe("PWA Islands Scene Tests", () => {
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
           isEditingName: false,
+          isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
         }),
@@ -245,7 +246,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-btn-copy-llm")).toContainText("Mit Anleitung"),
       sceneExpect(selector("#modal-btn-copy-hashes")).toContainText("Datei"),
       sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Einfügen"),
-      sceneExpect(selector("#modal-btn-save-and-open")).toContainText("Anzeigen"),
+      sceneExpect(selector("#modal-btn-preview")).toContainText("Anzeigen"),
       sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
       click(selector("#modal-btn-copy-dts")),
       Command.expectExact(Editor.CopyApiDtsToClipboard()),
@@ -308,7 +309,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-thinking-select")).toExist(),
       sceneExpect(selector("#modal-llm-thinking-select")).toHaveValue("false"),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
-      sceneExpect(selector("#modal-btn-save-and-open")).toExist(),
+      sceneExpect(selector("#modal-btn-preview")).toExist(),
       type(selector("#modal-llm-chat-input"), "Mach einen Button"),
       sceneExpect(selector("#modal-llm-chat-input")).toHaveValue("Mach einen Button"),
       change(selector("#modal-llm-model-select"), "qwen3"),
@@ -330,7 +331,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Closed"),
       sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
-      sceneExpect(selector("#modal-btn-save-and-open")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-preview")).toBeAbsent(),
     )
   })
 
@@ -555,6 +556,7 @@ describe("PWA Islands Scene Tests", () => {
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
           isEditingName: false,
+          isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
         }),
@@ -608,6 +610,7 @@ describe("PWA Islands Scene Tests", () => {
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
           isEditingName: false,
+          isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
         }),
@@ -652,6 +655,7 @@ describe("PWA Islands Scene Tests", () => {
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
           isEditingName: false,
+          isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
         }),
@@ -682,7 +686,7 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
-  it("hides delete button in LLM mode and saves + opens in new tab on Anzeigen click", () => {
+  it("hides delete button in LLM mode and opens full-window iframe without saving on Anzeigen click", () => {
     const editModel = Editor.Model.EditFile({
       originalName: "index.html",
       name: "index.html",
@@ -697,6 +701,7 @@ describe("PWA Islands Scene Tests", () => {
       llmChatState: Editor.LlmChatState.Idle(),
       isMaximized: false,
       isEditingName: false,
+      isPreviewOpen: false,
       editorSplitPercent: 62,
       editorSplitDrag: Option.none(),
     })
@@ -707,24 +712,6 @@ describe("PWA Islands Scene Tests", () => {
       }),
     }
 
-    const expectedOpenEditModel = Editor.Model.EditFile({
-      originalName: "index.html",
-      name: "index.html",
-      fileMode: EditorFileMode.Text({ content: "<p>Test</p>" }),
-      maybeValidationError: Option.none(),
-      maybeAlertBanner: Option.none(),
-      maybePasteError: Option.none(),
-      llmBarMode: "Copy",
-      llmChatInput: "",
-      llmChatMessages: [],
-      llmChatDisplay: [],
-      llmChatState: Editor.LlmChatState.Idle(),
-      isMaximized: false,
-      isEditingName: false,
-      editorSplitPercent: 62,
-      editorSplitDrag: Option.none(),
-    })
-
     scene(
       { update, view },
       given(modelWithEditFile),
@@ -732,21 +719,19 @@ describe("PWA Islands Scene Tests", () => {
       change(selector("#modal-llm-mode-select"), "Copy"),
       Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       sceneExpect(selector("#modal-btn-delete")).toBeAbsent(),
-      sceneExpect(selector(".modal-footer #modal-btn-save-and-open")).toExist(),
-      click(selector("#modal-btn-save-and-open")),
-      Command.expectExact(Editor.SaveAndOpenChanges({ model: expectedOpenEditModel, subPath: [] })),
-      Command.resolve(
-        Editor.SaveAndOpenChanges,
-        Editor.Message.SucceededSaveAndOpen({
-          entries: [],
-          savedFileName: "index.html",
-          url: "/index.html",
-        }),
-      ),
-      Command.expectExact(Editor.OpenUrlInNewTab({ url: "/index.html" })),
-      Command.resolve(Editor.OpenUrlInNewTab, Editor.Message.CompletedOpenInNewTab()),
+      sceneExpect(selector(".modal-footer #modal-btn-preview")).toExist(),
+      sceneExpect(selector("#editor-preview-overlay")).toBeAbsent(),
+      click(selector("#modal-btn-preview")),
+      Command.expectNone(),
+      sceneExpect(selector("#editor-preview-overlay")).toExist(),
+      sceneExpect(selector("#editor-preview-iframe")).toExist(),
+      sceneExpect(selector("#editor-preview-iframe")).toHaveAttr("srcdoc", "<p>Test</p>"),
+      sceneExpect(selector("#editor-preview-close")).toExist(),
+      sceneExpect(selector("#editor-preview-close")).toHaveAttr("aria-label", "Vorschau schließen"),
+      click(selector("#editor-preview-close")),
+      Command.expectNone(),
+      sceneExpect(selector("#editor-preview-overlay")).toBeAbsent(),
       sceneExpect(selector(".modal-overlay")).toExist(),
-      sceneExpect(text("Gespeichert und in neuem Tab geöffnet")).toExist(),
     )
   })
 
@@ -789,6 +774,7 @@ describe("PWA Islands Scene Tests", () => {
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
           isEditingName: false,
+          isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
         }),

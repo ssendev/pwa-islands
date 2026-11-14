@@ -28,7 +28,6 @@ import {
 import { formatUpdatedHashlines } from "./hashline"
 import { viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
-import { encodeSubPath } from "./route"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
   clampEditorSplitPercent,
@@ -146,6 +145,7 @@ export const Model = defineTaggedUnion({
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
     llmChatState: LlmChatState,
     isMaximized: Schema.Boolean,
+    isPreviewOpen: Schema.Boolean,
     editorSplitPercent: Schema.Number,
     editorSplitDrag: Schema.Option(EditorSplitDrag),
   },
@@ -174,6 +174,7 @@ export const Model = defineTaggedUnion({
     llmChatState: LlmChatState,
     isMaximized: Schema.Boolean,
     isEditingName: Schema.Boolean,
+    isPreviewOpen: Schema.Boolean,
     editorSplitPercent: Schema.Number,
     editorSplitDrag: Schema.Option(EditorSplitDrag),
   },
@@ -219,6 +220,7 @@ export const makeCreateFile = (
   llmChatDisplay: [],
   llmChatState: LlmChatState.Idle(),
   isMaximized: defaults?.isMaximized ?? false,
+  isPreviewOpen: false,
   editorSplitPercent: defaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
   editorSplitDrag: Option.none(),
 })
@@ -424,6 +426,26 @@ export const applyLlmChatFailure = (model: Model, message: string): Model => {
   })
 }
 
+export const isPreviewOpen = (model: Model): boolean =>
+  Model.match(model, {
+    CreateFile: (state) => state.isPreviewOpen,
+    EditFile: (state) => state.isPreviewOpen && state.fileMode._tag === "Text",
+    CreateFolder: () => false,
+    EditFolder: () => false,
+    ConfirmDelete: () => false,
+    ConfirmOverwrite: () => false,
+  })
+
+export const closePreview = (model: Model): Model =>
+  Model.match(model, {
+    CreateFile: (state) => modifyFields(state, { isPreviewOpen: () => false }),
+    EditFile: (state) => modifyFields(state, { isPreviewOpen: () => false }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
 export const getAlertBanner = (model: Model): Option.Option<AlertBanner> =>
   Model.match(model, {
     CreateFile: (state) => state.maybeAlertBanner,
@@ -606,7 +628,8 @@ export const Message = defineMessageUnion({
   CompletedCopyPasteErrorToClipboard: {},
   ClickedDismissAlert: {},
   ClickedSave: {},
-  ClickedSaveAndOpen: {},
+  ClickedOpenPreview: {},
+  ClickedClosePreview: {},
   ClickedConfirmOverwrite: {},
   ClickedCancelOverwrite: {},
   ClickedDelete: {},
@@ -616,12 +639,6 @@ export const Message = defineMessageUnion({
   SucceededSaveChanges: {
     entries: Schema.Array(FileEntry),
   },
-  SucceededSaveAndOpen: {
-    entries: Schema.Array(FileEntry),
-    savedFileName: Schema.String,
-    url: Schema.String,
-  },
-  CompletedOpenInNewTab: {},
   FailedSaveChanges: {
     message: Schema.String,
   },
@@ -877,43 +894,6 @@ export const SaveChanges = Command.define("SaveChanges", {
     ),
 })
 
-export const SaveAndOpenChanges = Command.define("SaveAndOpenChanges", {
-  args: {
-    model: Model,
-    subPath: Schema.Array(Schema.String),
-  },
-  messages: [Message.SucceededSaveAndOpen, Message.FailedSaveChanges],
-  execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { entries, savedFileName } = await executeSaveChanges(args.model, args.subPath)
-        const url = `/${encodeSubPath([...args.subPath, savedFileName])}`
-        return Message.SucceededSaveAndOpen({ entries, savedFileName, url })
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.succeed(
-          Message.FailedSaveChanges({
-            message: `Speichern fehlgeschlagen: ${error.message}`,
-          }),
-        ),
-      ),
-    ),
-})
-
-export const OpenUrlInNewTab = Command.define("OpenUrlInNewTab", {
-  args: {
-    url: Schema.String,
-  },
-  messages: [Message.CompletedOpenInNewTab],
-  execute: ({ url }) =>
-    Effect.sync(() => {
-      window.open(url, "_blank", "noopener")
-      return Message.CompletedOpenInNewTab()
-    }),
-})
-
 export const DeleteEntry = Command.define("DeleteEntry", {
   args: {
     entryName: Schema.String,
@@ -1165,16 +1145,13 @@ const handleSaveAction = (
     readonly subPath: ReadonlyArray<string>
     readonly existingEntries: ReadonlyArray<FileEntry>
   },
-  openInNewTab: boolean,
 ): {
   readonly model: Model
   readonly commands?: ReadonlyArray<Command.Command<Message>>
   readonly outMessage: OutMessage
 } => {
   const makeSaveCommand = (nextModel: Model) =>
-    openInNewTab
-      ? SaveAndOpenChanges({ model: nextModel, subPath: context.subPath })
-      : SaveChanges({ model: nextModel, subPath: context.subPath })
+    SaveChanges({ model: nextModel, subPath: context.subPath })
 
   const validateName = (rawName: string, isFolder: boolean): Option.Option<string> => {
     const trimmed = rawName.trim()
@@ -2229,9 +2206,27 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
-    ClickedSave: () => handleSaveAction(model, context, false),
+    ClickedSave: () => handleSaveAction(model, context),
 
-    ClickedSaveAndOpen: () => handleSaveAction(model, context, true),
+    ClickedOpenPreview: () => ({
+      model: Model.match(model, {
+        CreateFile: (state) => modifyFields(state, { isPreviewOpen: () => true }),
+        EditFile: (state) =>
+          state.fileMode._tag === "Text"
+            ? modifyFields(state, { isPreviewOpen: () => true })
+            : state,
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      }),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedClosePreview: () => ({
+      model: closePreview(model),
+      outMessage: OutMessage.None(),
+    }),
 
     ClickedConfirmOverwrite: () => ({
       model: modifyFields(model, {
@@ -2263,6 +2258,7 @@ export const update = (
                 llmChatDisplay: [],
                 llmChatState: LlmChatState.Idle(),
                 isMaximized: false,
+                isPreviewOpen: false,
                 editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
                 editorSplitDrag: Option.none(),
               }),
@@ -2283,6 +2279,7 @@ export const update = (
                 llmChatState: LlmChatState.Idle(),
                 isMaximized: false,
                 isEditingName: false,
+                isPreviewOpen: false,
                 editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
                 editorSplitDrag: Option.none(),
               }),
@@ -2349,56 +2346,6 @@ export const update = (
     SucceededSaveChanges: ({ entries }) => ({
       model,
       outMessage: OutMessage.EntriesUpdated({ entries, closeModal: true }),
-    }),
-
-    SucceededSaveAndOpen: ({ entries, savedFileName, url }) => {
-      const banner = Option.some({
-        message: "Gespeichert und in neuem Tab geöffnet",
-        variant: "info" as const,
-      })
-      const nextModel = Model.match(model, {
-        CreateFile: (state) =>
-          Model.EditFile({
-            originalName: savedFileName,
-            name: savedFileName,
-            fileMode: EditorFileMode.Text({ content: state.content }),
-            maybeValidationError: Option.none(),
-            maybeAlertBanner: banner,
-            maybePasteError: Option.none(),
-            llmBarMode: state.llmBarMode,
-            llmChatInput: state.llmChatInput,
-            llmChatMessages: state.llmChatMessages,
-            llmChatDisplay: state.llmChatDisplay,
-            llmChatState: state.llmChatState,
-            isMaximized: state.isMaximized,
-            isEditingName: false,
-            editorSplitPercent: state.editorSplitPercent,
-            editorSplitDrag: state.editorSplitDrag,
-          }),
-        EditFile: (state) =>
-          modifyFields(state, {
-            originalName: () => savedFileName,
-            name: () => savedFileName,
-            maybeValidationError: () => Option.none(),
-            maybeAlertBanner: () => banner,
-            maybePasteError: () => Option.none(),
-          }),
-        CreateFolder: () => setAlertBanner(model, banner),
-        EditFolder: () => setAlertBanner(model, banner),
-        ConfirmDelete: () => setAlertBanner(model, banner),
-        ConfirmOverwrite: () => setAlertBanner(model, banner),
-      })
-
-      return {
-        model: nextModel,
-        commands: [OpenUrlInNewTab({ url })],
-        outMessage: OutMessage.EntriesUpdated({ entries, closeModal: false }),
-      }
-    },
-
-    CompletedOpenInNewTab: () => ({
-      model,
-      outMessage: OutMessage.None(),
     }),
 
     FailedSaveChanges: ({ message: errorMessage }) => ({
@@ -3343,11 +3290,11 @@ const viewEditorModal = (
                     ? h.button(
                         [
                           h.Type("button"),
-                          h.Id("modal-btn-save-and-open"),
+                          h.Id("modal-btn-preview"),
                           h.Class("btn btn-secondary icon-label-btn"),
-                          h.AriaLabel("Speichern und in neuem Tab anzeigen"),
-                          h.DataAttribute("tip", "Speichern und in neuem Tab anzeigen"),
-                          h.OnClick(Message.ClickedSaveAndOpen()),
+                          h.AriaLabel("Im Vollfenster anzeigen"),
+                          h.DataAttribute("tip", "Im Vollfenster anzeigen"),
+                          h.OnClick(Message.ClickedOpenPreview()),
                         ],
                         [
                           h.span(
@@ -3524,37 +3471,71 @@ const viewConfirmOverwriteModal = (
     ],
   )
 
+const PREVIEW_IFRAME_SANDBOX =
+  "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
+
+const viewPreviewOverlay = (content: string, h: Html.HtmlBuilder<Message>): Html.Html =>
+  h.div(
+    [h.Id("editor-preview-overlay"), h.Class("editor-preview-overlay")],
+    [
+      h.iframe([
+        h.Id("editor-preview-iframe"),
+        h.Class("editor-preview-iframe"),
+        h.Srcdoc(content),
+        h.Sandbox(PREVIEW_IFRAME_SANDBOX),
+        h.Title("Vorschau"),
+      ]),
+      h.button(
+        [
+          h.Type("button"),
+          h.Id("editor-preview-close"),
+          h.Class("editor-preview-close"),
+          h.Title("Schließen (Esc)"),
+          h.AriaLabel("Vorschau schließen"),
+          h.OnClick(Message.ClickedClosePreview()),
+        ],
+        [viewIcon("close", h)],
+      ),
+    ],
+  )
+
 export const view = Submodel.defineView<Model, Message, ViewInputs>(
   (model, context, h): Html.Html =>
     Model.match(model, {
       CreateFile: (state) =>
-        viewEditorModal(
-          {
-            titleText: "Neue Datei erstellen",
-            noun: "Datei",
-            isFolder: false,
-            isTextFile: true,
-            llmBarMode: state.llmBarMode,
-            llmChatInput: state.llmChatInput,
-            llmChatState: state.llmChatState,
-            llmChatDisplay: state.llmChatDisplay,
-            llmViewInputs: context,
-            isMaximized: state.isMaximized,
-            isNameToggleable: false,
-            isNameInputVisible: true,
-            editorSplitPercent: state.editorSplitPercent,
-            isDraggingSplit: Option.isSome(state.editorSplitDrag),
-            isEditingExisting: false,
-            nameValue: state.name,
-            maybeValidationError: state.maybeValidationError,
-            maybeAlertBanner: state.maybeAlertBanner,
-            maybePasteError: state.maybePasteError,
-            extraBodyNodes: [
-              viewTemplatePicker(state, h),
-              ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
-            ],
-          },
-          h,
+        h.div(
+          [h.Class("editor-modal-host")],
+          [
+            viewEditorModal(
+              {
+                titleText: "Neue Datei erstellen",
+                noun: "Datei",
+                isFolder: false,
+                isTextFile: true,
+                llmBarMode: state.llmBarMode,
+                llmChatInput: state.llmChatInput,
+                llmChatState: state.llmChatState,
+                llmChatDisplay: state.llmChatDisplay,
+                llmViewInputs: context,
+                isMaximized: state.isMaximized,
+                isNameToggleable: false,
+                isNameInputVisible: true,
+                editorSplitPercent: state.editorSplitPercent,
+                isDraggingSplit: Option.isSome(state.editorSplitDrag),
+                isEditingExisting: false,
+                nameValue: state.name,
+                maybeValidationError: state.maybeValidationError,
+                maybeAlertBanner: state.maybeAlertBanner,
+                maybePasteError: state.maybePasteError,
+                extraBodyNodes: [
+                  viewTemplatePicker(state, h),
+                  ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
+                ],
+              },
+              h,
+            ),
+            state.isPreviewOpen ? viewPreviewOverlay(state.content, h) : h.empty,
+          ],
         ),
 
       CreateFolder: ({ name, maybeValidationError, maybeAlertBanner }) =>
@@ -3624,33 +3605,42 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         llmChatDisplay,
         isMaximized,
         isEditingName,
+        isPreviewOpen: previewOpen,
         editorSplitPercent,
         editorSplitDrag,
       }) =>
-        viewEditorModal(
-          {
-            titleText: `Datei bearbeiten: ${originalName}`,
-            noun: "Datei",
-            isFolder: false,
-            isTextFile: fileMode._tag === "Text",
-            llmBarMode,
-            llmChatInput,
-            llmChatState,
-            llmChatDisplay,
-            llmViewInputs: context,
-            isMaximized,
-            isNameToggleable: true,
-            isNameInputVisible: isEditingName,
-            editorSplitPercent,
-            isDraggingSplit: Option.isSome(editorSplitDrag),
-            isEditingExisting: true,
-            nameValue: name,
-            maybeValidationError,
-            maybeAlertBanner,
-            maybePasteError,
-            extraBodyNodes: viewEditorFileBody(fileMode, h),
-          },
-          h,
+        h.div(
+          [h.Class("editor-modal-host")],
+          [
+            viewEditorModal(
+              {
+                titleText: `Datei bearbeiten: ${originalName}`,
+                noun: "Datei",
+                isFolder: false,
+                isTextFile: fileMode._tag === "Text",
+                llmBarMode,
+                llmChatInput,
+                llmChatState,
+                llmChatDisplay,
+                llmViewInputs: context,
+                isMaximized,
+                isNameToggleable: true,
+                isNameInputVisible: isEditingName,
+                editorSplitPercent,
+                isDraggingSplit: Option.isSome(editorSplitDrag),
+                isEditingExisting: true,
+                nameValue: name,
+                maybeValidationError,
+                maybeAlertBanner,
+                maybePasteError,
+                extraBodyNodes: viewEditorFileBody(fileMode, h),
+              },
+              h,
+            ),
+            previewOpen && fileMode._tag === "Text"
+              ? viewPreviewOverlay(fileMode.content, h)
+              : h.empty,
+          ],
         ),
 
       ConfirmDelete: ({ entryName, entryKind, maybeAlertBanner }) =>
