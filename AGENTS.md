@@ -1,6 +1,6 @@
 # PWA Islands
 
-Dies ist eine PWA welche mit der eine reihe von mini APPs (.html single file pages) mit FS API gespeichert und dann angezeigt werden können.
+Dies ist eine PWA welche mit der eine reihe von mini APPs (.html single file pages) mit FS API gespeichert und dann angezeigt werden können. Sie ist als PWA direkt in Browsern oder auch als Tauri App zum installieren verfügbar.
 
 # UI
 
