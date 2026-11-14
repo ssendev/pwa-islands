@@ -183,6 +183,7 @@ export const Model = defineTaggedUnion({
     originalName: Schema.String,
     name: Schema.String,
     maybeValidationError: Schema.Option(Schema.String),
+    isConfirmingDelete: Schema.Boolean,
   },
   EditFile: {
     originalName: Schema.String,
@@ -206,10 +207,7 @@ export const Model = defineTaggedUnion({
     historyState: HistoryState,
     isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
-  },
-  ConfirmDelete: {
-    entryName: Schema.String,
-    entryKind: FileEntryKind,
+    isConfirmingDelete: Schema.Boolean,
   },
   ConfirmOverwrite: {
     targetName: Schema.String,
@@ -274,7 +272,6 @@ export const applyPreferences = (
       }),
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 
@@ -359,7 +356,6 @@ export const applyLlmChatStream = (
       }),
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 
@@ -424,7 +420,6 @@ export const applyLlmChatSuccess = (
     },
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 }
@@ -462,7 +457,6 @@ export const applyLlmChatFailure = (model: Model, message: string): Model => {
       }),
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 }
@@ -477,7 +471,6 @@ export const isPreviewOpen = (model: Model): boolean =>
           Option.isSome(state.historyState.maybePreviewContent))),
     CreateFolder: () => false,
     EditFolder: () => false,
-    ConfirmDelete: () => false,
     ConfirmOverwrite: () => false,
   })
 
@@ -500,7 +493,6 @@ export const closePreview = (model: Model): Model =>
         : modifyFields(state, { isPreviewOpen: () => false }),
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 
@@ -516,7 +508,6 @@ const getTextFileContext = (
       }),
     CreateFolder: () => Option.none(),
     EditFolder: () => Option.none(),
-    ConfirmDelete: () => Option.none(),
     ConfirmOverwrite: () => Option.none(),
   })
 
@@ -536,7 +527,6 @@ const setLlmBarMode = (model: Model, llmBarMode: LlmBarMode): Model =>
     EditFile: (state) => modifyFields(state, { llmBarMode: () => llmBarMode }),
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 
@@ -546,7 +536,6 @@ const setPasteError = (model: Model, maybePasteError: Option.Option<string>): Mo
     EditFile: (state) => modifyFields(state, { maybePasteError: () => maybePasteError }),
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 
@@ -572,7 +561,6 @@ const applyTextContentUpdate = (model: Model, content: string): Model =>
       }),
     CreateFolder: () => model,
     EditFolder: () => model,
-    ConfirmDelete: () => model,
     ConfirmOverwrite: () => model,
   })
 
@@ -1015,7 +1003,6 @@ const executeSaveChanges = async (
       )
       return targetName
     }),
-    Match.tag("ConfirmDelete", () => Promise.resolve("")),
     Match.exhaustive,
   )
 
@@ -1688,10 +1675,6 @@ const handleSaveAction = (
         outMessage: OutMessage.None(),
       }
     },
-    ConfirmDelete: () => ({
-      model,
-      outMessage: OutMessage.None(),
-    }),
     ConfirmOverwrite: () => ({
       model: modifyFields(model, {}),
       commands: [makeSaveCommand(model)],
@@ -1737,7 +1720,6 @@ export const update = (
             name: () => name,
             maybeValidationError: () => Option.none(),
           }),
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       }),
       outMessage: OutMessage.None(),
@@ -1765,7 +1747,6 @@ export const update = (
             },
             Binary: () => state,
           }),
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       }),
       outMessage: OutMessage.None(),
@@ -2040,7 +2021,6 @@ export const update = (
         EditFile: (state) => Option.some(state.llmBarMode),
         CreateFolder: () => Option.none(),
         EditFolder: () => Option.none(),
-        ConfirmDelete: () => Option.none(),
         ConfirmOverwrite: () => Option.none(),
       })
       const outMessage = Option.match(maybeNextMode, {
@@ -2065,7 +2045,6 @@ export const update = (
         EditFile: (state) => modifyFields(state, { llmChatInput: () => value }),
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       }),
       outMessage: OutMessage.None(),
@@ -2132,7 +2111,6 @@ export const update = (
         },
         CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
         EditFolder: () => ({ model, outMessage: OutMessage.None() }),
-        ConfirmDelete: () => ({ model, outMessage: OutMessage.None() }),
         ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
 
@@ -2142,7 +2120,6 @@ export const update = (
         EditFile: (state) => state.llmChatState._tag === "Sending",
         CreateFolder: () => false,
         EditFolder: () => false,
-        ConfirmDelete: () => false,
         ConfirmOverwrite: () => false,
       })
       const nextModel = Model.match(model, {
@@ -2168,7 +2145,6 @@ export const update = (
             : state,
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       })
       return wasSending
@@ -2211,7 +2187,6 @@ export const update = (
         EditFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       })
       const maybeMax = Model.match(nextModel, {
@@ -2219,7 +2194,6 @@ export const update = (
         EditFile: (state) => Option.some(state.isMaximized),
         CreateFolder: () => Option.none(),
         EditFolder: () => Option.none(),
-        ConfirmDelete: () => Option.none(),
         ConfirmOverwrite: () => Option.none(),
       })
       const isChatOpen = Model.match(nextModel, {
@@ -2227,7 +2201,6 @@ export const update = (
         EditFile: (state) => state.llmBarMode === "Chat",
         CreateFolder: () => false,
         EditFolder: () => false,
-        ConfirmDelete: () => false,
         ConfirmOverwrite: () => false,
       })
       const outMessage = Option.match(maybeMax, {
@@ -2257,7 +2230,6 @@ export const update = (
         EditFile: (state) => modifyFields(state, { editorSplitDrag: () => drag }),
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       })
       return {
@@ -2278,7 +2250,6 @@ export const update = (
         EditFile: (state) => modifyFields(state, { editorSplitDrag: Option.map(updateDrag) }),
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       })
       return {
@@ -2316,7 +2287,6 @@ export const update = (
           }),
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       })
       return {
@@ -2331,7 +2301,6 @@ export const update = (
         EditFile: (state) => modifyFields(state, { editorSplitDrag: () => Option.none() }),
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       })
       const maybePercent = Model.match(nextModel, {
@@ -2339,7 +2308,6 @@ export const update = (
         EditFile: (state) => Option.some(state.editorSplitPercent),
         CreateFolder: () => Option.none(),
         EditFolder: () => Option.none(),
-        ConfirmDelete: () => Option.none(),
         ConfirmOverwrite: () => Option.none(),
       })
       return {
@@ -2371,7 +2339,6 @@ export const update = (
         CreateFile: () => ({ model, outMessage: OutMessage.None() }),
         CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
         EditFolder: () => ({ model, outMessage: OutMessage.None() }),
-        ConfirmDelete: () => ({ model, outMessage: OutMessage.None() }),
         ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
 
@@ -2585,7 +2552,6 @@ export const update = (
             : state,
         CreateFolder: () => model,
         EditFolder: () => model,
-        ConfirmDelete: () => model,
         ConfirmOverwrite: () => model,
       }),
       outMessage: OutMessage.None(),
@@ -2650,6 +2616,7 @@ export const update = (
                 redoStack: [],
                 maybeOpfsHistoryCursor: Option.none(),
                 historyState: HistoryState.Closed(),
+                isConfirmingDelete: false,
               }),
               outMessage: OutMessage.None(),
             }),
@@ -2658,49 +2625,72 @@ export const update = (
         CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
         EditFolder: () => ({ model, outMessage: OutMessage.None() }),
         EditFile: () => ({ model, outMessage: OutMessage.None() }),
-        ConfirmDelete: () => ({ model, outMessage: OutMessage.None() }),
       }),
 
     ClickedDelete: () =>
       Model.match(model, {
-        EditFolder: ({ originalName }) => ({
-          model: Model.ConfirmDelete({
-            entryName: originalName,
-            entryKind: "directory",
-          }),
+        EditFolder: (folder) => ({
+          model: modifyFields(folder, { isConfirmingDelete: () => true }),
           outMessage: OutMessage.None(),
         }),
-        EditFile: ({ originalName }) => ({
-          model: Model.ConfirmDelete({
-            entryName: originalName,
-            entryKind: "file",
-          }),
+        EditFile: (file) => ({
+          model: modifyFields(file, { isConfirmingDelete: () => true }),
           outMessage: OutMessage.None(),
         }),
         CreateFile: () => ({ model, outMessage: OutMessage.None() }),
         CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
-        ConfirmDelete: () => ({ model, outMessage: OutMessage.None() }),
         ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
 
     ClickedConfirmDelete: () =>
       Model.match(model, {
-        ConfirmDelete: ({ entryName, entryKind }) => ({
-          model: modifyFields(model, {}),
-          commands: [DeleteEntry({ entryName, entryKind, subPath: context.subPath })],
+        EditFolder: ({ originalName, isConfirmingDelete }) =>
+          isConfirmingDelete
+            ? {
+                model,
+                commands: [
+                  DeleteEntry({
+                    entryName: originalName,
+                    entryKind: "directory",
+                    subPath: context.subPath,
+                  }),
+                ],
+                outMessage: OutMessage.None(),
+              }
+            : { model, outMessage: OutMessage.None() },
+        EditFile: ({ originalName, isConfirmingDelete }) =>
+          isConfirmingDelete
+            ? {
+                model,
+                commands: [
+                  DeleteEntry({
+                    entryName: originalName,
+                    entryKind: "file",
+                    subPath: context.subPath,
+                  }),
+                ],
+                outMessage: OutMessage.None(),
+              }
+            : { model, outMessage: OutMessage.None() },
+        CreateFile: () => ({ model, outMessage: OutMessage.None() }),
+        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
+      }),
+
+    ClickedCancelDelete: () =>
+      Model.match(model, {
+        EditFolder: (folder) => ({
+          model: modifyFields(folder, { isConfirmingDelete: () => false }),
+          outMessage: OutMessage.None(),
+        }),
+        EditFile: (file) => ({
+          model: modifyFields(file, { isConfirmingDelete: () => false }),
           outMessage: OutMessage.None(),
         }),
         CreateFile: () => ({ model, outMessage: OutMessage.None() }),
         CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
-        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
-        EditFile: () => ({ model, outMessage: OutMessage.None() }),
         ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
-
-    ClickedCancelDelete: () => ({
-      model,
-      outMessage: OutMessage.CloseModal({ replaceUrl: true }),
-    }),
 
     ClickedClose: () => ({
       model,
@@ -2751,6 +2741,7 @@ export const update = (
             redoStack: [],
             maybeOpfsHistoryCursor: Option.none(),
             historyState: HistoryState.Closed(),
+            isConfirmingDelete: false,
           }),
           outMessage: OutMessage.EntriesUpdated({
             entries,
@@ -2794,7 +2785,13 @@ export const update = (
     }),
 
     FailedDeleteEntry: ({ message: errorMessage }) => ({
-      model,
+      model: Model.match(model, {
+        EditFolder: (folder) => modifyFields(folder, { isConfirmingDelete: () => false }),
+        EditFile: (file) => modifyFields(file, { isConfirmingDelete: () => false }),
+        CreateFile: () => model,
+        CreateFolder: () => model,
+        ConfirmOverwrite: () => model,
+      }),
       outMessage: OutMessage.ShowAlert({
         banner: {
           message: errorMessage,
@@ -3998,7 +3995,6 @@ const viewEditorModal = (
   const saveLabel = isEditingExisting ? "Speichern" : "Erstellen"
   const effectiveLlmBarMode: LlmBarMode =
     !isTextFile || (llmBarMode === "Chat" && !llmViewInputs.llmEnabled) ? "Closed" : llmBarMode
-  const isLlmBarOpen = effectiveLlmBarMode !== "Closed"
   const llmBarModeOptions: ReadonlyArray<{ readonly value: LlmBarMode; readonly label: string }> =
     llmViewInputs.llmEnabled
       ? [
@@ -4098,18 +4094,42 @@ const viewEditorModal = (
                         [h.Class("form-group")],
                         [
                           h.label([h.For("modal-file-name")], [`${noun}name:`]),
-                          h.input([
-                            h.Type("text"),
-                            h.Id("modal-file-name"),
-                            h.Class("form-input"),
-                            h.Value(nameValue),
-                            h.Required(true),
-                            h.Placeholder(
-                              isFolder ? "z. B. projekte" : "z. B. index.html, daten.json",
-                            ),
-                            h.Autocomplete("off"),
-                            h.OnInput((name) => Message.UpdatedName({ name })),
-                          ]),
+                          h.div(
+                            [h.Class("modal-name-row")],
+                            [
+                              h.input([
+                                h.Type("text"),
+                                h.Id("modal-file-name"),
+                                h.Class("form-input"),
+                                h.Value(nameValue),
+                                h.Required(true),
+                                h.Placeholder(
+                                  isFolder ? "z. B. projekte" : "z. B. index.html, daten.json",
+                                ),
+                                h.Autocomplete("off"),
+                                h.OnInput((name) => Message.UpdatedName({ name })),
+                              ]),
+                              isEditingExisting
+                                ? h.button(
+                                    [
+                                      h.Type("button"),
+                                      h.Id("modal-btn-delete"),
+                                      h.Class("btn btn-danger icon-label-btn"),
+                                      h.AriaLabel("Löschen"),
+                                      h.DataAttribute("tip", "Löschen"),
+                                      h.OnClick(Message.ClickedDelete()),
+                                    ],
+                                    [
+                                      h.span(
+                                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                        [viewIcon("trash", h)],
+                                      ),
+                                      h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
+                                    ],
+                                  )
+                                : h.empty,
+                            ],
+                          ),
                         ],
                       )
                     : h.empty,
@@ -4127,27 +4147,7 @@ const viewEditorModal = (
                     ? viewLlmChatModelControls(llmChatState, llmViewInputs, h)
                     : effectiveLlmBarMode === "Copy"
                       ? viewLlmButtons(maybePasteError, h)
-                      : isEditingExisting
-                        ? [
-                            h.button(
-                              [
-                                h.Type("button"),
-                                h.Id("modal-btn-delete"),
-                                h.Class("btn btn-danger icon-label-btn"),
-                                h.AriaLabel("Löschen"),
-                                h.DataAttribute("tip", "Löschen"),
-                                h.OnClick(Message.ClickedDelete()),
-                              ],
-                              [
-                                h.span(
-                                  [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                  [viewIcon("trash", h)],
-                                ),
-                                h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
-                              ],
-                            ),
-                          ]
-                        : []),
+                      : []),
                   isTextFile
                     ? h.select(
                         [
@@ -4252,7 +4252,7 @@ const viewEditorModal = (
                       h.span([h.Class("icon-label-btn-text")], [saveLabel]),
                     ],
                   ),
-                  isTextFile && isLlmBarOpen
+                  isTextFile
                     ? h.button(
                         [
                           h.Type("button"),
@@ -4293,7 +4293,7 @@ const viewConfirmDeleteModal = (
       h.Class("modal-overlay"),
       h.Role("dialog"),
       h.AriaModal(true),
-      h.AriaLabelledBy("modal-title"),
+      h.AriaLabelledBy("modal-confirm-delete-title"),
     ],
     [
       h.div(
@@ -4302,7 +4302,10 @@ const viewConfirmDeleteModal = (
           h.header(
             [h.Class("modal-header")],
             [
-              h.h3([h.Id("modal-title"), h.Class("modal-title")], ["Eintrag löschen"]),
+              h.h3(
+                [h.Id("modal-confirm-delete-title"), h.Class("modal-title")],
+                ["Eintrag löschen"],
+              ),
               h.button(
                 [
                   h.Type("button"),
@@ -4337,6 +4340,7 @@ const viewConfirmDeleteModal = (
                   h.button(
                     [
                       h.Type("button"),
+                      h.Id("modal-btn-cancel-delete"),
                       h.Class("btn btn-secondary"),
                       h.OnClick(Message.ClickedCancelDelete()),
                     ],
@@ -4760,30 +4764,36 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
           h,
         ),
 
-      EditFolder: ({ originalName, name, maybeValidationError }) =>
-        viewEditorModal(
-          {
-            titleText: `Ordner bearbeiten: ${originalName}`,
-            noun: "Ordner",
-            isFolder: true,
-            isTextFile: false,
-            llmBarMode: "Closed",
-            llmChatInput: "",
-            llmChatState: LlmChatState.Idle(),
-            llmChatDisplay: [],
-            llmViewInputs: context,
-            isMaximized: false,
-            isNameToggleable: false,
-            isNameInputVisible: true,
-            editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
-            isDraggingSplit: false,
-            isEditingExisting: true,
-            nameValue: name,
-            maybeValidationError,
-            maybePasteError: Option.none(),
-            extraBodyNodes: [],
-          },
-          h,
+      EditFolder: ({ originalName, name, maybeValidationError, isConfirmingDelete }) =>
+        h.div(
+          [h.Class("editor-modal-host")],
+          [
+            viewEditorModal(
+              {
+                titleText: `Ordner bearbeiten: ${originalName}`,
+                noun: "Ordner",
+                isFolder: true,
+                isTextFile: false,
+                llmBarMode: "Closed",
+                llmChatInput: "",
+                llmChatState: LlmChatState.Idle(),
+                llmChatDisplay: [],
+                llmViewInputs: context,
+                isMaximized: false,
+                isNameToggleable: false,
+                isNameInputVisible: true,
+                editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+                isDraggingSplit: false,
+                isEditingExisting: true,
+                nameValue: name,
+                maybeValidationError,
+                maybePasteError: Option.none(),
+                extraBodyNodes: [],
+              },
+              h,
+            ),
+            isConfirmingDelete ? viewConfirmDeleteModal(originalName, "directory", h) : h.empty,
+          ],
         ),
 
       EditFile: ({
@@ -4807,6 +4817,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         historyState,
         isHistoryEnabled,
         hasHistoryEntries,
+        isConfirmingDelete,
       }) =>
         h.div(
           [h.Class("editor-modal-host")],
@@ -4859,10 +4870,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
               ? viewPreviewOverlay(historyState.maybePreviewContent.value, h)
               : h.empty,
+            isConfirmingDelete ? viewConfirmDeleteModal(originalName, "file", h) : h.empty,
           ],
         ),
-
-      ConfirmDelete: ({ entryName, entryKind }) => viewConfirmDeleteModal(entryName, entryKind, h),
 
       ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
     }),

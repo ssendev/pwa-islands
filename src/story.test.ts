@@ -1169,6 +1169,7 @@ describe("PWA Islands Story Tests", () => {
             redoStack: [],
             maybeOpfsHistoryCursor: Option.none(),
             historyState: Editor.HistoryState.Closed(),
+            isConfirmingDelete: false,
           }),
         }),
       }
@@ -1179,15 +1180,21 @@ describe("PWA Islands Story Tests", () => {
         message(editorMsg(Editor.Message.ClickedDelete())),
         Command.expectNone(),
         model((m) => {
-          expect(m.modalState).toEqual(
-            ModalState.Editor({
-              editor: Editor.Model.ConfirmDelete({
-                entryName: "index.html",
-                entryKind: "file",
-              }),
-            }),
-          )
+          expect(m.modalState._tag).toBe("Editor")
+          if (m.modalState._tag === "Editor" && m.modalState.editor._tag === "EditFile") {
+            expect(m.modalState.editor.isConfirmingDelete).toBe(true)
+          }
         }),
+        message(editorMsg(Editor.Message.ClickedCancelDelete())),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.modalState._tag).toBe("Editor")
+          if (m.modalState._tag === "Editor" && m.modalState.editor._tag === "EditFile") {
+            expect(m.modalState.editor.isConfirmingDelete).toBe(false)
+          }
+        }),
+        message(editorMsg(Editor.Message.ClickedDelete())),
+        Command.expectNone(),
         message(editorMsg(Editor.Message.ClickedConfirmDelete())),
         Command.expectExact(
           DeleteEntry({
@@ -2330,6 +2337,7 @@ describe("PWA Islands Story Tests", () => {
                   redoStack: [],
                   maybeOpfsHistoryCursor: Option.none(),
                   historyState: Editor.HistoryState.Closed(),
+                  isConfirmingDelete: false,
                 }),
               }),
             ),

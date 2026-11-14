@@ -195,6 +195,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -322,6 +323,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Closed"),
       sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-preview")).toExist(),
       change(selector("#modal-llm-mode-select"), "Chat"),
       Command.resolveAll(
         [SaveEditorPreferences, Message.CompletedSaveEditorPreferences()],
@@ -356,7 +358,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Closed"),
       sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
-      sceneExpect(selector("#modal-btn-preview")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-preview")).toExist(),
     )
   })
 
@@ -638,6 +640,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -693,6 +696,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -740,6 +744,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -789,6 +794,7 @@ describe("PWA Islands Scene Tests", () => {
       redoStack: [],
       maybeOpfsHistoryCursor: Option.none(),
       historyState: Editor.HistoryState.Closed(),
+      isConfirmingDelete: false,
     })
     const modelWithEditFile: Model = {
       ...readyModel,
@@ -800,7 +806,8 @@ describe("PWA Islands Scene Tests", () => {
     scene(
       { update, view },
       given(modelWithEditFile),
-      sceneExpect(selector("#modal-btn-delete")).toExist(),
+      sceneExpect(selector("#modal-btn-delete")).toBeAbsent(),
+      sceneExpect(selector(".modal-footer #modal-btn-preview")).toExist(),
       change(selector("#modal-llm-mode-select"), "Copy"),
       Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       sceneExpect(selector("#modal-btn-delete")).toBeAbsent(),
@@ -864,6 +871,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -873,10 +881,24 @@ describe("PWA Islands Scene Tests", () => {
       given(modelWithEditFile),
       sceneExpect(selector(".modal-title")).toHaveText("Datei bearbeiten: index.html"),
       sceneExpect(selector("#modal-file-name")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-delete")).toBeAbsent(),
       sceneExpect(text("Inhalt:")).toBeAbsent(),
+      click(selector("#modal-btn-edit-name")),
+      Command.resolve(Editor.FocusNameInput, Editor.Message.CompletedFocusNameInput()),
+      sceneExpect(selector("#modal-file-name")).toExist(),
+      sceneExpect(selector(".modal-name-row #modal-btn-delete")).toExist(),
+      sceneExpect(selector(".modal-footer #modal-btn-delete")).toBeAbsent(),
       click(selector("#modal-btn-delete")),
-      sceneExpect(selector(".modal-title")).toHaveText("Eintrag löschen"),
+      sceneExpect(selector("#modal-confirm-delete-title")).toHaveText("Eintrag löschen"),
+      sceneExpect(selector("#modal-title")).toHaveText("Datei bearbeiten: index.html"),
+      sceneExpect(selector("#modal-file-name")).toExist(),
       sceneExpect(text(/wirklich unwiderruflich löschen\?/)).toExist(),
+      click(selector("#modal-btn-cancel-delete")),
+      sceneExpect(selector("#modal-confirm-delete-title")).toBeAbsent(),
+      sceneExpect(selector("#modal-title")).toHaveText("Datei bearbeiten: index.html"),
+      sceneExpect(selector("#modal-file-name")).toExist(),
+      click(selector("#modal-btn-delete")),
+      sceneExpect(selector("#modal-confirm-delete-title")).toHaveText("Eintrag löschen"),
     )
 
     if (
@@ -1395,6 +1417,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -1446,6 +1469,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -1582,6 +1606,7 @@ describe("PWA Islands Scene Tests", () => {
           historyState: Editor.HistoryState.Closed(),
           isHistoryEnabled: false,
           hasHistoryEntries: false,
+          isConfirmingDelete: false,
         }),
       }),
     }
@@ -1633,6 +1658,7 @@ describe("PWA Islands Scene Tests", () => {
           redoStack: [],
           maybeOpfsHistoryCursor: Option.none(),
           historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
         }),
       }),
     }

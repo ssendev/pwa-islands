@@ -989,6 +989,23 @@ code {
   gap: 12px;
 }
 
+.modal-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modal-name-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal-name-row .btn {
+  flex-shrink: 0;
+  height: 38px;
+  box-sizing: border-box;
+}
+
 /* `display: flex` ueberschreibt das hidden-Attribut -- daher explizit ausblenden. */
 .form-group[hidden],
 .file-preview[hidden] {
@@ -1412,7 +1429,8 @@ code {
   }
 
   /* In Fenstern gilt die Dialoghoehe, nicht die kleinere Toolbarhoehe. */
-  .modal-footer .icon-label-btn {
+  .modal-footer .icon-label-btn,
+  .modal-name-row .icon-label-btn {
     width: 38px;
     height: 38px;
   }

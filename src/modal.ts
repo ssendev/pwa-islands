@@ -113,9 +113,14 @@ export const formatDocumentTitle = (state: ModalState, folderTitle: string): str
       Editor.Model.match(editor, {
         CreateFile: () => `Neue Datei — ${folderTitle}`,
         CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
-        EditFolder: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
-        EditFile: ({ originalName }) => `${originalName} bearbeiten — ${folderTitle}`,
-        ConfirmDelete: ({ entryName }) => `${entryName} löschen — ${folderTitle}`,
+        EditFolder: ({ originalName, isConfirmingDelete }) =>
+          isConfirmingDelete
+            ? `${originalName} löschen — ${folderTitle}`
+            : `${originalName} bearbeiten — ${folderTitle}`,
+        EditFile: ({ originalName, isConfirmingDelete }) =>
+          isConfirmingDelete
+            ? `${originalName} löschen — ${folderTitle}`
+            : `${originalName} bearbeiten — ${folderTitle}`,
         ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
       }),
     ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
@@ -155,6 +160,7 @@ export const openEditFolder = (name: string): ModalState =>
       originalName: name,
       name,
       maybeValidationError: Option.none(),
+      isConfirmingDelete: false,
     }),
   })
 
@@ -166,7 +172,6 @@ export const isEditingEntry = (state: ModalState, name: string): boolean =>
         EditFile: (file) => file.originalName === name,
         CreateFile: () => false,
         CreateFolder: () => false,
-        ConfirmDelete: () => false,
         ConfirmOverwrite: () => false,
       }),
     ),
@@ -378,6 +383,7 @@ export const resolveModalForRoute = async (
                   historyState: Editor.HistoryState.Closed(),
                   isHistoryEnabled,
                   hasHistoryEntries,
+                  isConfirmingDelete: false,
                 }),
               }),
             ),
@@ -803,6 +809,7 @@ export const update = (
           historyState: Editor.HistoryState.Closed(),
           isHistoryEnabled: isHistoryEnabled ?? true,
           hasHistoryEntries: hasHistoryEntries ?? true,
+          isConfirmingDelete: false,
         }),
       }),
       commands: [FocusModalNameInput()],
