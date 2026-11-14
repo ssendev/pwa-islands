@@ -4267,7 +4267,7 @@ const viewEditorModal = (
                             [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                             [viewIcon("desktop", h)],
                           ),
-                          h.span([h.Class("icon-label-btn-text")], ["Anzeigen"]),
+                          h.span([h.Class("icon-label-btn-text")], ["Vorschau"]),
                         ],
                       )
                     : h.empty,
@@ -4664,7 +4664,7 @@ const viewHistoryOverlay = (
                                             }),
                                           ),
                                         ],
-                                        ["Anzeigen"],
+                                        ["Vorschau"],
                                       ),
                                       h.button(
                                         [

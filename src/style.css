@@ -758,7 +758,7 @@ code {
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  width: min(420px, calc(100vw - 32px));
+  width: min(720px, calc(100vw - 32px));
   max-height: calc(100dvh - 40px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -782,14 +782,33 @@ code {
 }
 
 .toast .alert-message {
+  flex: 1 1 auto;
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.toast .alert-close-btn {
+.toast-actions {
+  flex: 0 999 auto;
+  min-width: 24px;
+  display: flex;
+  flex-direction: row-reverse;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
   align-self: flex-start;
   position: sticky;
   top: 0;
+}
+
+.toast-repeat-count {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0.85;
 }
 
 .toast.alert-info {

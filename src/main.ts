@@ -442,6 +442,10 @@ export const Message = defineMessageUnion({
   ClickedDismissToast: {
     id: Schema.Number,
   },
+  ClickedCopyToast: {
+    message: Schema.String,
+  },
+  CompletedCopyToast: {},
   CompletedWaitBeforeDismissToast: {
     id: Schema.Number,
   },
@@ -1611,6 +1615,21 @@ export const WaitBeforeDismissToast = Command.define("WaitBeforeDismissToast", {
     ),
 })
 
+export const CopyToastMessage = Command.define("CopyToastMessage", {
+  args: {
+    message: Schema.String,
+  },
+  messages: [Message.CompletedCopyToast],
+  execute: ({ message }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await navigator.clipboard.writeText(message)
+        return Message.CompletedCopyToast()
+      },
+      catch: () => undefined,
+    }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedCopyToast()))),
+})
+
 export const ScheduleReturnArrowClick = Command.define("ScheduleReturnArrowClick", {
   args: {
     clickId: Schema.Number,
@@ -1995,12 +2014,26 @@ const enqueueToast = (
   readonly model: Model
   readonly commands?: ReadonlyArray<Command.Command<Message>>
 } => {
-  const alreadyVisible = Array.some(
+  const existingIndex = Array.findFirstIndex(
     model.toasts,
     (existing) => existing.message === banner.message && existing.variant === banner.variant,
   )
-  if (alreadyVisible) {
-    return { model }
+  if (Option.isSome(existingIndex)) {
+    return {
+      model: modifyFields(model, {
+        toasts: (toasts) =>
+          Array.map(toasts, (existing, index) =>
+            index === existingIndex.value
+              ? {
+                  id: existing.id,
+                  message: existing.message,
+                  variant: existing.variant,
+                  count: (existing.count ?? 1) + 1,
+                }
+              : existing,
+          ),
+      }),
+    }
   }
 
   const toastId = model.nextToastId
@@ -2353,6 +2386,13 @@ export const update = (
         toasts: (toasts) => Array.filter(toasts, (toast) => toast.id !== id),
       }),
     }),
+
+    ClickedCopyToast: ({ message }) => ({
+      model,
+      commands: [CopyToastMessage({ message })],
+    }),
+
+    CompletedCopyToast: () => ({ model }),
 
     CompletedWaitBeforeDismissToast: ({ id }) => ({
       model: modifyFields(model, {
@@ -5801,7 +5841,12 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
               h,
             ),
         }),
-        viewToasts(model.toasts, (id) => Message.ClickedDismissToast({ id }), h),
+        viewToasts(
+          model.toasts,
+          (id) => Message.ClickedDismissToast({ id }),
+          (message) => Message.ClickedCopyToast({ message }),
+          h,
+        ),
       ],
     ),
   }

@@ -1314,6 +1314,45 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
+    it("deduplicates identical toasts and increments count", () => {
+      story(
+        update,
+        given(readyModel),
+        message(
+          modalMsg(
+            Modal.Message.FailedInspectFileForEditor({
+              message: "Datei konnte nicht gelesen werden",
+            }),
+          ),
+        ),
+        Command.resolveAll(
+          [Modal.RevokeActivePreviewUrl, Modal.Message.CompletedRevokeActivePreviewUrl()],
+          [ReplaceUrl, Message.CompletedReplaceUrl()],
+        ),
+        message(
+          modalMsg(
+            Modal.Message.FailedInspectFileForEditor({
+              message: "Datei konnte nicht gelesen werden",
+            }),
+          ),
+        ),
+        Command.resolveAll(
+          [Modal.RevokeActivePreviewUrl, Modal.Message.CompletedRevokeActivePreviewUrl()],
+          [ReplaceUrl, Message.CompletedReplaceUrl()],
+        ),
+        model((m) => {
+          expect(m.toasts).toEqual([
+            {
+              id: 1,
+              message: "Datei konnte nicht gelesen werden",
+              variant: "danger",
+              count: 2,
+            },
+          ])
+        }),
+      )
+    })
+
     it("handles import collision conflict flow and resolution", () => {
       story(
         update,

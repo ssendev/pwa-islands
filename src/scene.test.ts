@@ -38,6 +38,7 @@ import {
   TestLlm,
   ToggleFullscreenWindow,
   WaitBeforeDismissToast,
+  CopyToastMessage,
   update,
   view,
   LlmTestState,
@@ -265,7 +266,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-btn-copy-llm")).toContainText("Mit Anleitung"),
       sceneExpect(selector("#modal-btn-copy-hashes")).toContainText("Datei"),
       sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Einfügen"),
-      sceneExpect(selector("#modal-btn-preview")).toContainText("Anzeigen"),
+      sceneExpect(selector("#modal-btn-preview")).toContainText("Vorschau"),
       sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
       click(selector("#modal-btn-copy-dts")),
       Command.expectExact(Editor.CopyApiDtsToClipboard()),
@@ -1684,6 +1685,7 @@ describe("PWA Islands Scene Tests", () => {
           id: 1,
           message: "Speichern fehlgeschlagen",
           variant: "danger",
+          count: 2,
         },
       ],
       nextToastId: 2,
@@ -1695,7 +1697,11 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#toast-container .toast.alert-danger")).toContainText(
         "Speichern fehlgeschlagen",
       ),
-      click(selector("#toast-container .alert-close-btn")),
+      sceneExpect(selector("#toast-container .toast-actions .toast-repeat-count")).toHaveText("2×"),
+      click(selector("#toast-container .toast-actions .toast-copy-btn")),
+      Command.expectExact(CopyToastMessage({ message: "Speichern fehlgeschlagen" })),
+      Command.resolve(CopyToastMessage, Message.CompletedCopyToast()),
+      click(selector("#toast-container .toast-actions .alert-close-btn")),
       sceneExpect(selector("#toast-container .toast")).toBeAbsent(),
     )
   })

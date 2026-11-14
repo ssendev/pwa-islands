@@ -16,12 +16,14 @@ export const Toast = Schema.Struct({
   id: Schema.Number,
   message: Schema.String,
   variant: AlertVariant,
+  count: Schema.optionalKey(Schema.Number),
 })
 export type Toast = typeof Toast.Type
 
 export const view = <Message>(
   toasts: ReadonlyArray<Toast>,
   onDismiss: (id: number) => Message,
+  onCopy: (message: string) => Message,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const containerAttrs = [
@@ -36,8 +38,9 @@ export const view = <Message>(
     onNonEmpty: (nonEmptyToasts) =>
       h.div(
         containerAttrs,
-        Array.map(nonEmptyToasts, (toast) =>
-          h.keyed("div")(
+        Array.map(nonEmptyToasts, (toast) => {
+          const repeatCount = toast.count ?? 1
+          return h.keyed("div")(
             String(toast.id),
             [
               h.Class(`toast alert alert-${toast.variant} alert-dismissible`),
@@ -45,18 +48,36 @@ export const view = <Message>(
             ],
             [
               h.span([h.Class("alert-message")], [toast.message]),
-              h.button(
+              h.div(
+                [h.Class("toast-actions")],
                 [
-                  h.Type("button"),
-                  h.Class("alert-close-btn"),
-                  h.AriaLabel("Hinweis schließen"),
-                  h.OnClick(onDismiss(toast.id)),
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("alert-close-btn"),
+                      h.AriaLabel("Hinweis schließen"),
+                      h.OnClick(onDismiss(toast.id)),
+                    ],
+                    [viewIcon("close", h)],
+                  ),
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("alert-close-btn toast-copy-btn"),
+                      h.AriaLabel("Meldung kopieren"),
+                      h.Title("Meldung kopieren"),
+                      h.OnClick(onCopy(toast.message)),
+                    ],
+                    [viewIcon("clipboard", h)],
+                  ),
+                  repeatCount > 1
+                    ? h.span([h.Class("toast-repeat-count")], [`${repeatCount}×`])
+                    : h.empty,
                 ],
-                [viewIcon("close", h)],
               ),
             ],
-          ),
-        ),
+          )
+        }),
       ),
   })
 }
