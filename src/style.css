@@ -1181,7 +1181,7 @@ code {
   .modal-content.is-maximized #modal-form.has-llm-chat .modal-editor-splitter {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-end;
     grid-column: 2;
     grid-row: 1;
     cursor: col-resize;
@@ -1199,7 +1199,6 @@ code {
       width 0.15s ease;
   }
 
-  .modal-content.is-maximized #modal-form.has-llm-chat .modal-editor-splitter:hover::before,
   .modal-content.is-maximized #modal-form.has-llm-chat .modal-editor-splitter.is-dragging::before {
     width: 3px;
     background: var(--accent, #2563eb);
