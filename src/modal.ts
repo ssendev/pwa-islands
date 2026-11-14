@@ -26,7 +26,7 @@ import * as Help from "./help"
 import { viewIcon } from "./icons"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
 import { StarterTemplate } from "./templates"
-import { getStoredUserTemplates } from "./storage"
+import { DEFAULT_EDITOR_SPLIT_PERCENT, getStoredUserTemplates } from "./storage"
 import type { StorageBackend } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
@@ -108,7 +108,11 @@ export const formatDocumentTitle = (state: ModalState, folderTitle: string): str
 export const openCreate = (
   target: NewTarget | "file" | "folder",
   templates: ReadonlyArray<StarterTemplate> = [],
-  defaults?: { readonly isMaximized?: boolean; readonly llmBarMode?: Editor.LlmBarMode },
+  defaults?: {
+    readonly isMaximized?: boolean
+    readonly llmBarMode?: Editor.LlmBarMode
+    readonly editorSplitPercent?: number
+  },
 ): ModalState =>
   ModalState.Editor({
     editor:
@@ -152,7 +156,11 @@ export const isEditingEntry = (state: ModalState, name: string): boolean =>
 
 export const applyEditorPreferences = (
   modalState: ModalState,
-  prefs: { readonly isMaximized: boolean; readonly llmBarMode: Editor.LlmBarMode },
+  prefs: {
+    readonly isMaximized: boolean
+    readonly llmBarMode: Editor.LlmBarMode
+    readonly editorSplitPercent: number
+  },
 ): ModalState =>
   Match.value(modalState).pipe(
     Match.tag("Editor", ({ editor }) =>
@@ -338,6 +346,9 @@ export const resolveModalForRoute = async (
                   llmChatDisplay: [],
                   llmChatState: Editor.LlmChatState.Idle(),
                   isMaximized: false,
+                  isEditingName: false,
+                  editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+                  editorSplitDrag: Option.none(),
                 }),
               }),
             ),
@@ -409,6 +420,9 @@ export const OutMessage = defineTaggedUnion({
   },
   ChangedMaximize: {
     isMaximized: Schema.Boolean,
+  },
+  ChangedEditorSplitPercent: {
+    editorSplitPercent: Schema.Number,
   },
 })
 export type OutMessage = typeof OutMessage.Type
@@ -569,6 +583,7 @@ export const update = (
     readonly editorDefaults?: {
       readonly isMaximized: boolean
       readonly llmBarMode: Editor.LlmBarMode
+      readonly editorSplitPercent: number
     }
   },
 ): {
@@ -646,6 +661,11 @@ export const update = (
               commands: mappedCommands,
               outMessage: OutMessage.ChangedMaximize({ isMaximized }),
             }),
+            ChangedEditorSplitPercent: ({ editorSplitPercent }) => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.ChangedEditorSplitPercent({ editorSplitPercent }),
+            }),
           })
         }),
         Match.orElse(() => ({
@@ -714,6 +734,10 @@ export const update = (
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: context.editorDefaults?.isMaximized ?? false,
+          isEditingName: false,
+          editorSplitPercent:
+            context.editorDefaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
+          editorSplitDrag: Option.none(),
         }),
       }),
       commands: [FocusModalNameInput()],

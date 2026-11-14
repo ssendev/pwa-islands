@@ -97,6 +97,7 @@ import { formatApiDtsMessage } from "./hashline"
 import * as Editor from "./editor"
 import * as LlmResponse from "./llm-response"
 import {
+  DEFAULT_EDITOR_SPLIT_PERCENT,
   OPFS_APP_FOLDER,
   getFileExtension,
   getStoredEditorPreferences,
@@ -333,6 +334,7 @@ export const Model = Schema.Struct({
   hasLoadedEditorLlmModels: Schema.Boolean,
   editorIsMaximized: Schema.Boolean,
   editorLlmBarMode: Editor.LlmBarMode,
+  editorSplitPercent: Schema.Number,
   llmDraftEnabled: Schema.Boolean,
   llmDraftEditFormat: EditFormat,
   llmDraftBaseUrl: Schema.String,
@@ -531,6 +533,7 @@ export const Message = defineMessageUnion({
     llmBarMode: Editor.LlmBarMode,
     llmModel: Schema.String,
     llmThinkingLevel: Schema.String,
+    editorSplitPercent: Schema.Number,
   },
   CompletedSaveEditorPreferences: {},
   SucceededLoadEditorLlmModels: {
@@ -822,6 +825,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         llmBarMode: prefs.llmBarMode,
         llmModel: prefs.llmModel,
         llmThinkingLevel: prefs.llmThinkingLevel,
+        editorSplitPercent: prefs.editorSplitPercent,
       }),
     ),
   ),
@@ -833,6 +837,7 @@ export const SaveEditorPreferences = Command.define("SaveEditorPreferences", {
     llmBarMode: Editor.LlmBarMode,
     llmModel: Schema.String,
     llmThinkingLevel: Schema.String,
+    editorSplitPercent: Schema.Number,
   },
   messages: [Message.CompletedSaveEditorPreferences],
   execute: (args) =>
@@ -843,6 +848,7 @@ export const SaveEditorPreferences = Command.define("SaveEditorPreferences", {
           llmBarMode: args.llmBarMode,
           llmModel: args.llmModel,
           llmThinkingLevel: args.llmThinkingLevel,
+          editorSplitPercent: args.editorSplitPercent,
         }),
       catch: () => new Error("Failed to save editor preferences"),
     }).pipe(
@@ -1752,6 +1758,7 @@ export const init = (
         hasLoadedEditorLlmModels: false,
         editorIsMaximized: false,
         editorLlmBarMode: "Closed",
+        editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
         llmDraftEnabled: false,
         llmDraftEditFormat: DEFAULT_EDIT_FORMAT,
         llmDraftBaseUrl: "",
@@ -1810,6 +1817,7 @@ export const init = (
       hasLoadedEditorLlmModels: false,
       editorIsMaximized: false,
       editorLlmBarMode: "Closed",
+      editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
       llmDraftEnabled: false,
       llmDraftEditFormat: DEFAULT_EDIT_FORMAT,
       llmDraftBaseUrl: "",
@@ -1904,6 +1912,7 @@ const handleStorageActivated = (
           Modal.applyEditorPreferences(modal, {
             isMaximized: model.editorIsMaximized,
             llmBarMode: model.editorLlmBarMode,
+            editorSplitPercent: model.editorSplitPercent,
           }),
       }),
     maybeAlertBanner: () => payload.maybeAlertBanner,
@@ -2511,6 +2520,7 @@ export const update = (
           const newModalState = Modal.openCreate(target, [], {
             isMaximized: modelWithRoute.editorIsMaximized,
             llmBarMode: modelWithRoute.editorLlmBarMode,
+            editorSplitPercent: modelWithRoute.editorSplitPercent,
           })
           const templateLoadCommands =
             target === "file" ? [toModalCommand(Modal.LoadEditorUserTemplates)] : []
@@ -2679,6 +2689,7 @@ export const update = (
           llmBarMode: model.editorLlmBarMode,
           llmModel: model.llmDraftModel,
           llmThinkingLevel: model.llmDraftThinkingLevel,
+          editorSplitPercent: model.editorSplitPercent,
         }),
       ],
     }),
@@ -2893,10 +2904,17 @@ export const update = (
 
     CompletedSaveLlmSettings: () => ({ model }),
 
-    CompletedLoadEditorPreferences: ({ isMaximized, llmBarMode, llmModel, llmThinkingLevel }) => ({
+    CompletedLoadEditorPreferences: ({
+      isMaximized,
+      llmBarMode,
+      llmModel,
+      llmThinkingLevel,
+      editorSplitPercent,
+    }) => ({
       model: modifyFields(model, {
         editorIsMaximized: () => isMaximized,
         editorLlmBarMode: () => llmBarMode,
+        editorSplitPercent: () => editorSplitPercent,
         llmModel: (current) => (current === "" ? llmModel : current),
         llmDraftModel: (current) => (current === "" ? llmModel : current),
         llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
@@ -2905,6 +2923,7 @@ export const update = (
           Modal.applyEditorPreferences(current, {
             isMaximized,
             llmBarMode,
+            editorSplitPercent,
           }),
       }),
     }),
@@ -3134,6 +3153,7 @@ export const update = (
             Modal.openCreate("file", [], {
               isMaximized: model.editorIsMaximized,
               llmBarMode: model.editorLlmBarMode,
+              editorSplitPercent: model.editorSplitPercent,
             }),
           maybeAlertBanner: () => Option.none(),
         }),
@@ -3317,6 +3337,7 @@ export const update = (
         editorDefaults: {
           isMaximized: model.editorIsMaximized,
           llmBarMode: model.editorLlmBarMode,
+          editorSplitPercent: model.editorSplitPercent,
         },
       })
 
@@ -3401,6 +3422,7 @@ export const update = (
               llmBarMode: model.editorLlmBarMode,
               llmModel: value,
               llmThinkingLevel: model.llmThinkingLevel,
+              editorSplitPercent: model.editorSplitPercent,
             }),
           ],
         }),
@@ -3418,6 +3440,7 @@ export const update = (
               llmBarMode: model.editorLlmBarMode,
               llmModel: model.llmModel,
               llmThinkingLevel: value,
+              editorSplitPercent: model.editorSplitPercent,
             }),
           ],
         }),
@@ -3434,6 +3457,7 @@ export const update = (
               llmBarMode,
               llmModel: model.llmModel,
               llmThinkingLevel: model.llmThinkingLevel,
+              editorSplitPercent: model.editorSplitPercent,
             }),
           ],
         }),
@@ -3450,6 +3474,24 @@ export const update = (
               llmBarMode: model.editorLlmBarMode,
               llmModel: model.llmModel,
               llmThinkingLevel: model.llmThinkingLevel,
+              editorSplitPercent: model.editorSplitPercent,
+            }),
+          ],
+        }),
+
+        ChangedEditorSplitPercent: ({ editorSplitPercent }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+            editorSplitPercent: () => editorSplitPercent,
+          }),
+          commands: [
+            ...mappedCommands,
+            SaveEditorPreferences({
+              isMaximized: model.editorIsMaximized,
+              llmBarMode: model.editorLlmBarMode,
+              llmModel: model.llmModel,
+              llmThinkingLevel: model.llmThinkingLevel,
+              editorSplitPercent,
             }),
           ],
         }),
@@ -4439,7 +4481,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               }),
                             ),
                           ]),
-                          h.span([], ["KI aktivieren"]),
+                          h.span([], ["Chat-API aktivieren"]),
                         ],
                       ),
                     ],

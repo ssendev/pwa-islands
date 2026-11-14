@@ -94,6 +94,7 @@ const readyModel: Model = {
   hasLoadedEditorLlmModels: false,
   editorIsMaximized: false,
   editorLlmBarMode: "Closed",
+  editorSplitPercent: 62,
   llmDraftEnabled: false,
   llmDraftEditFormat: "hashline",
   llmDraftBaseUrl: "",
@@ -172,6 +173,9 @@ describe("PWA Islands Scene Tests", () => {
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
+          isEditingName: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
         }),
       }),
     }
@@ -378,7 +382,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-chat-input")).toHaveValue(""),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Füge Titel hinzu"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Schreibt …"),
-      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Stopp"),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       sceneExpect(selector("#modal-btn-send-llm")).toBeEnabled(),
       sceneExpect(selector("#modal-btn-send-llm.btn-danger")).toExist(),
       Subscription.emit(
@@ -446,7 +450,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-chat-history")).toContainText(
         "1 Bearbeitung(en) angewendet",
       ),
-      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Senden"),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Senden"),
     )
   })
 
@@ -469,7 +473,7 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       type(selector("#modal-llm-chat-input"), "Erkläre kurz"),
       click(selector("#modal-btn-send-llm")),
-      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Stopp"),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
           completedTurns: [],
@@ -481,7 +485,7 @@ describe("PWA Islands Scene Tests", () => {
       ),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Teilantwort"),
       click(selector("#modal-btn-send-llm")),
-      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Senden"),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Senden"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Erkläre kurz"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Teilantwort"),
       sceneExpect(selector("#modal-llm-chat-history .llm-response-streaming")).toBeAbsent(),
@@ -507,7 +511,7 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       type(selector("#modal-llm-chat-input"), "Erkläre Fehler"),
       click(selector("#modal-btn-send-llm")),
-      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Stopp"),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
           completedTurns: [],
@@ -526,7 +530,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("HTTP 500"),
       sceneExpect(selector("#modal-llm-chat-input")).toHaveValue("Erkläre Fehler"),
       sceneExpect(selector("#modal-llm-chat-input")).toBeEnabled(),
-      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Senden"),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Senden"),
       sceneExpect(selector("#modal-btn-send-llm")).toBeEnabled(),
     )
   })
@@ -550,6 +554,9 @@ describe("PWA Islands Scene Tests", () => {
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
+          isEditingName: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
         }),
       }),
     }
@@ -600,6 +607,9 @@ describe("PWA Islands Scene Tests", () => {
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
+          isEditingName: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
         }),
       }),
     }
@@ -641,6 +651,9 @@ describe("PWA Islands Scene Tests", () => {
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
+          isEditingName: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
         }),
       }),
     }
@@ -683,6 +696,9 @@ describe("PWA Islands Scene Tests", () => {
       llmChatDisplay: [],
       llmChatState: Editor.LlmChatState.Idle(),
       isMaximized: false,
+      isEditingName: false,
+      editorSplitPercent: 62,
+      editorSplitDrag: Option.none(),
     })
     const modelWithEditFile: Model = {
       ...readyModel,
@@ -704,6 +720,9 @@ describe("PWA Islands Scene Tests", () => {
       llmChatDisplay: [],
       llmChatState: Editor.LlmChatState.Idle(),
       isMaximized: false,
+      isEditingName: false,
+      editorSplitPercent: 62,
+      editorSplitDrag: Option.none(),
     })
 
     scene(
@@ -769,6 +788,9 @@ describe("PWA Islands Scene Tests", () => {
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
+          isEditingName: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
         }),
       }),
     }
@@ -777,10 +799,32 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(modelWithEditFile),
       sceneExpect(selector(".modal-title")).toHaveText("Datei bearbeiten: index.html"),
+      sceneExpect(selector("#modal-file-name")).toBeAbsent(),
+      sceneExpect(text("Inhalt:")).toBeAbsent(),
       click(selector("#modal-btn-delete")),
       sceneExpect(selector(".modal-title")).toHaveText("Eintrag löschen"),
       sceneExpect(text(/wirklich unwiderruflich löschen\?/)).toExist(),
     )
+
+    if (
+      modelWithEditFile.modalState._tag === "Editor" &&
+      modelWithEditFile.modalState.editor._tag === "EditFile"
+    ) {
+      const modelWithEditFileNameOpen: Model = {
+        ...modelWithEditFile,
+        modalState: ModalState.Editor({
+          editor: Editor.Model.EditFile({
+            ...modelWithEditFile.modalState.editor,
+            isEditingName: true,
+          }),
+        }),
+      }
+      scene(
+        { update, view },
+        given(modelWithEditFileNameOpen),
+        sceneExpect(selector("#modal-file-name")).toExist(),
+      )
+    }
   })
 
   it("toggles maximize state in file editor modal and hides maximize button in folder modal", () => {

@@ -791,6 +791,21 @@ code {
   color: var(--text-h);
 }
 
+.modal-title-name-btn {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.modal-title-name-btn:hover {
+  color: var(--accent, #2563eb);
+}
+
 /* Quadratisch wie die Knoepfe der Fusszeile, statt aus Schrift + Padding. */
 .modal-close-btn {
   display: inline-flex;
@@ -1052,7 +1067,87 @@ code {
   flex-direction: column;
   align-items: stretch;
   gap: 8px;
-  flex: 1 1 100%;
+  padding: 16px 20px 0;
+  border-top: 1px solid var(--border);
+  background: var(--social-bg);
+}
+
+#modal-form.has-llm-chat .modal-footer {
+  border-top: none;
+  padding-top: 10px;
+}
+
+.modal-editor-splitter {
+  display: none;
+}
+
+@media (orientation: landscape) {
+  .modal-content.is-maximized #modal-form.has-llm-chat {
+    display: grid;
+    grid-template-columns:
+      minmax(
+        min(280px, calc(100% - 268px)),
+        min(var(--editor-split-width, 62%), calc(100% - 268px))
+      )
+      8px minmax(260px, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+  }
+
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-body {
+    grid-column: 1;
+    grid-row: 1;
+    min-width: 0;
+  }
+
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-editor-splitter {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    grid-column: 2;
+    grid-row: 1;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-editor-splitter::before {
+    content: "";
+    width: 2px;
+    height: 100%;
+    background: var(--border);
+    transition:
+      background 0.15s ease,
+      width 0.15s ease;
+  }
+
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-editor-splitter:hover::before,
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-editor-splitter.is-dragging::before {
+    width: 3px;
+    background: var(--accent, #2563eb);
+  }
+
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-llm-chat-bar {
+    grid-column: 3;
+    grid-row: 1;
+    padding: 20px;
+    border-top: none;
+    min-height: 0;
+    overflow: hidden;
+    justify-content: flex-end;
+  }
+
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-llm-chat-history {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+  }
+
+  .modal-content.is-maximized #modal-form.has-llm-chat .modal-footer {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+  }
 }
 
 .modal-llm-chat-history {
@@ -1100,16 +1195,15 @@ code {
   color: var(--danger);
 }
 
-.modal-llm-chat-input {
-  width: 100%;
-  min-width: 0;
-}
-
-.modal-llm-chat-controls {
+.modal-llm-chat-input-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
+}
+
+.modal-llm-chat-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .modal-llm-select {
@@ -1119,7 +1213,15 @@ code {
 }
 
 .modal-llm-send-btn {
-  margin-left: auto;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 16px;
+  line-height: 1;
 }
 
 /*

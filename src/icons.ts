@@ -33,6 +33,7 @@ import iconRestore from "./emoji/↙️.svg"
 import iconSave from "./emoji/💾.svg"
 import iconScroll from "./emoji/📜.svg"
 import iconSettings from "./emoji/⚙️.svg"
+import iconStop from "./emoji/⏹️.svg"
 import iconText from "./emoji/📝.svg"
 import iconTrash from "./emoji/🗑️.svg"
 import iconUpload from "./emoji/📤.svg"
@@ -78,6 +79,7 @@ export const ICONS = {
   restore: iconRestore,
   ai: iconAi,
   quickstart: iconQuickstart,
+  stop: iconStop,
 } as const
 
 export type IconId = keyof typeof ICONS

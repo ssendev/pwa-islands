@@ -30,6 +30,8 @@ import { viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { encodeSubPath } from "./route"
 import {
+  DEFAULT_EDITOR_SPLIT_PERCENT,
+  clampEditorSplitPercent,
   deleteUserTemplate,
   getStoredUserTemplates,
   sanitizeTemplateName,
@@ -119,6 +121,13 @@ export const OverwriteSource = defineTaggedUnion({
 })
 export type OverwriteSource = typeof OverwriteSource.Type
 
+export const EditorSplitDrag = Schema.Struct({
+  startScreenX: Schema.Number,
+  startWidthPx: Schema.Number,
+  containerWidthPx: Schema.Number,
+})
+export type EditorSplitDrag = typeof EditorSplitDrag.Type
+
 export const Model = defineTaggedUnion({
   CreateFile: {
     name: Schema.String,
@@ -137,6 +146,8 @@ export const Model = defineTaggedUnion({
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
     llmChatState: LlmChatState,
     isMaximized: Schema.Boolean,
+    editorSplitPercent: Schema.Number,
+    editorSplitDrag: Schema.Option(EditorSplitDrag),
   },
   CreateFolder: {
     name: Schema.String,
@@ -162,6 +173,9 @@ export const Model = defineTaggedUnion({
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
     llmChatState: LlmChatState,
     isMaximized: Schema.Boolean,
+    isEditingName: Schema.Boolean,
+    editorSplitPercent: Schema.Number,
+    editorSplitDrag: Schema.Option(EditorSplitDrag),
   },
   ConfirmDelete: {
     entryName: Schema.String,
@@ -182,7 +196,11 @@ type BinaryFileMode = Extract<EditorFileMode, { readonly _tag: "Binary" }>
 
 export const makeCreateFile = (
   userTemplates: ReadonlyArray<StarterTemplate> = [],
-  defaults?: { readonly isMaximized?: boolean; readonly llmBarMode?: LlmBarMode },
+  defaults?: {
+    readonly isMaximized?: boolean
+    readonly llmBarMode?: LlmBarMode
+    readonly editorSplitPercent?: number
+  },
 ): CreateFileModel => ({
   _tag: "CreateFile",
   name: "Neu.html",
@@ -201,22 +219,30 @@ export const makeCreateFile = (
   llmChatDisplay: [],
   llmChatState: LlmChatState.Idle(),
   isMaximized: defaults?.isMaximized ?? false,
+  editorSplitPercent: defaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
+  editorSplitDrag: Option.none(),
 })
 
 export const applyPreferences = (
   model: Model,
-  prefs: { readonly isMaximized: boolean; readonly llmBarMode: LlmBarMode },
+  prefs: {
+    readonly isMaximized: boolean
+    readonly llmBarMode: LlmBarMode
+    readonly editorSplitPercent: number
+  },
 ): Model =>
   Model.match(model, {
     CreateFile: (state) =>
       modifyFields(state, {
         isMaximized: () => prefs.isMaximized,
         llmBarMode: () => prefs.llmBarMode,
+        editorSplitPercent: () => prefs.editorSplitPercent,
       }),
     EditFile: (state) =>
       modifyFields(state, {
         isMaximized: () => prefs.isMaximized,
         llmBarMode: () => prefs.llmBarMode,
+        editorSplitPercent: () => prefs.editorSplitPercent,
       }),
     CreateFolder: () => model,
     EditFolder: () => model,
@@ -607,6 +633,19 @@ export const Message = defineMessageUnion({
   },
   CompletedFocusNameInput: {},
   CompletedClearClipboardAfterPaste: {},
+  StartedResizeEditorSplit: {
+    startScreenX: Schema.Number,
+    pointerId: Schema.Number,
+  },
+  MeasuredEditorSplitDrag: {
+    startWidthPx: Schema.Number,
+    containerWidthPx: Schema.Number,
+  },
+  MovedResizeEditorSplit: {
+    screenX: Schema.Number,
+  },
+  EndedResizeEditorSplit: {},
+  ClickedToggleEditName: {},
 })
 export type Message = typeof Message.Type
 
@@ -623,6 +662,7 @@ export const OutMessage = defineTaggedUnion({
   SelectedLlmThinkingLevel: { value: Schema.String },
   ChangedLlmBarMode: { llmBarMode: LlmBarMode },
   ChangedMaximize: { isMaximized: Schema.Boolean },
+  ChangedEditorSplitPercent: { editorSplitPercent: Schema.Number },
 })
 export type OutMessage = typeof OutMessage.Type
 
@@ -1052,6 +1092,27 @@ export const ClearClipboardAfterPaste = Command.define("ClearClipboardAfterPaste
     },
     catch: () => undefined,
   }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedClearClipboardAfterPaste()))),
+})
+
+export const StartEditorSplitDrag = Command.define("StartEditorSplitDrag", {
+  args: { pointerId: Schema.Number },
+  messages: [Message.MeasuredEditorSplitDrag],
+  execute: ({ pointerId }) =>
+    Effect.sync(() => {
+      const splitter = document.getElementById("modal-editor-splitter")
+      if (splitter && typeof splitter.setPointerCapture === "function") {
+        try {
+          splitter.setPointerCapture(pointerId)
+        } catch {
+          // Ignore if pointerId is not active (e.g., synthetic test event)
+        }
+      }
+      const form = document.getElementById("modal-form")
+      const body = form?.querySelector(".modal-body")
+      const containerWidthPx = form ? form.getBoundingClientRect().width : 0
+      const startWidthPx = body ? body.getBoundingClientRect().width : 0
+      return Message.MeasuredEditorSplitDrag({ startWidthPx, containerWidthPx })
+    }),
 })
 
 // UPDATE
@@ -1844,6 +1905,135 @@ export const update = (
       }
     },
 
+    StartedResizeEditorSplit: ({ startScreenX, pointerId }) => {
+      const drag = Option.some({
+        startScreenX,
+        startWidthPx: 0,
+        containerWidthPx: 0,
+      })
+      const nextModel = Model.match(model, {
+        CreateFile: (state) => modifyFields(state, { editorSplitDrag: () => drag }),
+        EditFile: (state) => modifyFields(state, { editorSplitDrag: () => drag }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      })
+      return {
+        model: nextModel,
+        commands: [StartEditorSplitDrag({ pointerId })],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    MeasuredEditorSplitDrag: ({ startWidthPx, containerWidthPx }) => {
+      const updateDrag = (drag: EditorSplitDrag) => ({
+        startScreenX: drag.startScreenX,
+        startWidthPx,
+        containerWidthPx,
+      })
+      const nextModel = Model.match(model, {
+        CreateFile: (state) => modifyFields(state, { editorSplitDrag: Option.map(updateDrag) }),
+        EditFile: (state) => modifyFields(state, { editorSplitDrag: Option.map(updateDrag) }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      })
+      return {
+        model: nextModel,
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    MovedResizeEditorSplit: ({ screenX }) => {
+      const computeNextPercent = (
+        currentPercent: number,
+        maybeDrag: Option.Option<EditorSplitDrag>,
+      ): number =>
+        Option.match(maybeDrag, {
+          onNone: () => currentPercent,
+          onSome: (drag) => {
+            if (drag.containerWidthPx <= 0) {
+              return currentPercent
+            }
+            const minWidthPx = 280
+            const maxWidthPx = Math.max(minWidthPx, drag.containerWidthPx - 268)
+            const targetWidthPx = drag.startWidthPx + (screenX - drag.startScreenX)
+            const clampedWidthPx = Math.min(maxWidthPx, Math.max(minWidthPx, targetWidthPx))
+            return clampEditorSplitPercent((clampedWidthPx / drag.containerWidthPx) * 100)
+          },
+        })
+      const nextModel = Model.match(model, {
+        CreateFile: (state) =>
+          modifyFields(state, {
+            editorSplitPercent: (percent) => computeNextPercent(percent, state.editorSplitDrag),
+          }),
+        EditFile: (state) =>
+          modifyFields(state, {
+            editorSplitPercent: (percent) => computeNextPercent(percent, state.editorSplitDrag),
+          }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      })
+      return {
+        model: nextModel,
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    EndedResizeEditorSplit: () => {
+      const nextModel = Model.match(model, {
+        CreateFile: (state) => modifyFields(state, { editorSplitDrag: () => Option.none() }),
+        EditFile: (state) => modifyFields(state, { editorSplitDrag: () => Option.none() }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      })
+      const maybePercent = Model.match(nextModel, {
+        CreateFile: (state) => Option.some(state.editorSplitPercent),
+        EditFile: (state) => Option.some(state.editorSplitPercent),
+        CreateFolder: () => Option.none(),
+        EditFolder: () => Option.none(),
+        ConfirmDelete: () => Option.none(),
+        ConfirmOverwrite: () => Option.none(),
+      })
+      return {
+        model: nextModel,
+        outMessage: Option.match(maybePercent, {
+          onNone: () => OutMessage.None(),
+          onSome: (editorSplitPercent) =>
+            OutMessage.ChangedEditorSplitPercent({ editorSplitPercent }),
+        }),
+      }
+    },
+
+    ClickedToggleEditName: () =>
+      Model.match(model, {
+        EditFile: (state) => {
+          const nextIsEditingName = !state.isEditingName
+          const nextModel = modifyFields(state, { isEditingName: () => nextIsEditingName })
+          return nextIsEditingName
+            ? {
+                model: nextModel,
+                commands: [FocusNameInput()],
+                outMessage: OutMessage.None(),
+              }
+            : {
+                model: nextModel,
+                outMessage: OutMessage.None(),
+              }
+        },
+        CreateFile: () => ({ model, outMessage: OutMessage.None() }),
+        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
+        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmDelete: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
+      }),
+
     ClickedCopyDts: () => ({
       model: setAlertBanner(model, Option.none()),
       commands: [CopyApiDtsToClipboard()],
@@ -2073,6 +2263,8 @@ export const update = (
                 llmChatDisplay: [],
                 llmChatState: LlmChatState.Idle(),
                 isMaximized: false,
+                editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+                editorSplitDrag: Option.none(),
               }),
               outMessage: OutMessage.None(),
             }),
@@ -2090,6 +2282,9 @@ export const update = (
                 llmChatDisplay: [],
                 llmChatState: LlmChatState.Idle(),
                 isMaximized: false,
+                isEditingName: false,
+                editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+                editorSplitDrag: Option.none(),
               }),
               outMessage: OutMessage.None(),
             }),
@@ -2176,6 +2371,9 @@ export const update = (
             llmChatDisplay: state.llmChatDisplay,
             llmChatState: state.llmChatState,
             isMaximized: state.isMaximized,
+            isEditingName: false,
+            editorSplitPercent: state.editorSplitPercent,
+            editorSplitDrag: state.editorSplitDrag,
           }),
         EditFile: (state) =>
           modifyFields(state, {
@@ -2444,10 +2642,10 @@ const viewEditorFileBody = (
       h.div(
         [h.Class("form-group")],
         [
-          h.label([h.For("modal-file-content")], ["Inhalt:"]),
           h.textarea([
             h.Id("modal-file-content"),
             h.Class("form-textarea"),
+            h.AriaLabel("Inhalt"),
             h.Placeholder("Geben Sie hier den Dateiinhalt ein..."),
             h.Spellcheck(false),
             h.Value(content),
@@ -2750,81 +2948,88 @@ const viewLlmChatHistory = (
   )
 }
 
+const viewLlmChatModelControls = (
+  llmChatState: LlmChatState,
+  viewInputs: ViewInputs,
+  h: Html.HtmlBuilder<Message>,
+): ReadonlyArray<Html.Html> => {
+  const { llmModelOptions, llmSelectedModel, llmThinkingLevels, llmSelectedThinkingLevel } =
+    viewInputs
+  const hasMultipleThinkingLevels = Array.length(llmThinkingLevels) > 1
+  const isSending = llmChatState._tag === "Sending"
+
+  return [
+    h.select(
+      [
+        h.Id("modal-llm-model-select"),
+        h.Class("form-input modal-llm-select"),
+        h.AriaLabel("Modell"),
+        h.Disabled(isSending || Array.isReadonlyArrayEmpty(llmModelOptions)),
+        h.Value(llmSelectedModel),
+        h.OnChange((value) => Message.SelectedLlmModel({ value })),
+      ],
+      Array.isReadonlyArrayNonEmpty(llmModelOptions)
+        ? Array.map(llmModelOptions, (item) =>
+            h.option(
+              [h.Value(item.value), h.Selected(llmSelectedModel === item.value)],
+              [item.label],
+            ),
+          )
+        : [h.option([h.Value(""), h.Selected(true)], ["Noch keine Modelle"])],
+    ),
+    hasMultipleThinkingLevels
+      ? h.select(
+          [
+            h.Id("modal-llm-thinking-select"),
+            h.Class("form-input modal-llm-select"),
+            h.AriaLabel("Thinking-Level"),
+            h.Disabled(isSending),
+            h.Value(llmSelectedThinkingLevel),
+            h.OnChange((value) => Message.SelectedLlmThinkingLevel({ value })),
+          ],
+          [
+            h.option([h.Value(""), h.Selected(llmSelectedThinkingLevel === "")], ["Standard"]),
+            ...Array.map(llmThinkingLevels, (item) =>
+              h.option(
+                [h.Value(item.value), h.Selected(llmSelectedThinkingLevel === item.value)],
+                [item.label],
+              ),
+            ),
+          ],
+        )
+      : h.empty,
+  ]
+}
+
 const viewLlmChatBar = (
   llmChatInput: string,
   llmChatState: LlmChatState,
   llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>,
-  viewInputs: ViewInputs,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
-  const { llmModelOptions, llmSelectedModel, llmThinkingLevels, llmSelectedThinkingLevel } =
-    viewInputs
-  const hasMultipleThinkingLevels = Array.length(llmThinkingLevels) > 1
   const isSending = llmChatState._tag === "Sending"
 
   return h.div(
     [h.Id("modal-llm-chat-bar"), h.Class("modal-llm-chat-bar")],
     [
       viewLlmChatHistory(llmChatDisplay, llmChatState, h),
-      h.input([
-        h.Type("text"),
-        h.Id("modal-llm-chat-input"),
-        h.Class("form-input modal-llm-chat-input"),
-        h.Placeholder("Nachricht an die KI …"),
-        h.AriaLabel("Nachricht an die KI"),
-        h.Autocomplete("off"),
-        h.Disabled(isSending),
-        h.Value(llmChatInput),
-        h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
-        h.OnKeyDownPreventDefault((key) =>
-          key === "Enter" ? Option.some(Message.SubmittedLlmChat()) : Option.none(),
-        ),
-      ]),
       h.div(
-        [h.Class("modal-llm-chat-controls")],
+        [h.Class("modal-llm-chat-input-row")],
         [
-          h.select(
-            [
-              h.Id("modal-llm-model-select"),
-              h.Class("form-input modal-llm-select"),
-              h.AriaLabel("Modell"),
-              h.Disabled(isSending || Array.isReadonlyArrayEmpty(llmModelOptions)),
-              h.Value(llmSelectedModel),
-              h.OnChange((value) => Message.SelectedLlmModel({ value })),
-            ],
-            Array.isReadonlyArrayNonEmpty(llmModelOptions)
-              ? Array.map(llmModelOptions, (item) =>
-                  h.option(
-                    [h.Value(item.value), h.Selected(llmSelectedModel === item.value)],
-                    [item.label],
-                  ),
-                )
-              : [h.option([h.Value(""), h.Selected(true)], ["Noch keine Modelle"])],
-          ),
-          hasMultipleThinkingLevels
-            ? h.select(
-                [
-                  h.Id("modal-llm-thinking-select"),
-                  h.Class("form-input modal-llm-select"),
-                  h.AriaLabel("Thinking-Level"),
-                  h.Disabled(isSending),
-                  h.Value(llmSelectedThinkingLevel),
-                  h.OnChange((value) => Message.SelectedLlmThinkingLevel({ value })),
-                ],
-                [
-                  h.option(
-                    [h.Value(""), h.Selected(llmSelectedThinkingLevel === "")],
-                    ["Standard"],
-                  ),
-                  ...Array.map(llmThinkingLevels, (item) =>
-                    h.option(
-                      [h.Value(item.value), h.Selected(llmSelectedThinkingLevel === item.value)],
-                      [item.label],
-                    ),
-                  ),
-                ],
-              )
-            : h.empty,
+          h.input([
+            h.Type("text"),
+            h.Id("modal-llm-chat-input"),
+            h.Class("form-input modal-llm-chat-input"),
+            h.Placeholder("Nachricht an die KI …"),
+            h.AriaLabel("Nachricht an die KI"),
+            h.Autocomplete("off"),
+            h.Disabled(isSending),
+            h.Value(llmChatInput),
+            h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
+            h.OnKeyDownPreventDefault((key) =>
+              key === "Enter" ? Option.some(Message.SubmittedLlmChat()) : Option.none(),
+            ),
+          ]),
           isSending
             ? h.button(
                 [
@@ -2832,10 +3037,12 @@ const viewLlmChatBar = (
                   h.Type("button"),
                   h.Id("modal-btn-send-llm"),
                   h.Class("btn btn-danger modal-llm-send-btn"),
+                  h.AriaLabel("Stopp"),
+                  h.Title("Stopp"),
                   h.Disabled(false),
                   h.OnClick(Message.ClickedStopLlmChat()),
                 ],
-                ["Stopp"],
+                [viewIcon("stop", h)],
               )
             : h.button(
                 [
@@ -2843,16 +3050,39 @@ const viewLlmChatBar = (
                   h.Type("button"),
                   h.Id("modal-btn-send-llm"),
                   h.Class("btn btn-primary modal-llm-send-btn"),
+                  h.AriaLabel("Senden"),
+                  h.Title("Senden"),
                   h.Disabled(llmChatInput.trim() === ""),
                   h.OnClick(Message.SubmittedLlmChat()),
                 ],
-                ["Senden"],
+                [h.span([h.AriaHidden(true)], ["➤"])],
               ),
         ],
       ),
     ],
   )
 }
+
+const viewEditorSplitter = (isDragging: boolean, h: Html.HtmlBuilder<Message>): Html.Html =>
+  h.div([
+    h.Id("modal-editor-splitter"),
+    h.Class(isDragging ? "modal-editor-splitter is-dragging" : "modal-editor-splitter"),
+    h.Role("separator"),
+    h.AriaOrientation("vertical"),
+    h.AriaLabel("Editor-Breite anpassen"),
+    h.OnPointerDown(
+      (_pointerType, button, screenX, _screenY, _timeStamp, _clientX, _clientY, pointerId) =>
+        button === 0 || button === -1
+          ? Option.some(Message.StartedResizeEditorSplit({ startScreenX: screenX, pointerId }))
+          : Option.none(),
+    ),
+    ...(isDragging
+      ? [
+          h.OnPointerMove((screenX) => Option.some(Message.MovedResizeEditorSplit({ screenX }))),
+          h.OnPointerUp(() => Option.some(Message.EndedResizeEditorSplit())),
+        ]
+      : []),
+  ])
 
 const viewEditorModal = (
   {
@@ -2866,6 +3096,10 @@ const viewEditorModal = (
     llmChatDisplay,
     llmViewInputs,
     isMaximized,
+    isNameToggleable,
+    isNameInputVisible,
+    editorSplitPercent,
+    isDraggingSplit,
     isEditingExisting,
     nameValue,
     maybeValidationError,
@@ -2883,6 +3117,10 @@ const viewEditorModal = (
     readonly llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>
     readonly llmViewInputs: ViewInputs
     readonly isMaximized: boolean
+    readonly isNameToggleable: boolean
+    readonly isNameInputVisible: boolean
+    readonly editorSplitPercent: number
+    readonly isDraggingSplit: boolean
     readonly isEditingExisting: boolean
     readonly nameValue: string
     readonly maybeValidationError: Option.Option<string>
@@ -2922,7 +3160,24 @@ const viewEditorModal = (
           h.header(
             [h.Class("modal-header")],
             [
-              h.h3([h.Id("modal-title"), h.Class("modal-title")], [titleText]),
+              h.h3(
+                [h.Id("modal-title"), h.Class("modal-title")],
+                isNameToggleable
+                  ? [
+                      "Datei bearbeiten: ",
+                      h.button(
+                        [
+                          h.Type("button"),
+                          h.Id("modal-btn-edit-name"),
+                          h.Class("modal-title-name-btn"),
+                          h.AriaExpanded(isNameInputVisible || Option.isSome(maybeValidationError)),
+                          h.OnClick(Message.ClickedToggleEditName()),
+                        ],
+                        [nameValue],
+                      ),
+                    ]
+                  : [titleText],
+              ),
               h.div(
                 [h.Class("modal-header-actions")],
                 [
@@ -2954,7 +3209,16 @@ const viewEditorModal = (
             ],
           ),
           h.form(
-            [h.Id("modal-form"), h.OnSubmit(Message.ClickedSave())],
+            [
+              h.Id("modal-form"),
+              ...(effectiveLlmBarMode === "Chat"
+                ? [
+                    h.Class("has-llm-chat"),
+                    h.Style({ "--editor-split-width": `${editorSplitPercent}%` }),
+                  ]
+                : []),
+              h.OnSubmit(Message.ClickedSave()),
+            ],
             [
               h.div(
                 [h.Class("modal-body")],
@@ -2965,30 +3229,38 @@ const viewEditorModal = (
                     onSome: (error) =>
                       h.div([h.Class("alert alert-danger mb-3"), h.Role("alert")], [error]),
                   }),
-                  h.div(
-                    [h.Class("form-group")],
-                    [
-                      h.label([h.For("modal-file-name")], [`${noun}name:`]),
-                      h.input([
-                        h.Type("text"),
-                        h.Id("modal-file-name"),
-                        h.Class("form-input"),
-                        h.Value(nameValue),
-                        h.Required(true),
-                        h.Placeholder(isFolder ? "z. B. projekte" : "z. B. index.html, daten.json"),
-                        h.Autocomplete("off"),
-                        h.OnInput((name) => Message.UpdatedName({ name })),
-                      ]),
-                    ],
-                  ),
+                  isNameInputVisible || Option.isSome(maybeValidationError)
+                    ? h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("modal-file-name")], [`${noun}name:`]),
+                          h.input([
+                            h.Type("text"),
+                            h.Id("modal-file-name"),
+                            h.Class("form-input"),
+                            h.Value(nameValue),
+                            h.Required(true),
+                            h.Placeholder(
+                              isFolder ? "z. B. projekte" : "z. B. index.html, daten.json",
+                            ),
+                            h.Autocomplete("off"),
+                            h.OnInput((name) => Message.UpdatedName({ name })),
+                          ]),
+                        ],
+                      )
+                    : h.empty,
                   ...extraBodyNodes,
                 ],
               ),
+              effectiveLlmBarMode === "Chat" ? viewEditorSplitter(isDraggingSplit, h) : h.empty,
+              effectiveLlmBarMode === "Chat"
+                ? viewLlmChatBar(llmChatInput, llmChatState, llmChatDisplay, h)
+                : h.empty,
               h.footer(
                 [h.Class("modal-footer")],
                 [
                   ...(effectiveLlmBarMode === "Chat"
-                    ? [viewLlmChatBar(llmChatInput, llmChatState, llmChatDisplay, llmViewInputs, h)]
+                    ? viewLlmChatModelControls(llmChatState, llmViewInputs, h)
                     : effectiveLlmBarMode === "Copy"
                       ? viewLlmButtons(maybePasteError, h)
                       : isEditingExisting
@@ -3268,6 +3540,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             llmChatDisplay: state.llmChatDisplay,
             llmViewInputs: context,
             isMaximized: state.isMaximized,
+            isNameToggleable: false,
+            isNameInputVisible: true,
+            editorSplitPercent: state.editorSplitPercent,
+            isDraggingSplit: Option.isSome(state.editorSplitDrag),
             isEditingExisting: false,
             nameValue: state.name,
             maybeValidationError: state.maybeValidationError,
@@ -3294,6 +3570,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             llmChatDisplay: [],
             llmViewInputs: context,
             isMaximized: false,
+            isNameToggleable: false,
+            isNameInputVisible: true,
+            editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+            isDraggingSplit: false,
             isEditingExisting: false,
             nameValue: name,
             maybeValidationError,
@@ -3317,6 +3597,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             llmChatDisplay: [],
             llmViewInputs: context,
             isMaximized: false,
+            isNameToggleable: false,
+            isNameInputVisible: true,
+            editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+            isDraggingSplit: false,
             isEditingExisting: true,
             nameValue: name,
             maybeValidationError,
@@ -3339,6 +3623,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         llmChatState,
         llmChatDisplay,
         isMaximized,
+        isEditingName,
+        editorSplitPercent,
+        editorSplitDrag,
       }) =>
         viewEditorModal(
           {
@@ -3352,6 +3639,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             llmChatDisplay,
             llmViewInputs: context,
             isMaximized,
+            isNameToggleable: true,
+            isNameInputVisible: isEditingName,
+            editorSplitPercent,
+            isDraggingSplit: Option.isSome(editorSplitDrag),
             isEditingExisting: true,
             nameValue: name,
             maybeValidationError,

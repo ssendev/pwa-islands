@@ -121,6 +121,7 @@ const readyModel: Model = {
   hasLoadedEditorLlmModels: false,
   editorIsMaximized: false,
   editorLlmBarMode: "Closed",
+  editorSplitPercent: 62,
   llmDraftEnabled: false,
   llmDraftEditFormat: "hashline",
   llmDraftBaseUrl: "",
@@ -1133,6 +1134,9 @@ describe("PWA Islands Story Tests", () => {
             llmChatDisplay: [],
             llmChatState: Editor.LlmChatState.Idle(),
             isMaximized: false,
+            isEditingName: false,
+            editorSplitPercent: 62,
+            editorSplitDrag: Option.none(),
           }),
         }),
       }
@@ -2141,6 +2145,7 @@ describe("PWA Islands Story Tests", () => {
             llmBarMode: "Closed",
             llmModel: "gpt-4o-mini",
             llmThinkingLevel: "false",
+            editorSplitPercent: 62,
           }),
         ),
         Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
@@ -2327,6 +2332,7 @@ describe("PWA Islands Story Tests", () => {
             llmBarMode: "Chat",
             llmModel: "qwen3",
             llmThinkingLevel: "high",
+            editorSplitPercent: 55,
           }),
         ),
         model((m) => {
@@ -2394,6 +2400,7 @@ describe("PWA Islands Story Tests", () => {
             llmBarMode: "Copy",
             llmModel: "",
             llmThinkingLevel: "",
+            editorSplitPercent: 70,
           }),
         ),
         message(
@@ -2418,6 +2425,9 @@ describe("PWA Islands Story Tests", () => {
                   llmChatDisplay: [],
                   llmChatState: Editor.LlmChatState.Idle(),
                   isMaximized: false,
+                  isEditingName: false,
+                  editorSplitPercent: 62,
+                  editorSplitDrag: Option.none(),
                 }),
               }),
             ),
@@ -2450,9 +2460,80 @@ describe("PWA Islands Story Tests", () => {
             if (m.modalState.editor._tag === "EditFile") {
               expect(m.modalState.editor.isMaximized).toBe(true)
               expect(m.modalState.editor.llmBarMode).toBe("Copy")
+              expect(m.modalState.editor.editorSplitPercent).toBe(70)
             }
           }
           expect(m.llmDiscoveredModels).toEqual(["qwen3", "gpt-4o"])
+        }),
+      )
+    })
+
+    it("merkt sich die angepasste Editor-Breite beim Ziehen des Trennbalkens", () => {
+      const editorModel = Editor.makeCreateFile([], {
+        isMaximized: true,
+        llmBarMode: "Chat",
+        editorSplitPercent: 62,
+      })
+
+      story(
+        (m: Editor.Model, msg: Editor.Message) =>
+          Editor.update(m, msg, {
+            subPath: [],
+            existingEntries: [],
+            llmEnabled: true,
+            llmEditFormat: "hashline",
+          }),
+        given(editorModel),
+        message(Editor.Message.StartedResizeEditorSplit({ startScreenX: 620, pointerId: 1 })),
+        Command.resolve(
+          Editor.StartEditorSplitDrag,
+          Editor.Message.MeasuredEditorSplitDrag({ startWidthPx: 620, containerWidthPx: 1000 }),
+        ),
+        message(Editor.Message.MovedResizeEditorSplit({ screenX: 500 })),
+        model((m) => {
+          expect(m._tag).toBe("CreateFile")
+          if (m._tag === "CreateFile") {
+            expect(m.editorSplitPercent).toBe(50)
+          }
+        }),
+        message(Editor.Message.EndedResizeEditorSplit()),
+      )
+
+      const modelWithResizedEditor = modifyFields(readyModel, {
+        modalState: () =>
+          ModalState.Editor({
+            editor: Editor.makeCreateFile([], {
+              isMaximized: true,
+              llmBarMode: "Chat",
+              editorSplitPercent: 50,
+            }),
+          }),
+        editorIsMaximized: () => true,
+        editorLlmBarMode: () => "Chat",
+      })
+
+      story(
+        update,
+        given(modelWithResizedEditor),
+        message(
+          Message.GotModalMessage({
+            message: Modal.Message.GotEditorMessage({
+              message: Editor.Message.EndedResizeEditorSplit(),
+            }),
+          }),
+        ),
+        Command.expectExact(
+          SaveEditorPreferences({
+            isMaximized: true,
+            llmBarMode: "Chat",
+            llmModel: "",
+            llmThinkingLevel: "",
+            editorSplitPercent: 50,
+          }),
+        ),
+        Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+        model((m) => {
+          expect(m.editorSplitPercent).toBe(50)
         }),
       )
     })
