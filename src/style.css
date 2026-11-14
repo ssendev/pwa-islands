@@ -1275,13 +1275,45 @@ code {
 
 .modal-llm-chat-input-row {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   gap: 8px;
 }
 
-.modal-llm-chat-input {
+.modal-llm-chat-input-wrap {
   flex: 1;
   min-width: 0;
+  display: grid;
+}
+
+/*
+ * Spiegel-Pseudoelement fuer automatisches Mitwachsen der Textarea ab 1 Zeile,
+ * ohne imperativen DOM-Zugriff.
+ */
+.modal-llm-chat-input-wrap::after {
+  content: attr(data-value) " ";
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  visibility: hidden;
+  pointer-events: none;
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 20px;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  grid-area: 1 / 1 / 2 / 2;
+  max-height: 160px;
+  overflow: hidden;
+}
+
+.modal-llm-chat-input {
+  grid-area: 1 / 1 / 2 / 2;
+  resize: none;
+  overflow-y: auto;
+  overflow-wrap: break-word;
+  line-height: 20px;
+  min-height: 38px;
+  max-height: 160px;
 }
 
 .modal-llm-select {

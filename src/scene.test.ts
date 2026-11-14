@@ -6,6 +6,7 @@ import {
   click,
   doubleClick,
   expect as sceneExpect,
+  expectIgnored,
   given,
   keydown,
   scene,
@@ -404,6 +405,9 @@ describe("PWA Islands Scene Tests", () => {
         [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
       ),
       type(selector("#modal-llm-chat-input"), "Füge Titel hinzu"),
+      keydown(selector("#modal-llm-chat-input"), "Enter", { shiftKey: true }),
+      expectIgnored(),
+      sceneExpect(selector("#modal-llm-chat-input")).toHaveValue("Füge Titel hinzu"),
       keydown(selector("#modal-llm-chat-input"), "Enter"),
       Command.resolve(
         Editor.ScrollLlmChatToBottomIfAtBottom,

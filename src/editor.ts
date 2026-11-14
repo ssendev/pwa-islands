@@ -3864,20 +3864,27 @@ const viewLlmChatBar = (
       h.div(
         [h.Class("modal-llm-chat-input-row")],
         [
-          h.input([
-            h.Type("text"),
-            h.Id("modal-llm-chat-input"),
-            h.Class("form-input modal-llm-chat-input"),
-            h.Placeholder("Nachricht an die KI …"),
-            h.AriaLabel("Nachricht an die KI"),
-            h.Autocomplete("off"),
-            h.Disabled(isSending),
-            h.Value(llmChatInput),
-            h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
-            h.OnKeyDownPreventDefault((key) =>
-              key === "Enter" ? Option.some(Message.SubmittedLlmChat()) : Option.none(),
-            ),
-          ]),
+          h.div(
+            [h.Class("modal-llm-chat-input-wrap"), h.DataAttribute("value", llmChatInput)],
+            [
+              h.textarea([
+                h.Id("modal-llm-chat-input"),
+                h.Class("form-input modal-llm-chat-input"),
+                h.Rows(1),
+                h.Placeholder("Nachricht an die KI …"),
+                h.AriaLabel("Nachricht an die KI"),
+                h.Autocomplete("off"),
+                h.Disabled(isSending),
+                h.Value(llmChatInput),
+                h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
+                h.OnKeyDownPreventDefault((key, modifiers) =>
+                  key === "Enter" && !modifiers.shiftKey
+                    ? Option.some(Message.SubmittedLlmChat())
+                    : Option.none(),
+                ),
+              ]),
+            ],
+          ),
           isSending
             ? h.button(
                 [
