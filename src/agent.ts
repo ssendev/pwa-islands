@@ -1,6 +1,8 @@
 // LLM / AGENT
 // Alles rund um den OpenAI-kompatiblen LLM-Zugang lebt hier.
 
+import { HashlineApplyResult, applyHashlineEdits, formatUpdatedHashlines } from "./hashline"
+
 export type LlmSettings = {
   enabled: boolean
   baseUrl: string
@@ -308,6 +310,28 @@ const parseLabeledOptions = (raw: string): ReadonlyArray<LabeledOption> => {
 /** Parst kommagetrennte Modelle (`Modell-ID` oder `Anzeigename=Modell-ID`) und entfernt Leerwerte/Duplikate. */
 export const parseModelOptions = (raw: string): ReadonlyArray<ModelOption> =>
   parseLabeledOptions(raw)
+
+/** Kombiniert manuelle, entdeckte und das aktive Modell dedupliziert zu Select-Optionen. */
+export const resolveModelOptions = (
+  models: string,
+  discoveredModels: ReadonlyArray<string>,
+  activeModel: string,
+): ReadonlyArray<ModelOption> => {
+  const manualOptions = parseModelOptions(models)
+  const trimmedActive = activeModel.trim()
+  const seen = new Set<string>()
+  return [
+    ...manualOptions,
+    ...discoveredModels.map((id) => ({ label: id, value: id })),
+    ...(trimmedActive !== "" ? [{ label: trimmedActive, value: trimmedActive }] : []),
+  ].filter((item) => {
+    if (seen.has(item.value)) {
+      return false
+    }
+    seen.add(item.value)
+    return true
+  })
+}
 
 /** Parst kommagetrennte Modell-IDs und entfernt Leerwerte/Duplikate. */
 export const parseModelList = (raw: string): ReadonlyArray<string> =>
@@ -778,4 +802,377 @@ export const testLlmConnection = async (
     reasoning: "",
     models,
   }
+}
+
+export type EditorChatToolCall = {
+  readonly id: string
+  readonly name: string
+  readonly arguments: string
+}
+
+export type EditorChatMessage =
+  | { readonly _tag: "System"; readonly content: string }
+  | { readonly _tag: "User"; readonly content: string }
+  | {
+      readonly _tag: "Assistant"
+      readonly content: string
+      readonly toolCalls: ReadonlyArray<EditorChatToolCall>
+    }
+  | { readonly _tag: "Tool"; readonly toolCallId: string; readonly content: string }
+
+export const EDITOR_EDIT_TOOL = {
+  type: "function",
+  function: {
+    name: "edit",
+    description:
+      "Wendet Hash-Anchored Line Edits (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE) auf die aktuell geöffnete Datei an.",
+    parameters: {
+      type: "object",
+      properties: {
+        edits: {
+          type: "string",
+          description: "Die Hashline-Bearbeitungsbefehle für die Datei.",
+        },
+      },
+      required: ["edits"],
+      additionalProperties: false,
+    },
+  },
+} as const
+
+const toOpenAiEditorMessages = (
+  messages: ReadonlyArray<EditorChatMessage>,
+): ReadonlyArray<Record<string, unknown>> =>
+  messages.map((msg) => {
+    if (msg._tag === "System") {
+      return { role: "system", content: msg.content }
+    }
+    if (msg._tag === "User") {
+      return { role: "user", content: msg.content }
+    }
+    if (msg._tag === "Tool") {
+      return { role: "tool", tool_call_id: msg.toolCallId, content: msg.content }
+    }
+    return {
+      role: "assistant",
+      content: msg.content === "" && msg.toolCalls.length > 0 ? null : msg.content,
+      ...(msg.toolCalls.length > 0
+        ? {
+            tool_calls: msg.toolCalls.map((call) => ({
+              id: call.id,
+              type: "function",
+              function: { name: call.name, arguments: call.arguments },
+            })),
+          }
+        : {}),
+    }
+  })
+
+const extractEditorToolArgs = (rawArguments: string, depth = 0): string => {
+  const trimmed = rawArguments.trim()
+  if (trimmed === "") {
+    return ""
+  }
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    if (typeof parsed === "string") {
+      if (depth < 2 && (parsed.trim().startsWith("{") || parsed.trim().startsWith('"'))) {
+        return extractEditorToolArgs(parsed, depth + 1)
+      }
+      return parsed
+    }
+    if (isRecord(parsed)) {
+      if (typeof parsed.edits === "string") {
+        return parsed.edits
+      }
+      if (typeof parsed.text === "string") {
+        return parsed.text
+      }
+      if (typeof parsed.patch === "string") {
+        return parsed.patch
+      }
+    }
+  } catch {
+    return rawArguments
+  }
+  return ""
+}
+
+const extractNonStreamingEditorResponse = (
+  body: unknown,
+): {
+  readonly content: string
+  readonly reasoning: string
+  readonly toolCalls: ReadonlyArray<EditorChatToolCall>
+} => {
+  if (!isRecord(body) || !Array.isArray(body.choices) || body.choices.length === 0) {
+    throw new Error("Unerwartete Antwort: keine choices")
+  }
+  const first: unknown = body.choices[0]
+  const message = isRecord(first) ? (first.message ?? first) : undefined
+  const content = isRecord(message) && typeof message.content === "string" ? message.content : ""
+  const reasoning =
+    extractFirstField(message, REASONING_KEYS) ?? extractFirstField(first, REASONING_KEYS) ?? ""
+  const rawCalls = isRecord(message) && Array.isArray(message.tool_calls) ? message.tool_calls : []
+  const toolCalls: ReadonlyArray<EditorChatToolCall> = rawCalls.flatMap((call, idx) => {
+    if (!isRecord(call) || !isRecord(call.function) || typeof call.function.name !== "string") {
+      return []
+    }
+    const id = typeof call.id === "string" && call.id !== "" ? call.id : `call_${idx}`
+    const args =
+      typeof call.function.arguments === "string"
+        ? call.function.arguments
+        : JSON.stringify(call.function.arguments ?? {})
+    return [{ id, name: call.function.name, arguments: args }]
+  })
+  return { content, reasoning: reasoning.trim(), toolCalls }
+}
+
+export const requestEditorChatCompletion = async (
+  config: LlmRequestConfig,
+  messages: ReadonlyArray<EditorChatMessage>,
+  onUpdate?: (parts: LlmReplyParts) => void,
+  signal?: AbortSignal,
+): Promise<{
+  readonly content: string
+  readonly reasoning: string
+  readonly toolCalls: ReadonlyArray<EditorChatToolCall>
+}> => {
+  const activeModel = resolveTestModel(config)
+  if (activeModel === "") {
+    throw new Error("Kein Modell ausgewählt oder angegeben")
+  }
+  const requestBody = buildChatRequestBody({ ...config, model: activeModel }, "", {
+    messages: toOpenAiEditorMessages(messages),
+    max_tokens: 4096,
+    tools: [EDITOR_EDIT_TOOL],
+    tool_choice: "auto",
+  })
+  const response = await fetch(joinUrl(config.baseUrl, "/chat/completions"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(config.apiKey) },
+    body: JSON.stringify(requestBody),
+    ...(signal ? { signal } : {}),
+  })
+  if (!response.ok) {
+    const detail = await readJson(response).then(errorDetail, () => "")
+    throw new Error(`HTTP ${response.status}${detail}`)
+  }
+  if (!config.streaming) {
+    const body = await readJson(response)
+    return extractNonStreamingEditorResponse(body)
+  }
+
+  const finalState = await readSseStream<{
+    content: string
+    reasoning: string
+    calls: ReadonlyArray<EditorChatToolCall>
+  }>(
+    response,
+    { content: "", reasoning: "", calls: [] },
+    (state, chunk) => {
+      const deltaParts = extractDeltaParts(chunk)
+      const first: unknown =
+        isRecord(chunk) && Array.isArray(chunk.choices) ? chunk.choices[0] : undefined
+      const delta = isRecord(first) ? (first.delta ?? first.message ?? first) : undefined
+      const rawToolCalls =
+        isRecord(delta) && Array.isArray(delta.tool_calls) ? delta.tool_calls : []
+
+      const nextCalls = rawToolCalls.reduce<ReadonlyArray<EditorChatToolCall>>((acc, item) => {
+        if (!isRecord(item) || !isRecord(item.function)) {
+          return acc
+        }
+        const idx = typeof item.index === "number" ? item.index : 0
+        const idPart = typeof item.id === "string" ? item.id : ""
+        const namePart = typeof item.function.name === "string" ? item.function.name : ""
+        const argsPart = typeof item.function.arguments === "string" ? item.function.arguments : ""
+        const existing = acc[idx] ?? { id: `call_${idx}`, name: "", arguments: "" }
+        const updated = acc.slice()
+        updated[idx] = {
+          id: idPart !== "" ? idPart : existing.id,
+          name: existing.name + namePart,
+          arguments: existing.arguments + argsPart,
+        }
+        return updated
+      }, state.calls)
+
+      const changed =
+        deltaParts.content !== "" || deltaParts.reasoning !== "" || rawToolCalls.length > 0
+      return {
+        state: changed
+          ? {
+              content: state.content + deltaParts.content,
+              reasoning: state.reasoning + deltaParts.reasoning,
+              calls: nextCalls,
+            }
+          : state,
+        changed,
+      }
+    },
+    (state) => {
+      if (!onUpdate) {
+        return
+      }
+      const streamingCalls = state.calls.filter((call) => call.name.trim() !== "")
+      const toolSummary = formatToolCallsSummary(streamingCalls)
+      const streamContent = joinNonEmptyParts([state.content, toolSummary])
+      onUpdate({
+        content: streamContent,
+        reasoning: state.reasoning,
+      })
+    },
+  )
+
+  return {
+    content: finalState.content,
+    reasoning: finalState.reasoning.trim(),
+    toolCalls: finalState.calls.filter((call) => call.name.trim() !== ""),
+  }
+}
+
+export type EditorChatTurnBlock = {
+  readonly content: string
+  readonly reasoning: string
+  readonly isError: boolean
+}
+
+export type EditorChatStreamUpdate = {
+  readonly completedTurns: ReadonlyArray<EditorChatTurnBlock>
+  readonly activeTurn: {
+    readonly content: string
+    readonly reasoning: string
+  }
+}
+
+export type EditorChatTurnResult = {
+  readonly messages: ReadonlyArray<EditorChatMessage>
+  readonly updatedContent?: string
+  readonly appliedCount: number
+  readonly turns: ReadonlyArray<EditorChatTurnBlock>
+}
+
+const MAX_EDIT_ERROR_RETRIES = 4
+
+const joinNonEmptyParts = (parts: ReadonlyArray<string>): string =>
+  parts
+    .map((part) => part.trim())
+    .filter((part) => part !== "")
+    .join("\n\n")
+
+const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): string =>
+  toolCalls
+    .map((call) => {
+      const name = call.name.trim()
+      if (name === "edit") {
+        const args = extractEditorToolArgs(call.arguments).trim()
+        return args !== "" ? `Tool-Aufruf: edit\n${args}` : "Tool-Aufruf: edit"
+      }
+      return name !== "" ? `Tool-Aufruf: ${name}` : ""
+    })
+    .filter((entry) => entry !== "")
+    .join("\n\n")
+
+export const runEditorChatTurn = async ({
+  config,
+  fileName,
+  initialContent,
+  initialMessages,
+  onUpdate,
+  signal,
+}: {
+  readonly config: LlmRequestConfig
+  readonly fileName: string
+  readonly initialContent: string
+  readonly initialMessages: ReadonlyArray<EditorChatMessage>
+  readonly onUpdate?: (update: EditorChatStreamUpdate) => void
+  readonly signal?: AbortSignal
+}): Promise<EditorChatTurnResult> => {
+  const step = async (
+    messages: ReadonlyArray<EditorChatMessage>,
+    currentContent: string,
+    errorRetriesLeft: number,
+    completedTurns: ReadonlyArray<EditorChatTurnBlock>,
+  ): Promise<EditorChatTurnResult> => {
+    const turnOnUpdate = onUpdate
+      ? (activeTurn: LlmReplyParts) => {
+          onUpdate({
+            completedTurns,
+            activeTurn,
+          })
+        }
+      : undefined
+    const reply = await requestEditorChatCompletion(config, messages, turnOnUpdate, signal)
+    const assistantMsg: EditorChatMessage = {
+      _tag: "Assistant",
+      content: reply.content,
+      toolCalls: reply.toolCalls,
+    }
+    const toolSummary = formatToolCallsSummary(reply.toolCalls)
+    const replyContent = joinNonEmptyParts([reply.content, toolSummary])
+    const replyReasoning = reply.reasoning.trim()
+    const replyTurns: ReadonlyArray<EditorChatTurnBlock> =
+      replyContent !== "" || replyReasoning !== ""
+        ? [{ content: replyContent, reasoning: replyReasoning, isError: false }]
+        : []
+
+    const editCall = reply.toolCalls.find((call) => call.name === "edit")
+    if (!editCall) {
+      return {
+        messages: [...messages, assistantMsg],
+        appliedCount: 0,
+        turns: [...completedTurns, ...replyTurns],
+      }
+    }
+
+    const editsText = extractEditorToolArgs(editCall.arguments)
+    const applyResult = applyHashlineEdits(currentContent, editsText)
+
+    return HashlineApplyResult.match(applyResult, {
+      Ok: ({ content: nextContent, appliedCount, changedLines }) => {
+        const toolMsg: EditorChatMessage = {
+          _tag: "Tool",
+          toolCallId: editCall.id,
+          content: formatUpdatedHashlines(fileName, changedLines),
+        }
+        return {
+          messages: [...messages, assistantMsg, toolMsg],
+          updatedContent: nextContent,
+          appliedCount,
+          turns: [...completedTurns, ...replyTurns],
+        }
+      },
+      Error: ({ message: errorMessage }) => {
+        const toolMsg: EditorChatMessage = {
+          _tag: "Tool",
+          toolCallId: editCall.id,
+          content: `Fehler beim Anwenden der Änderungen: ${errorMessage}`,
+        }
+        const nextMessages = [...messages, assistantMsg, toolMsg]
+        const errorTurn: EditorChatTurnBlock = {
+          content: `Fehler beim Anwenden der Änderungen: ${errorMessage}`,
+          reasoning: "",
+          isError: true,
+        }
+        const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
+          ...completedTurns,
+          ...replyTurns,
+          errorTurn,
+        ]
+        if (errorRetriesLeft <= 0) {
+          onUpdate?.({
+            completedTurns: nextCompletedTurns,
+            activeTurn: { content: "", reasoning: "" },
+          })
+          throw new Error(errorMessage)
+        }
+        onUpdate?.({
+          completedTurns: nextCompletedTurns,
+          activeTurn: { content: "Korrigiere Bearbeitung …", reasoning: "" },
+        })
+        return step(nextMessages, currentContent, errorRetriesLeft - 1, nextCompletedTurns)
+      },
+    })
+  }
+
+  return step(initialMessages, initialContent, MAX_EDIT_ERROR_RETRIES, [])
 }

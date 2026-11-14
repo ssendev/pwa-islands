@@ -72,21 +72,32 @@ import {
   parseUrlToRoute,
 } from "./route"
 import {
+  type EditorChatMessage,
   THINKING_PRESETS,
   emptyLlmSettings,
+  listModels,
   parseModelList,
-  parseModelOptions,
   parseThinkingLevels,
+  resolveModelOptions,
   resolveTestModel,
+  runEditorChatTurn,
   streamChatParts,
   streamToolCallParts,
   testLlmConnection,
 } from "./agent"
+import {
+  formatApiDtsMessage,
+  formatHashedFileMessage,
+  formatHashlineSystemPrompt,
+} from "./hashline"
+import * as Editor from "./editor"
 import * as LlmResponse from "./llm-response"
 import {
   OPFS_APP_FOLDER,
   getFileExtension,
+  getStoredEditorPreferences,
   getStoredLlmSettings,
+  storeEditorPreferences,
   storeLlmSettings,
 } from "./storage"
 
@@ -314,6 +325,9 @@ export const Model = Schema.Struct({
   llmModel: Schema.String,
   llmThinkingLevel: Schema.String,
   llmDiscoveredModels: Schema.Array(Schema.String),
+  hasLoadedEditorLlmModels: Schema.Boolean,
+  editorIsMaximized: Schema.Boolean,
+  editorLlmBarMode: Editor.LlmBarMode,
   llmDraftEnabled: Schema.Boolean,
   llmDraftBaseUrl: Schema.String,
   llmDraftApiKey: Schema.String,
@@ -504,6 +518,33 @@ export const Message = defineMessageUnion({
     extraArgs: Schema.String,
   },
   CompletedSaveLlmSettings: {},
+  CompletedLoadEditorPreferences: {
+    isMaximized: Schema.Boolean,
+    llmBarMode: Editor.LlmBarMode,
+    llmModel: Schema.String,
+    llmThinkingLevel: Schema.String,
+  },
+  CompletedSaveEditorPreferences: {},
+  SucceededLoadEditorLlmModels: {
+    models: Schema.Array(Schema.String),
+  },
+  FailedLoadEditorLlmModels: {},
+  UpdatedEditorLlmChatStream: {
+    completedTurns: Schema.Array(Editor.LlmChatTurnBlock),
+    activeTurn: Schema.Struct({
+      content: Schema.String,
+      reasoning: Schema.String,
+    }),
+  },
+  SucceededEditorLlmChat: {
+    messages: Schema.Array(Editor.LlmChatMessage),
+    maybeUpdatedContent: Schema.Option(Schema.String),
+    appliedCount: Schema.Number,
+    turns: Schema.Array(Editor.LlmChatTurnBlock),
+  },
+  FailedEditorLlmChat: {
+    message: Schema.String,
+  },
   ClickedToggleFileInfo: {},
   ClickedSelectFolder: {},
   ClickedChangeFolder: {},
@@ -760,6 +801,98 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
       Effect.catch(() => Effect.succeed(Message.CompletedSaveLlmSettings())),
     ),
 })
+
+export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
+  messages: [Message.CompletedLoadEditorPreferences],
+  execute: Effect.promise(() => getStoredEditorPreferences()).pipe(
+    Effect.map((prefs) =>
+      Message.CompletedLoadEditorPreferences({
+        isMaximized: prefs.isMaximized,
+        llmBarMode: prefs.llmBarMode,
+        llmModel: prefs.llmModel,
+        llmThinkingLevel: prefs.llmThinkingLevel,
+      }),
+    ),
+  ),
+})
+
+export const SaveEditorPreferences = Command.define("SaveEditorPreferences", {
+  args: {
+    isMaximized: Schema.Boolean,
+    llmBarMode: Editor.LlmBarMode,
+    llmModel: Schema.String,
+    llmThinkingLevel: Schema.String,
+  },
+  messages: [Message.CompletedSaveEditorPreferences],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () =>
+        storeEditorPreferences({
+          isMaximized: args.isMaximized,
+          llmBarMode: args.llmBarMode,
+          llmModel: args.llmModel,
+          llmThinkingLevel: args.llmThinkingLevel,
+        }),
+      catch: () => new Error("Failed to save editor preferences"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveEditorPreferences()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveEditorPreferences())),
+    ),
+})
+
+export const LoadEditorLlmModels = Command.define("LoadEditorLlmModels", {
+  args: {
+    enabled: Schema.Boolean,
+    baseUrl: Schema.String,
+    apiKey: Schema.String,
+    models: Schema.String,
+    streaming: Schema.Boolean,
+    toolCalls: Schema.Boolean,
+    thinkingParam: Schema.String,
+    thinkingLevels: Schema.String,
+    extraArgs: Schema.String,
+  },
+  messages: [Message.SucceededLoadEditorLlmModels, Message.FailedLoadEditorLlmModels],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const models = await listModels(args)
+        return Message.SucceededLoadEditorLlmModels({ models })
+      },
+      catch: () => new Error("Failed to load editor LLM models"),
+    }).pipe(Effect.catch(() => Effect.succeed(Message.FailedLoadEditorLlmModels()))),
+})
+
+const toAgentEditorMessages = (
+  messages: ReadonlyArray<Editor.LlmChatMessage>,
+): ReadonlyArray<EditorChatMessage> =>
+  Array.map(messages, (msg) =>
+    Editor.LlmChatMessage.match(msg, {
+      System: ({ content }) => ({ _tag: "System" as const, content }),
+      User: ({ content }) => ({ _tag: "User" as const, content }),
+      Assistant: ({ content, toolCalls }) => ({ _tag: "Assistant" as const, content, toolCalls }),
+      Tool: ({ toolCallId, content }) => ({ _tag: "Tool" as const, toolCallId, content }),
+    }),
+  )
+
+const toEditorSchemaMessages = (
+  messages: ReadonlyArray<EditorChatMessage>,
+): ReadonlyArray<Editor.LlmChatMessage> =>
+  Array.map(messages, (msg) => {
+    if (msg._tag === "System") {
+      return Editor.LlmChatMessage.System({ content: msg.content })
+    }
+    if (msg._tag === "User") {
+      return Editor.LlmChatMessage.User({ content: msg.content })
+    }
+    if (msg._tag === "Tool") {
+      return Editor.LlmChatMessage.Tool({ toolCallId: msg.toolCallId, content: msg.content })
+    }
+    return Editor.LlmChatMessage.Assistant({
+      content: msg.content,
+      toolCalls: [...msg.toolCalls],
+    })
+  })
 
 export const TestLlm = Command.define("TestLlm", {
   args: {
@@ -1602,6 +1735,9 @@ export const init = (
         llmModel: "",
         llmThinkingLevel: "",
         llmDiscoveredModels: [],
+        hasLoadedEditorLlmModels: false,
+        editorIsMaximized: false,
+        editorLlmBarMode: "Closed",
         llmDraftEnabled: false,
         llmDraftBaseUrl: "",
         llmDraftApiKey: "",
@@ -1655,6 +1791,9 @@ export const init = (
       llmModel: "",
       llmThinkingLevel: "",
       llmDiscoveredModels: [],
+      hasLoadedEditorLlmModels: false,
+      editorIsMaximized: false,
+      editorLlmBarMode: "Closed",
       llmDraftEnabled: false,
       llmDraftBaseUrl: "",
       llmDraftApiKey: "",
@@ -1683,11 +1822,38 @@ export const init = (
       }),
       LoadFileInfoPreference(),
       LoadLlmSettings(),
+      LoadEditorPreferences(),
     ],
   }
 }
 
 // UPDATE
+
+const isFileEditorModal = (modalState: Modal.ModalState): boolean =>
+  Match.value(modalState).pipe(
+    Match.tag("Editor", ({ editor }) => editor._tag === "CreateFile" || editor._tag === "EditFile"),
+    Match.orElse(() => false),
+  )
+
+const syncOpenEditor = (
+  model: Model,
+  extraCommands: ReadonlyArray<Command.Command<Message>> = [],
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} => {
+  if (!isFileEditorModal(model.modalState)) {
+    return Array.isReadonlyArrayNonEmpty(extraCommands)
+      ? { model, commands: extraCommands }
+      : { model }
+  }
+
+  const editorModelsLoad = maybeLoadEditorLlmModels(model)
+  const commands = [...extraCommands, ...(editorModelsLoad.commands ?? [])]
+  return Array.isReadonlyArrayNonEmpty(commands)
+    ? { model: editorModelsLoad.model, commands }
+    : { model: editorModelsLoad.model }
+}
 
 const handleStorageActivated = (
   model: Model,
@@ -1712,20 +1878,28 @@ const handleStorageActivated = (
     otherBackend: payload.otherBackend,
   })
 
-  return {
-    model: modifyFields(model, {
-      storageState: () => readyStorage,
-      modalState: () =>
-        Option.match(payload.maybeModalState, {
-          onNone: () => model.modalState,
-          onSome: (modal) => modal,
-        }),
-      maybeAlertBanner: () => payload.maybeAlertBanner,
-    }),
-    commands: Option.exists(payload.maybeModalState, (modal) => modal._tag === "Editor")
-      ? [toModalCommand(Modal.FocusModalNameInput())]
-      : [],
-  }
+  const nextModel = modifyFields(model, {
+    storageState: () => readyStorage,
+    modalState: () =>
+      Option.match(payload.maybeModalState, {
+        onNone: () => model.modalState,
+        onSome: (modal) =>
+          Modal.applyEditorPreferences(modal, {
+            isMaximized: model.editorIsMaximized,
+            llmBarMode: model.editorLlmBarMode,
+          }),
+      }),
+    maybeAlertBanner: () => payload.maybeAlertBanner,
+  })
+
+  const editorFocusCommands: ReadonlyArray<Command.Command<Message>> = Option.exists(
+    payload.maybeModalState,
+    (modal) => modal._tag === "Editor",
+  )
+    ? [toModalCommand(Modal.FocusModalNameInput())]
+    : []
+
+  return syncOpenEditor(nextModel, editorFocusCommands)
 }
 
 const handlePermissionRequired = (
@@ -1866,6 +2040,40 @@ const handleUseFsa = (
       ],
     }),
   })
+}
+
+const maybeLoadEditorLlmModels = (
+  model: Model,
+): { readonly model: Model; readonly commands?: ReadonlyArray<Command.Command<Message>> } => {
+  const shouldLoad =
+    model.llmEnabled &&
+    !model.hasLoadedEditorLlmModels &&
+    model.llmBaseUrl.trim() !== "" &&
+    Array.isReadonlyArrayEmpty(parseModelList(model.llmModels)) &&
+    Array.isReadonlyArrayEmpty(model.llmDiscoveredModels)
+
+  if (!shouldLoad) {
+    return { model }
+  }
+
+  return {
+    model: modifyFields(model, {
+      hasLoadedEditorLlmModels: () => true,
+    }),
+    commands: [
+      LoadEditorLlmModels({
+        enabled: model.llmEnabled,
+        baseUrl: model.llmBaseUrl,
+        apiKey: model.llmApiKey,
+        models: model.llmModels,
+        streaming: model.llmStreaming,
+        toolCalls: model.llmToolCalls,
+        thinkingParam: model.llmThinkingParam,
+        thinkingLevels: model.llmThinkingLevels,
+        extraArgs: model.llmExtraArgs,
+      }),
+    ],
+  }
 }
 
 export const update = (
@@ -2282,38 +2490,34 @@ export const update = (
         },
 
         New: ({ subPath, target }) => {
-          const newModalState = Modal.openCreate(target)
+          const newModalState = Modal.openCreate(target, [], {
+            isMaximized: modelWithRoute.editorIsMaximized,
+            llmBarMode: modelWithRoute.editorLlmBarMode,
+          })
           const templateLoadCommands =
             target === "file" ? [toModalCommand(Modal.LoadEditorUserTemplates)] : []
 
           return whenReady(modelWithRoute, (readyState) => {
             const isSamePath = isSameSubPath(readyState.subPath, subPath)
-            if (isSamePath) {
-              return {
-                model: modifyFields(modelWithRoute, {
-                  isSettingsOpen: () => false,
-                  modalState: () => newModalState,
-                  maybeAlertBanner: () => Option.none(),
-                }),
-                commands: [toModalCommand(Modal.FocusModalNameInput()), ...templateLoadCommands],
-              }
-            }
-            return {
-              model: modifyFields(modelWithRoute, {
-                isSettingsOpen: () => false,
-                modalState: () => newModalState,
-                maybeAlertBanner: () => Option.none(),
-                storageState: () =>
-                  modifyFields(readyState, {
-                    entriesState: () => EntriesState.Loading(),
+            const nextModel = modifyFields(modelWithRoute, {
+              isSettingsOpen: () => false,
+              modalState: () => newModalState,
+              maybeAlertBanner: () => Option.none(),
+              ...(isSamePath
+                ? {}
+                : {
+                    storageState: () =>
+                      modifyFields(readyState, {
+                        entriesState: () => EntriesState.Loading(),
+                      }),
                   }),
-              }),
-              commands: [
-                NavigateToSubfolder({ targetSubPath: subPath }),
-                toModalCommand(Modal.FocusModalNameInput()),
-                ...templateLoadCommands,
-              ],
-            }
+            })
+            const baseCommands: ReadonlyArray<Command.Command<Message>> = [
+              ...(isSamePath ? [] : [NavigateToSubfolder({ targetSubPath: subPath })]),
+              toModalCommand(Modal.FocusModalNameInput()),
+              ...templateLoadCommands,
+            ]
+            return syncOpenEditor(nextModel, baseCommands)
           })
         },
 
@@ -2343,11 +2547,15 @@ export const update = (
               }
             }
 
+            const editorModelsLoad = maybeLoadEditorLlmModels(modelWithRoute)
             return {
-              model: modifyFields(modelWithRoute, {
+              model: modifyFields(editorModelsLoad.model, {
                 isSettingsOpen: () => false,
               }),
-              commands: [toModalCommand(Modal.InspectFileForEditor({ entryName: name, subPath }))],
+              commands: [
+                toModalCommand(Modal.InspectFileForEditor({ entryName: name, subPath })),
+                ...(editorModelsLoad.commands ?? []),
+              ],
             }
           })
         },
@@ -2431,6 +2639,7 @@ export const update = (
         llmExtraArgs: () => model.llmDraftExtraArgs,
         llmModel: () => model.llmDraftModel,
         llmThinkingLevel: () => model.llmDraftThinkingLevel,
+        hasLoadedEditorLlmModels: () => false,
       }),
       commands: [
         SaveLlmSettings({
@@ -2443,6 +2652,12 @@ export const update = (
           thinkingParam: model.llmDraftThinkingParam,
           thinkingLevels: model.llmDraftThinkingLevels,
           extraArgs: model.llmDraftExtraArgs,
+        }),
+        SaveEditorPreferences({
+          isMaximized: model.editorIsMaximized,
+          llmBarMode: model.editorLlmBarMode,
+          llmModel: model.llmDraftModel,
+          llmThinkingLevel: model.llmDraftThinkingLevel,
         }),
       ],
     }),
@@ -2619,8 +2834,8 @@ export const update = (
       thinkingParam,
       thinkingLevels,
       extraArgs,
-    }) => ({
-      model: modifyFields(model, {
+    }) => {
+      const nextModel = modifyFields(model, {
         llmEnabled: () => enabled,
         llmDraftEnabled: () => enabled,
         llmBaseUrl: () => baseUrl,
@@ -2639,10 +2854,65 @@ export const update = (
         llmDraftThinkingLevels: () => thinkingLevels,
         llmExtraArgs: () => extraArgs,
         llmDraftExtraArgs: () => extraArgs,
+      })
+
+      return syncOpenEditor(nextModel)
+    },
+
+    CompletedSaveLlmSettings: () => ({ model }),
+
+    CompletedLoadEditorPreferences: ({ isMaximized, llmBarMode, llmModel, llmThinkingLevel }) => ({
+      model: modifyFields(model, {
+        editorIsMaximized: () => isMaximized,
+        editorLlmBarMode: () => llmBarMode,
+        llmModel: (current) => (current === "" ? llmModel : current),
+        llmDraftModel: (current) => (current === "" ? llmModel : current),
+        llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
+        llmDraftThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
+        modalState: (current) =>
+          Modal.applyEditorPreferences(current, {
+            isMaximized,
+            llmBarMode,
+          }),
       }),
     }),
 
-    CompletedSaveLlmSettings: () => ({ model }),
+    CompletedSaveEditorPreferences: () => ({ model }),
+
+    SucceededLoadEditorLlmModels: ({ models }) => ({
+      model: modifyFields(model, {
+        llmDiscoveredModels: (current) => (models.length > 0 ? models : current),
+        llmModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
+        llmDraftModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
+      }),
+    }),
+
+    FailedLoadEditorLlmModels: () => ({ model }),
+
+    UpdatedEditorLlmChatStream: ({ completedTurns, activeTurn }) => ({
+      model: modifyFields(model, {
+        modalState: (current) =>
+          Modal.applyEditorLlmChatStream(current, { completedTurns, activeTurn }),
+      }),
+    }),
+
+    SucceededEditorLlmChat: ({ messages, maybeUpdatedContent, appliedCount, turns }) => ({
+      model: modifyFields(model, {
+        modalState: (current) =>
+          Modal.applyEditorLlmChatSuccess(current, {
+            messages,
+            maybeUpdatedContent,
+            appliedCount,
+            turns,
+          }),
+      }),
+    }),
+
+    FailedEditorLlmChat: ({ message: errorMessage }) => ({
+      model: modifyFields(model, {
+        modalState: (current) => Modal.applyEditorLlmChatFailure(current, errorMessage),
+      }),
+    }),
 
     ClickedToggleFileInfo: () => {
       const nextVisible = !model.showFileInfo
@@ -2826,17 +3096,21 @@ export const update = (
     // Toolbar & Triggers
     ClickedNewFile: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
-      return {
-        model: modifyFields(model, {
-          modalState: () => Modal.openCreate("file"),
+      return syncOpenEditor(
+        modifyFields(model, {
+          modalState: () =>
+            Modal.openCreate("file", [], {
+              isMaximized: model.editorIsMaximized,
+              llmBarMode: model.editorLlmBarMode,
+            }),
           maybeAlertBanner: () => Option.none(),
         }),
-        commands: [
+        [
           PushUrl({ url: buildNewUrl(subPath, "file") }),
           toModalCommand(Modal.FocusModalNameInput()),
           toModalCommand(Modal.LoadEditorUserTemplates),
         ],
-      }
+      )
     },
 
     ClickedNewFolder: () => {
@@ -2875,13 +3149,15 @@ export const update = (
         }
       }
 
+      const editorModelsLoad = maybeLoadEditorLlmModels(model)
       return {
-        model: modifyFields(model, {
+        model: modifyFields(editorModelsLoad.model, {
           maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           PushUrl({ url: buildEditUrl(subPath, entry.name) }),
           toModalCommand(Modal.InspectFileForEditor({ entryName: entry.name, subPath })),
+          ...(editorModelsLoad.commands ?? []),
         ],
       }
     },
@@ -3004,6 +3280,11 @@ export const update = (
       const modalResult = Modal.update(model.modalState, modalMessage, {
         subPath,
         existingEntries,
+        llmEnabled: model.llmEnabled,
+        editorDefaults: {
+          isMaximized: model.editorIsMaximized,
+          llmBarMode: model.editorLlmBarMode,
+        },
       })
 
       const mappedCommands = modalResult.commands
@@ -3014,18 +3295,12 @@ export const update = (
 
       return Modal.OutMessage.match(modalResult.outMessage, {
         None: () =>
-          Array.isReadonlyArrayNonEmpty(mappedCommands)
-            ? {
-                model: modifyFields(model, {
-                  modalState: () => modalResult.model,
-                }),
-                commands: mappedCommands,
-              }
-            : {
-                model: modifyFields(model, {
-                  modalState: () => modalResult.model,
-                }),
-              },
+          syncOpenEditor(
+            modifyFields(model, {
+              modalState: () => modalResult.model,
+            }),
+            mappedCommands,
+          ),
 
         ReplaceUrl: ({ url }) => ({
           model: modifyFields(model, {
@@ -3079,6 +3354,72 @@ export const update = (
             commands,
           }
         },
+
+        SelectedLlmModel: ({ value }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+            llmModel: () => value,
+            llmDraftModel: () => value,
+          }),
+          commands: [
+            ...mappedCommands,
+            SaveEditorPreferences({
+              isMaximized: model.editorIsMaximized,
+              llmBarMode: model.editorLlmBarMode,
+              llmModel: value,
+              llmThinkingLevel: model.llmThinkingLevel,
+            }),
+          ],
+        }),
+
+        SelectedLlmThinkingLevel: ({ value }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+            llmThinkingLevel: () => value,
+            llmDraftThinkingLevel: () => value,
+          }),
+          commands: [
+            ...mappedCommands,
+            SaveEditorPreferences({
+              isMaximized: model.editorIsMaximized,
+              llmBarMode: model.editorLlmBarMode,
+              llmModel: model.llmModel,
+              llmThinkingLevel: value,
+            }),
+          ],
+        }),
+
+        ChangedLlmBarMode: ({ llmBarMode }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+            editorLlmBarMode: () => llmBarMode,
+          }),
+          commands: [
+            ...mappedCommands,
+            SaveEditorPreferences({
+              isMaximized: model.editorIsMaximized,
+              llmBarMode,
+              llmModel: model.llmModel,
+              llmThinkingLevel: model.llmThinkingLevel,
+            }),
+          ],
+        }),
+
+        ChangedMaximize: ({ isMaximized }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+            editorIsMaximized: () => isMaximized,
+          }),
+          commands: [
+            ...mappedCommands,
+            SaveEditorPreferences({
+              isMaximized,
+              llmBarMode: model.editorLlmBarMode,
+              llmModel: model.llmModel,
+              llmThinkingLevel: model.llmThinkingLevel,
+            }),
+          ],
+        }),
       })
     },
   })
@@ -3422,6 +3763,168 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                   )
                   Queue.endUnsafe(queue)
                 })
+              return controller
+            }),
+            (controller) => Effect.sync(() => controller.abort()),
+          ),
+        )
+      },
+    },
+  ),
+  editorLlmChatStream: entry(
+    {
+      isSending: Schema.Boolean,
+      prompt: Schema.String,
+      fileName: Schema.String,
+      content: Schema.String,
+      messages: Schema.Array(Editor.LlmChatMessage),
+      enabled: Schema.Boolean,
+      baseUrl: Schema.String,
+      apiKey: Schema.String,
+      models: Schema.String,
+      streaming: Schema.Boolean,
+      toolCalls: Schema.Boolean,
+      thinkingParam: Schema.String,
+      thinkingLevels: Schema.String,
+      extraArgs: Schema.String,
+      model: Schema.String,
+      thinkingLevel: Schema.String,
+    },
+    {
+      modelToDependencies: (model) => {
+        const sending = (() => {
+          if (model.modalState._tag !== "Editor") {
+            return undefined
+          }
+          const editor = model.modalState.editor
+          if (editor._tag !== "CreateFile" && editor._tag !== "EditFile") {
+            return undefined
+          }
+          return editor.llmChatState._tag === "Sending" ? editor.llmChatState : undefined
+        })()
+
+        const modelOptions = resolveModelOptions(
+          model.llmModels,
+          model.llmDiscoveredModels,
+          model.llmModel,
+        )
+        const effectiveModel =
+          model.llmModel.trim() !== "" ? model.llmModel.trim() : (modelOptions[0]?.value ?? "")
+
+        return {
+          isSending: sending !== undefined,
+          prompt: sending?.prompt ?? "",
+          fileName: sending?.fileName ?? "",
+          content: sending?.content ?? "",
+          messages: sending?.messages ?? [],
+          enabled: model.llmEnabled,
+          baseUrl: model.llmBaseUrl,
+          apiKey: model.llmApiKey,
+          models: model.llmModels,
+          streaming: model.llmStreaming,
+          toolCalls: model.llmToolCalls,
+          thinkingParam: model.llmThinkingParam,
+          thinkingLevels: model.llmThinkingLevels,
+          extraArgs: model.llmExtraArgs,
+          model: effectiveModel,
+          thinkingLevel: model.llmThinkingLevel,
+        }
+      },
+      dependenciesToStream: (deps) => {
+        if (!deps.isSending) {
+          return Stream.empty
+        }
+        return Stream.callback<Message>((queue) =>
+          Effect.acquireRelease(
+            Effect.sync(() => {
+              const controller = new AbortController()
+              const runTurn = async () => {
+                const initialMessages: ReadonlyArray<EditorChatMessage> =
+                  Array.isReadonlyArrayEmpty(deps.messages)
+                    ? await (async () => {
+                        const res = await fetch("/api.d.ts", {
+                          cache: "no-cache",
+                          signal: controller.signal,
+                        })
+                        if (!res.ok) {
+                          throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
+                        }
+                        const apiDts = await res.text()
+                        return [
+                          { _tag: "System" as const, content: formatHashlineSystemPrompt() },
+                          { _tag: "User" as const, content: formatApiDtsMessage(apiDts) },
+                          {
+                            _tag: "User" as const,
+                            content: formatHashedFileMessage(deps.fileName, deps.content),
+                          },
+                          { _tag: "User" as const, content: deps.prompt },
+                        ]
+                      })()
+                    : [
+                        ...toAgentEditorMessages(deps.messages),
+                        { _tag: "User" as const, content: deps.prompt },
+                      ]
+
+                return runEditorChatTurn({
+                  config: {
+                    enabled: deps.enabled,
+                    baseUrl: deps.baseUrl,
+                    apiKey: deps.apiKey,
+                    models: deps.models,
+                    streaming: deps.streaming,
+                    toolCalls: deps.toolCalls,
+                    thinkingParam: deps.thinkingParam,
+                    thinkingLevels: deps.thinkingLevels,
+                    extraArgs: deps.extraArgs,
+                    model: deps.model,
+                    thinkingLevel: deps.thinkingLevel,
+                  },
+                  fileName: deps.fileName,
+                  initialContent: deps.content,
+                  initialMessages,
+                  onUpdate: ({ completedTurns, activeTurn }) => {
+                    if (!controller.signal.aborted) {
+                      Queue.offerUnsafe(
+                        queue,
+                        Message.UpdatedEditorLlmChatStream({
+                          completedTurns: [...completedTurns],
+                          activeTurn,
+                        }),
+                      )
+                    }
+                  },
+                  signal: controller.signal,
+                })
+              }
+
+              void runTurn()
+                .then((result) => {
+                  if (controller.signal.aborted) {
+                    return
+                  }
+                  Queue.offerUnsafe(
+                    queue,
+                    Message.SucceededEditorLlmChat({
+                      messages: toEditorSchemaMessages(result.messages),
+                      maybeUpdatedContent:
+                        result.updatedContent !== undefined
+                          ? Option.some(result.updatedContent)
+                          : Option.none(),
+                      appliedCount: result.appliedCount,
+                      turns: [...result.turns],
+                    }),
+                  )
+                  Queue.endUnsafe(queue)
+                })
+                .catch((error: unknown) => {
+                  if (controller.signal.aborted) {
+                    return
+                  }
+                  const errMsg = error instanceof Error ? error.message : String(error)
+                  Queue.offerUnsafe(queue, Message.FailedEditorLlmChat({ message: errMsg }))
+                  Queue.endUnsafe(queue)
+                })
+
               return controller
             }),
             (controller) => Effect.sync(() => controller.abort()),
@@ -3851,7 +4354,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               h.section(
                 [h.Class("settings-group"), h.Id("settings-group-llm")],
                 [
-                  h.h4([h.Class("settings-group-title")], ["LLM"]),
+                  h.h4([h.Class("settings-group-title")], ["KI"]),
                   h.div(
                     [h.Class("form-group")],
                     [
@@ -3868,7 +4371,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               }),
                             ),
                           ]),
-                          h.span([], ["LLM aktivieren"]),
+                          h.span([], ["KI aktivieren"]),
                         ],
                       ),
                     ],
@@ -4075,26 +4578,11 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           ],
                         ),
                         (() => {
-                          const manualOptions = parseModelOptions(model.llmDraftModels)
-                          const seenModels = new Set<string>()
-                          const modelOptions = [
-                            ...manualOptions,
-                            ...model.llmDiscoveredModels.map((id) => ({ label: id, value: id })),
-                            ...(model.llmDraftModel.trim() !== ""
-                              ? [
-                                  {
-                                    label: model.llmDraftModel.trim(),
-                                    value: model.llmDraftModel.trim(),
-                                  },
-                                ]
-                              : []),
-                          ].filter((item) => {
-                            if (seenModels.has(item.value)) {
-                              return false
-                            }
-                            seenModels.add(item.value)
-                            return true
-                          })
+                          const modelOptions = resolveModelOptions(
+                            model.llmDraftModels,
+                            model.llmDiscoveredModels,
+                            model.llmDraftModel,
+                          )
                           const availableLevels = parseThinkingLevels(model.llmDraftThinkingLevels)
                           const hasThinking =
                             model.llmDraftThinkingParam.trim() !== "" && availableLevels.length > 0
@@ -4675,8 +5163,18 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
 
 // VIEW MODALS
 
-const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
-  h.submodel({
+const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
+  const llmModelOptions = resolveModelOptions(
+    model.llmModels,
+    model.llmDiscoveredModels,
+    model.llmModel,
+  )
+  const llmSelectedModel =
+    model.llmModel.trim() !== "" ? model.llmModel.trim() : (llmModelOptions[0]?.value ?? "")
+  const llmThinkingLevels =
+    model.llmThinkingParam.trim() !== "" ? parseThinkingLevels(model.llmThinkingLevels) : []
+
+  return h.submodel({
     slotId: "modal",
     model: model.modalState,
     viewInputs: {
@@ -4684,10 +5182,18 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html =>
       hasDirectoryPicker: model.hasDirectoryPicker,
       hasOPFS: model.hasOPFS,
       hasTauri: model.hasTauri,
+      llm: {
+        llmEnabled: model.llmEnabled,
+        llmModelOptions,
+        llmSelectedModel,
+        llmThinkingLevels,
+        llmSelectedThinkingLevel: model.llmThinkingLevel,
+      },
     },
     view: Modal.view,
     toParentMessage: (msg) => Message.GotModalMessage({ message: msg }),
   })
+}
 
 // VIEW DOCUMENT
 

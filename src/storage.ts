@@ -230,6 +230,73 @@ export async function storeLlmSettings(settings: LlmSettings): Promise<void> {
   })
 }
 
+export type EditorPreferences = {
+  isMaximized: boolean
+  llmBarMode: "Closed" | "Chat" | "Copy"
+  llmModel: string
+  llmThinkingLevel: string
+}
+
+export const emptyEditorPreferences: EditorPreferences = {
+  isMaximized: false,
+  llmBarMode: "Closed",
+  llmModel: "",
+  llmThinkingLevel: "",
+}
+
+const EDITOR_PREFERENCES_KEY = "editor_preferences"
+
+export async function getStoredEditorPreferences(): Promise<EditorPreferences> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(EDITOR_PREFERENCES_KEY)
+      req.onsuccess = () => {
+        const value: unknown = req.result
+        const record = typeof value === "object" && value !== null ? value : {}
+        const isMaximized =
+          "isMaximized" in record && typeof record.isMaximized === "boolean"
+            ? record.isMaximized
+            : false
+        const llmBarMode =
+          "llmBarMode" in record &&
+          (record.llmBarMode === "Closed" ||
+            record.llmBarMode === "Chat" ||
+            record.llmBarMode === "Copy")
+            ? record.llmBarMode
+            : "Closed"
+        const llmModel =
+          "llmModel" in record && typeof record.llmModel === "string" ? record.llmModel : ""
+        const llmThinkingLevel =
+          "llmThinkingLevel" in record && typeof record.llmThinkingLevel === "string"
+            ? record.llmThinkingLevel
+            : ""
+        resolve({
+          isMaximized,
+          llmBarMode,
+          llmModel,
+          llmThinkingLevel,
+        })
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Editor-Einstellungen:", error)
+    return emptyEditorPreferences
+  }
+}
+
+export async function storeEditorPreferences(prefs: EditorPreferences): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put({ ...prefs }, EDITOR_PREFERENCES_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
 export async function clearStoredStorageType(): Promise<void> {
   invalidateRootCache()
   const db = await openDB()

@@ -294,7 +294,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                             h.p(
                               [],
                               [
-                                "Im Datei-Editor kannst du Seiten direkt zusammen mit einem LLM (z. B. ChatGPT, Claude oder Gemini) über die Zwischenablage bearbeiten:",
+                                "Im Datei-Editor kannst du Seiten direkt zusammen mit einer KI (z. B. ChatGPT, Claude oder Gemini) über die Zwischenablage bearbeiten:",
                               ],
                             ),
                             h.ol(
@@ -303,16 +303,20 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                 h.li(
                                   [],
                                   [
-                                    h.strong([], ["LLM-Modus öffnen: "]),
-                                    "Klicke im Editor unten auf ",
-                                    h.strong([], ["LLM"]),
-                                    ", um die LLM-Leiste einzublenden.",
+                                    h.strong([], ["KI-Modus öffnen: "]),
+                                    "Wähle im Editor unten bei ",
+                                    h.strong([], ["KI"]),
+                                    " den Punkt ",
+                                    h.strong([], ["Copy"]),
+                                    " (oder ",
+                                    h.strong([], ["Chat"]),
+                                    ", wenn eine KI-API aktiviert ist), um die KI-Leiste einzublenden.",
                                   ],
                                 ),
                                 h.li(
                                   [],
                                   [
-                                    h.strong([], ["Datei für das LLM kopieren: "]),
+                                    h.strong([], ["Datei für die KI kopieren: "]),
                                     "Wähle ",
                                     h.strong([], ["Mit Anleitung"]),
                                     " (kopiert Kurzanleitung, ",
@@ -329,15 +333,15 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                 h.li(
                                   [],
                                   [
-                                    h.strong([], ["An das LLM senden: "]),
-                                    "Füge das Kopierte zusammen mit deinen Änderungswünschen in das LLM ein.",
+                                    h.strong([], ["An die KI senden: "]),
+                                    "Füge das Kopierte zusammen mit deinen Änderungswünschen in die KI ein.",
                                   ],
                                 ),
                                 h.li(
                                   [],
                                   [
                                     h.strong([], ["KI-Antwort einfügen: "]),
-                                    "Kopiere die Antwort des LLMs (",
+                                    "Kopiere die Antwort der KI (",
                                     h.code([], ["REPLACE"]),
                                     ", ",
                                     h.code([], ["INSERT_AFTER"]),
@@ -367,7 +371,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                   [],
                                   [
                                     h.strong([], ["Weiterarbeiten: "]),
-                                    "Füge die in Schritt 4 kopierten Zeilen (oder Fehlermeldungen) zusammen mit deinen nächsten Änderungswünschen wieder in das LLM ein.",
+                                    "Füge die in Schritt 4 kopierten Zeilen (oder Fehlermeldungen) zusammen mit deinen nächsten Änderungswünschen wieder in die KI ein.",
                                   ],
                                 ),
                               ],

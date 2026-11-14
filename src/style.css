@@ -1041,9 +1041,85 @@ code {
 }
 
 /* Wie der Schliessen-Knopf im Kopf: gleiche Hoehe in beiden Leisten. */
-.modal-footer .btn {
+.modal-footer .btn,
+.modal-footer .modal-llm-select {
   height: 38px;
   box-sizing: border-box;
+}
+
+.modal-llm-chat-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  flex: 1 1 100%;
+}
+
+.modal-llm-chat-history {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+
+.modal-llm-chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.modal-llm-chat-msg.is-user {
+  align-self: flex-end;
+  align-items: flex-end;
+  text-align: right;
+  max-width: 85%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-secondary);
+}
+
+.modal-llm-chat-role {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.modal-llm-chat-question {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.875rem;
+}
+
+.modal-llm-chat-msg.is-error .modal-llm-chat-role,
+.modal-llm-chat-msg.is-error .llm-response-content {
+  color: var(--danger);
+}
+
+.modal-llm-chat-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.modal-llm-chat-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modal-llm-select {
+  width: auto;
+  max-width: 220px;
+  flex: 0 1 auto;
+}
+
+.modal-llm-send-btn {
+  margin-left: auto;
 }
 
 /*

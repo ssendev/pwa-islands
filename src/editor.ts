@@ -6,6 +6,7 @@ import type * as Html from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
+import type { ModelOption, ThinkingLevelOption } from "./agent"
 import {
   BinaryEdit,
   EditorFileMode,
@@ -25,6 +26,7 @@ import {
   HashlineApplyResult,
 } from "./hashline"
 import { viewIcon } from "./icons"
+import * as LlmResponse from "./llm-response"
 import { encodeSubPath } from "./route"
 import {
   deleteUserTemplate,
@@ -41,6 +43,61 @@ export { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate }
 
 export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
 export type AlertVariant = typeof AlertVariant.Type
+
+export const LlmBarMode = Schema.Literals(["Closed", "Chat", "Copy"])
+export type LlmBarMode = typeof LlmBarMode.Type
+
+export const LlmToolCallSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  arguments: Schema.String,
+})
+export type LlmToolCallSchema = typeof LlmToolCallSchema.Type
+
+export const LlmChatMessage = defineTaggedUnion({
+  System: { content: Schema.String },
+  User: { content: Schema.String },
+  Assistant: {
+    content: Schema.String,
+    toolCalls: Schema.Array(LlmToolCallSchema),
+  },
+  Tool: {
+    toolCallId: Schema.String,
+    content: Schema.String,
+  },
+})
+export type LlmChatMessage = typeof LlmChatMessage.Type
+
+export const LlmChatTurnBlock = Schema.Struct({
+  content: Schema.String,
+  reasoning: Schema.String,
+  isError: Schema.Boolean,
+})
+export type LlmChatTurnBlock = typeof LlmChatTurnBlock.Type
+
+export const LlmChatDisplayEntry = defineTaggedUnion({
+  Question: { content: Schema.String },
+  Answer: {
+    content: Schema.String,
+    reasoning: Schema.String,
+    isError: Schema.Boolean,
+  },
+})
+export type LlmChatDisplayEntry = typeof LlmChatDisplayEntry.Type
+
+export const LlmChatState = defineTaggedUnion({
+  Idle: {},
+  Sending: {
+    prompt: Schema.String,
+    fileName: Schema.String,
+    content: Schema.String,
+    messages: Schema.Array(LlmChatMessage),
+    streamTurns: Schema.Array(LlmChatTurnBlock),
+    streamContent: Schema.String,
+    streamReasoning: Schema.String,
+  },
+})
+export type LlmChatState = typeof LlmChatState.Type
 
 export const AlertBanner = Schema.Struct({
   message: Schema.String,
@@ -73,7 +130,11 @@ export const Model = defineTaggedUnion({
     maybeValidationError: Schema.Option(Schema.String),
     maybeAlertBanner: Schema.Option(AlertBanner),
     maybePasteError: Schema.Option(Schema.String),
-    isLlmBarOpen: Schema.Boolean,
+    llmBarMode: LlmBarMode,
+    llmChatInput: Schema.String,
+    llmChatMessages: Schema.Array(LlmChatMessage),
+    llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
+    llmChatState: LlmChatState,
     isMaximized: Schema.Boolean,
   },
   CreateFolder: {
@@ -94,7 +155,11 @@ export const Model = defineTaggedUnion({
     maybeValidationError: Schema.Option(Schema.String),
     maybeAlertBanner: Schema.Option(AlertBanner),
     maybePasteError: Schema.Option(Schema.String),
-    isLlmBarOpen: Schema.Boolean,
+    llmBarMode: LlmBarMode,
+    llmChatInput: Schema.String,
+    llmChatMessages: Schema.Array(LlmChatMessage),
+    llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
+    llmChatState: LlmChatState,
     isMaximized: Schema.Boolean,
   },
   ConfirmDelete: {
@@ -116,6 +181,7 @@ type BinaryFileMode = Extract<EditorFileMode, { readonly _tag: "Binary" }>
 
 export const makeCreateFile = (
   userTemplates: ReadonlyArray<StarterTemplate> = [],
+  defaults?: { readonly isMaximized?: boolean; readonly llmBarMode?: LlmBarMode },
 ): CreateFileModel => ({
   _tag: "CreateFile",
   name: "Neu.html",
@@ -128,9 +194,34 @@ export const makeCreateFile = (
   maybeValidationError: Option.none(),
   maybeAlertBanner: Option.none(),
   maybePasteError: Option.none(),
-  isLlmBarOpen: false,
-  isMaximized: false,
+  llmBarMode: defaults?.llmBarMode ?? "Closed",
+  llmChatInput: "",
+  llmChatMessages: [],
+  llmChatDisplay: [],
+  llmChatState: LlmChatState.Idle(),
+  isMaximized: defaults?.isMaximized ?? false,
 })
+
+export const applyPreferences = (
+  model: Model,
+  prefs: { readonly isMaximized: boolean; readonly llmBarMode: LlmBarMode },
+): Model =>
+  Model.match(model, {
+    CreateFile: (state) =>
+      modifyFields(state, {
+        isMaximized: () => prefs.isMaximized,
+        llmBarMode: () => prefs.llmBarMode,
+      }),
+    EditFile: (state) =>
+      modifyFields(state, {
+        isMaximized: () => prefs.isMaximized,
+        llmBarMode: () => prefs.llmBarMode,
+      }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
+  })
 
 export const setAlertBanner = (model: Model, maybeAlertBanner: Option.Option<AlertBanner>): Model =>
   Model.match(model, {
@@ -141,6 +232,170 @@ export const setAlertBanner = (model: Model, maybeAlertBanner: Option.Option<Ale
     ConfirmDelete: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
     ConfirmOverwrite: (state) => modifyFields(state, { maybeAlertBanner: () => maybeAlertBanner }),
   })
+
+const sendingEntriesToDisplay = (chatState: LlmChatState): ReadonlyArray<LlmChatDisplayEntry> => {
+  if (chatState._tag !== "Sending") {
+    return []
+  }
+  const completed = Array.map(chatState.streamTurns, (turn) =>
+    LlmChatDisplayEntry.Answer({
+      content: turn.content,
+      reasoning: turn.reasoning,
+      isError: turn.isError,
+    }),
+  )
+  const hasActive = chatState.streamContent !== "" || chatState.streamReasoning !== ""
+  return hasActive
+    ? [
+        ...completed,
+        LlmChatDisplayEntry.Answer({
+          content: chatState.streamContent,
+          reasoning: chatState.streamReasoning,
+          isError: false,
+        }),
+      ]
+    : completed
+}
+
+export const applyLlmChatStream = (
+  model: Model,
+  {
+    completedTurns,
+    activeTurn,
+  }: {
+    readonly completedTurns: ReadonlyArray<LlmChatTurnBlock>
+    readonly activeTurn: { readonly content: string; readonly reasoning: string }
+  },
+): Model =>
+  Model.match(model, {
+    CreateFile: (state) =>
+      LlmChatState.match(state.llmChatState, {
+        Idle: () => state,
+        Sending: (sending) =>
+          modifyFields(state, {
+            llmChatState: () =>
+              modifyFields(sending, {
+                streamTurns: () => completedTurns,
+                streamContent: () => activeTurn.content,
+                streamReasoning: () => activeTurn.reasoning,
+              }),
+          }),
+      }),
+    EditFile: (state) =>
+      LlmChatState.match(state.llmChatState, {
+        Idle: () => state,
+        Sending: (sending) =>
+          modifyFields(state, {
+            llmChatState: () =>
+              modifyFields(sending, {
+                streamTurns: () => completedTurns,
+                streamContent: () => activeTurn.content,
+                streamReasoning: () => activeTurn.reasoning,
+              }),
+          }),
+      }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+export const applyLlmChatSuccess = (
+  model: Model,
+  {
+    messages,
+    maybeUpdatedContent,
+    appliedCount,
+    turns,
+  }: {
+    readonly messages: ReadonlyArray<LlmChatMessage>
+    readonly maybeUpdatedContent: Option.Option<string>
+    readonly appliedCount: number
+    readonly turns: ReadonlyArray<LlmChatTurnBlock>
+  },
+): Model => {
+  const turnEntries = Array.map(turns, (turn) =>
+    LlmChatDisplayEntry.Answer({
+      content: turn.content,
+      reasoning: turn.reasoning,
+      isError: turn.isError,
+    }),
+  )
+  const appliedEntries: ReadonlyArray<LlmChatDisplayEntry> = Option.match(maybeUpdatedContent, {
+    onSome: () => [
+      LlmChatDisplayEntry.Answer({
+        content: `${appliedCount} Bearbeitung(en) angewendet`,
+        reasoning: "",
+        isError: false,
+      }),
+    ],
+    onNone: () => [],
+  })
+  const newDisplayEntries = [...turnEntries, ...appliedEntries]
+
+  return Model.match(model, {
+    CreateFile: (state) =>
+      modifyFields(state, {
+        content: (current) => Option.getOrElse(maybeUpdatedContent, () => current),
+        llmChatMessages: () => messages,
+        llmChatDisplay: (current) => [...current, ...newDisplayEntries],
+        llmChatState: () => LlmChatState.Idle(),
+      }),
+    EditFile: (state) =>
+      modifyFields(state, {
+        fileMode: (current) =>
+          Option.match(maybeUpdatedContent, {
+            onSome: (nextContent) => EditorFileMode.Text({ content: nextContent }),
+            onNone: () => current,
+          }),
+        llmChatMessages: () => messages,
+        llmChatDisplay: (current) => [...current, ...newDisplayEntries],
+        llmChatState: () => LlmChatState.Idle(),
+      }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
+  })
+}
+
+export const applyLlmChatFailure = (model: Model, message: string): Model => {
+  const errorEntry = LlmChatDisplayEntry.Answer({
+    content: message,
+    reasoning: "",
+    isError: true,
+  })
+
+  const restorePromptIfEmpty = (currentInput: string, chatState: LlmChatState): string =>
+    currentInput.trim() === "" && chatState._tag === "Sending" ? chatState.prompt : currentInput
+
+  return Model.match(model, {
+    CreateFile: (state) =>
+      modifyFields(state, {
+        llmChatInput: (current) => restorePromptIfEmpty(current, state.llmChatState),
+        llmChatDisplay: (current) => [
+          ...current,
+          ...sendingEntriesToDisplay(state.llmChatState),
+          errorEntry,
+        ],
+        llmChatState: () => LlmChatState.Idle(),
+      }),
+    EditFile: (state) =>
+      modifyFields(state, {
+        llmChatInput: (current) => restorePromptIfEmpty(current, state.llmChatState),
+        llmChatDisplay: (current) => [
+          ...current,
+          ...sendingEntriesToDisplay(state.llmChatState),
+          errorEntry,
+        ],
+        llmChatState: () => LlmChatState.Idle(),
+      }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmDelete: () => model,
+    ConfirmOverwrite: () => model,
+  })
+}
 
 export const getAlertBanner = (model: Model): Option.Option<AlertBanner> =>
   Model.match(model, {
@@ -168,10 +423,20 @@ const getTextFileContext = (
     ConfirmOverwrite: () => Option.none(),
   })
 
-const toggleLlmBar = (model: Model): Model =>
+const parseLlmBarMode = (value: string, llmEnabled: boolean): LlmBarMode => {
+  if (value === "Chat" && llmEnabled) {
+    return "Chat"
+  }
+  if (value === "Copy") {
+    return "Copy"
+  }
+  return "Closed"
+}
+
+const setLlmBarMode = (model: Model, llmBarMode: LlmBarMode): Model =>
   Model.match(model, {
-    CreateFile: (state) => modifyFields(state, { isLlmBarOpen: (open) => !open }),
-    EditFile: (state) => modifyFields(state, { isLlmBarOpen: (open) => !open }),
+    CreateFile: (state) => modifyFields(state, { llmBarMode: () => llmBarMode }),
+    EditFile: (state) => modifyFields(state, { llmBarMode: () => llmBarMode }),
     CreateFolder: () => model,
     EditFolder: () => model,
     ConfirmDelete: () => model,
@@ -261,7 +526,29 @@ export const Message = defineMessageUnion({
   UpdatedBase64Content: {
     base64Content: Schema.String,
   },
-  ClickedToggleLlmBar: {},
+  SelectedLlmBarMode: {
+    value: Schema.String,
+  },
+  UpdatedLlmChatInput: {
+    value: Schema.String,
+  },
+  SubmittedLlmChat: {},
+  ClickedStopLlmChat: {},
+  SucceededLlmChat: {
+    messages: Schema.Array(LlmChatMessage),
+    maybeUpdatedContent: Schema.Option(Schema.String),
+    appliedCount: Schema.Number,
+    turns: Schema.Array(LlmChatTurnBlock),
+  },
+  FailedLlmChat: {
+    message: Schema.String,
+  },
+  SelectedLlmModel: {
+    value: Schema.String,
+  },
+  SelectedLlmThinkingLevel: {
+    value: Schema.String,
+  },
   ClickedToggleMaximize: {},
   ClickedCopyDts: {},
   SucceededCopyApiDtsToClipboard: {},
@@ -330,6 +617,10 @@ export const OutMessage = defineTaggedUnion({
     closeModal: Schema.Boolean,
     replaceUrl: Schema.Boolean,
   },
+  SelectedLlmModel: { value: Schema.String },
+  SelectedLlmThinkingLevel: { value: Schema.String },
+  ChangedLlmBarMode: { llmBarMode: LlmBarMode },
+  ChangedMaximize: { isMaximized: Schema.Boolean },
 })
 export type OutMessage = typeof OutMessage.Type
 
@@ -1021,6 +1312,7 @@ export const update = (
   context: {
     readonly subPath: ReadonlyArray<string>
     readonly existingEntries: ReadonlyArray<FileEntry>
+    readonly llmEnabled: boolean
   },
 ): {
   readonly model: Model
@@ -1361,15 +1653,30 @@ export const update = (
         }
       }),
 
-    ClickedToggleLlmBar: () => ({
-      model: toggleLlmBar(model),
-      outMessage: OutMessage.None(),
-    }),
+    SelectedLlmBarMode: ({ value }) => {
+      const nextMode = parseLlmBarMode(value, context.llmEnabled)
+      const nextModel = setLlmBarMode(model, nextMode)
+      const maybeNextMode = Model.match(nextModel, {
+        CreateFile: (state) => Option.some(state.llmBarMode),
+        EditFile: (state) => Option.some(state.llmBarMode),
+        CreateFolder: () => Option.none(),
+        EditFolder: () => Option.none(),
+        ConfirmDelete: () => Option.none(),
+        ConfirmOverwrite: () => Option.none(),
+      })
+      return {
+        model: nextModel,
+        outMessage: Option.match(maybeNextMode, {
+          onNone: () => OutMessage.None(),
+          onSome: (llmBarMode) => OutMessage.ChangedLlmBarMode({ llmBarMode }),
+        }),
+      }
+    },
 
-    ClickedToggleMaximize: () => ({
+    UpdatedLlmChatInput: ({ value }) => ({
       model: Model.match(model, {
-        CreateFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
-        EditFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
+        CreateFile: (state) => modifyFields(state, { llmChatInput: () => value }),
+        EditFile: (state) => modifyFields(state, { llmChatInput: () => value }),
         CreateFolder: () => model,
         EditFolder: () => model,
         ConfirmDelete: () => model,
@@ -1377,6 +1684,147 @@ export const update = (
       }),
       outMessage: OutMessage.None(),
     }),
+
+    SubmittedLlmChat: () =>
+      Model.match(model, {
+        CreateFile: (state) => {
+          const prompt = state.llmChatInput.trim()
+          if (prompt === "" || state.llmChatState._tag === "Sending") {
+            return { model, outMessage: OutMessage.None() }
+          }
+          return {
+            model: modifyFields(state, {
+              llmChatInput: () => "",
+              llmChatState: () =>
+                LlmChatState.Sending({
+                  prompt,
+                  fileName: state.name,
+                  content: state.content,
+                  messages: state.llmChatMessages,
+                  streamTurns: [],
+                  streamContent: "",
+                  streamReasoning: "",
+                }),
+              llmChatDisplay: (current) => [
+                ...current,
+                LlmChatDisplayEntry.Question({ content: prompt }),
+              ],
+              maybeAlertBanner: () => Option.none(),
+            }),
+            outMessage: OutMessage.None(),
+          }
+        },
+        EditFile: (state) => {
+          const prompt = state.llmChatInput.trim()
+          if (prompt === "" || state.llmChatState._tag === "Sending") {
+            return { model, outMessage: OutMessage.None() }
+          }
+          return EditorFileMode.match(state.fileMode, {
+            Text: ({ content }) => ({
+              model: modifyFields(state, {
+                llmChatInput: () => "",
+                llmChatState: () =>
+                  LlmChatState.Sending({
+                    prompt,
+                    fileName: state.name,
+                    content,
+                    messages: state.llmChatMessages,
+                    streamTurns: [],
+                    streamContent: "",
+                    streamReasoning: "",
+                  }),
+                llmChatDisplay: (current) => [
+                  ...current,
+                  LlmChatDisplayEntry.Question({ content: prompt }),
+                ],
+                maybeAlertBanner: () => Option.none(),
+              }),
+              outMessage: OutMessage.None(),
+            }),
+            Binary: () => ({ model, outMessage: OutMessage.None() }),
+          })
+        },
+        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
+        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmDelete: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
+      }),
+
+    ClickedStopLlmChat: () => ({
+      model: Model.match(model, {
+        CreateFile: (state) =>
+          state.llmChatState._tag === "Sending"
+            ? modifyFields(state, {
+                llmChatDisplay: (current) => [
+                  ...current,
+                  ...sendingEntriesToDisplay(state.llmChatState),
+                ],
+                llmChatState: () => LlmChatState.Idle(),
+              })
+            : state,
+        EditFile: (state) =>
+          state.llmChatState._tag === "Sending"
+            ? modifyFields(state, {
+                llmChatDisplay: (current) => [
+                  ...current,
+                  ...sendingEntriesToDisplay(state.llmChatState),
+                ],
+                llmChatState: () => LlmChatState.Idle(),
+              })
+            : state,
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      }),
+      outMessage: OutMessage.None(),
+    }),
+
+    SucceededLlmChat: (payload) => ({
+      model: applyLlmChatSuccess(model, payload),
+      outMessage: OutMessage.None(),
+    }),
+
+    FailedLlmChat: ({ message }) => ({
+      model: applyLlmChatFailure(model, message),
+      outMessage: OutMessage.None(),
+    }),
+
+    SelectedLlmModel: ({ value }) => ({
+      model,
+      outMessage: OutMessage.SelectedLlmModel({ value }),
+    }),
+
+    SelectedLlmThinkingLevel: ({ value }) => ({
+      model,
+      outMessage: OutMessage.SelectedLlmThinkingLevel({ value }),
+    }),
+
+    ClickedToggleMaximize: () => {
+      const nextModel = Model.match(model, {
+        CreateFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
+        EditFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmDelete: () => model,
+        ConfirmOverwrite: () => model,
+      })
+      const maybeMax = Model.match(nextModel, {
+        CreateFile: (state) => Option.some(state.isMaximized),
+        EditFile: (state) => Option.some(state.isMaximized),
+        CreateFolder: () => Option.none(),
+        EditFolder: () => Option.none(),
+        ConfirmDelete: () => Option.none(),
+        ConfirmOverwrite: () => Option.none(),
+      })
+      return {
+        model: nextModel,
+        outMessage: Option.match(maybeMax, {
+          onNone: () => OutMessage.None(),
+          onSome: (isMaximized) => OutMessage.ChangedMaximize({ isMaximized }),
+        }),
+      }
+    },
 
     ClickedCopyDts: () => ({
       model: setAlertBanner(model, Option.none()),
@@ -1573,7 +2021,11 @@ export const update = (
                 maybeValidationError: Option.none(),
                 maybeAlertBanner: Option.none(),
                 maybePasteError: Option.none(),
-                isLlmBarOpen: false,
+                llmBarMode: "Closed",
+                llmChatInput: "",
+                llmChatMessages: [],
+                llmChatDisplay: [],
+                llmChatState: LlmChatState.Idle(),
                 isMaximized: false,
               }),
               outMessage: OutMessage.None(),
@@ -1586,7 +2038,11 @@ export const update = (
                 maybeValidationError: Option.none(),
                 maybeAlertBanner: Option.none(),
                 maybePasteError: Option.none(),
-                isLlmBarOpen: false,
+                llmBarMode: "Closed",
+                llmChatInput: "",
+                llmChatMessages: [],
+                llmChatDisplay: [],
+                llmChatState: LlmChatState.Idle(),
                 isMaximized: false,
               }),
               outMessage: OutMessage.None(),
@@ -1668,7 +2124,11 @@ export const update = (
             maybeValidationError: Option.none(),
             maybeAlertBanner: banner,
             maybePasteError: Option.none(),
-            isLlmBarOpen: state.isLlmBarOpen,
+            llmBarMode: state.llmBarMode,
+            llmChatInput: state.llmChatInput,
+            llmChatMessages: state.llmChatMessages,
+            llmChatDisplay: state.llmChatDisplay,
+            llmChatState: state.llmChatState,
             isMaximized: state.isMaximized,
           }),
         EditFile: (state) =>
@@ -2147,13 +2607,218 @@ const viewLlmButtons = (
   }),
 ]
 
+export type ViewInputs = {
+  readonly llmEnabled: boolean
+  readonly llmModelOptions: ReadonlyArray<ModelOption>
+  readonly llmSelectedModel: string
+  readonly llmThinkingLevels: ReadonlyArray<ThinkingLevelOption>
+  readonly llmSelectedThinkingLevel: string
+}
+
+const viewLlmChatHistory = (
+  llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>,
+  llmChatState: LlmChatState,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html => {
+  const isSending = llmChatState._tag === "Sending"
+  if (Array.isReadonlyArrayEmpty(llmChatDisplay) && !isSending) {
+    return h.empty
+  }
+
+  const renderAnswerNode = (
+    {
+      content,
+      reasoning,
+      isError,
+      isStreaming,
+    }: {
+      readonly content: string
+      readonly reasoning: string
+      readonly isError: boolean
+      readonly isStreaming: boolean
+    },
+    hBuilder: Html.HtmlBuilder<Message>,
+  ): Html.Html =>
+    hBuilder.div(
+      [
+        hBuilder.Class(
+          isError
+            ? "modal-llm-chat-msg is-assistant is-error"
+            : isStreaming
+              ? "modal-llm-chat-msg is-assistant is-streaming"
+              : "modal-llm-chat-msg is-assistant",
+        ),
+      ],
+      [
+        hBuilder.span([hBuilder.Class("modal-llm-chat-role")], [isError ? "Fehler" : "KI"]),
+        LlmResponse.view({ content, reasoning, isStreaming }, hBuilder),
+      ],
+    )
+
+  const historyNodes = Array.map(llmChatDisplay, (entry) =>
+    LlmChatDisplayEntry.match(entry, {
+      Question: ({ content }) =>
+        h.div(
+          [h.Class("modal-llm-chat-msg is-user")],
+          [
+            h.span([h.Class("modal-llm-chat-role")], ["Du"]),
+            h.div([h.Class("modal-llm-chat-question")], [content]),
+          ],
+        ),
+      Answer: ({ content, reasoning, isError }) =>
+        renderAnswerNode({ content, reasoning, isError, isStreaming: false }, h),
+    }),
+  )
+
+  const completedStreamNodes =
+    llmChatState._tag === "Sending"
+      ? Array.map(llmChatState.streamTurns, (turn) =>
+          renderAnswerNode(
+            {
+              content: turn.content,
+              reasoning: turn.reasoning,
+              isError: turn.isError,
+              isStreaming: false,
+            },
+            h,
+          ),
+        )
+      : []
+
+  const streamingNode =
+    llmChatState._tag === "Sending"
+      ? renderAnswerNode(
+          {
+            content: llmChatState.streamContent,
+            reasoning: llmChatState.streamReasoning,
+            isError: false,
+            isStreaming: true,
+          },
+          h,
+        )
+      : h.empty
+
+  return h.div(
+    [h.Id("modal-llm-chat-history"), h.Class("modal-llm-chat-history")],
+    [...historyNodes, ...completedStreamNodes, streamingNode],
+  )
+}
+
+const viewLlmChatBar = (
+  llmChatInput: string,
+  llmChatState: LlmChatState,
+  llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>,
+  viewInputs: ViewInputs,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html => {
+  const { llmModelOptions, llmSelectedModel, llmThinkingLevels, llmSelectedThinkingLevel } =
+    viewInputs
+  const hasMultipleThinkingLevels = Array.length(llmThinkingLevels) > 1
+  const isSending = llmChatState._tag === "Sending"
+
+  return h.div(
+    [h.Id("modal-llm-chat-bar"), h.Class("modal-llm-chat-bar")],
+    [
+      viewLlmChatHistory(llmChatDisplay, llmChatState, h),
+      h.input([
+        h.Type("text"),
+        h.Id("modal-llm-chat-input"),
+        h.Class("form-input modal-llm-chat-input"),
+        h.Placeholder("Nachricht an die KI …"),
+        h.AriaLabel("Nachricht an die KI"),
+        h.Autocomplete("off"),
+        h.Disabled(isSending),
+        h.Value(llmChatInput),
+        h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
+        h.OnKeyDownPreventDefault((key) =>
+          key === "Enter" ? Option.some(Message.SubmittedLlmChat()) : Option.none(),
+        ),
+      ]),
+      h.div(
+        [h.Class("modal-llm-chat-controls")],
+        [
+          h.select(
+            [
+              h.Id("modal-llm-model-select"),
+              h.Class("form-input modal-llm-select"),
+              h.AriaLabel("Modell"),
+              h.Disabled(isSending || Array.isReadonlyArrayEmpty(llmModelOptions)),
+              h.Value(llmSelectedModel),
+              h.OnChange((value) => Message.SelectedLlmModel({ value })),
+            ],
+            Array.isReadonlyArrayNonEmpty(llmModelOptions)
+              ? Array.map(llmModelOptions, (item) =>
+                  h.option(
+                    [h.Value(item.value), h.Selected(llmSelectedModel === item.value)],
+                    [item.label],
+                  ),
+                )
+              : [h.option([h.Value(""), h.Selected(true)], ["Noch keine Modelle"])],
+          ),
+          hasMultipleThinkingLevels
+            ? h.select(
+                [
+                  h.Id("modal-llm-thinking-select"),
+                  h.Class("form-input modal-llm-select"),
+                  h.AriaLabel("Thinking-Level"),
+                  h.Disabled(isSending),
+                  h.Value(llmSelectedThinkingLevel),
+                  h.OnChange((value) => Message.SelectedLlmThinkingLevel({ value })),
+                ],
+                [
+                  h.option(
+                    [h.Value(""), h.Selected(llmSelectedThinkingLevel === "")],
+                    ["Standard"],
+                  ),
+                  ...Array.map(llmThinkingLevels, (item) =>
+                    h.option(
+                      [h.Value(item.value), h.Selected(llmSelectedThinkingLevel === item.value)],
+                      [item.label],
+                    ),
+                  ),
+                ],
+              )
+            : h.empty,
+          isSending
+            ? h.button(
+                [
+                  h.Key("stop"),
+                  h.Type("button"),
+                  h.Id("modal-btn-send-llm"),
+                  h.Class("btn btn-danger modal-llm-send-btn"),
+                  h.Disabled(false),
+                  h.OnClick(Message.ClickedStopLlmChat()),
+                ],
+                ["Stopp"],
+              )
+            : h.button(
+                [
+                  h.Key("send"),
+                  h.Type("button"),
+                  h.Id("modal-btn-send-llm"),
+                  h.Class("btn btn-primary modal-llm-send-btn"),
+                  h.Disabled(llmChatInput.trim() === ""),
+                  h.OnClick(Message.SubmittedLlmChat()),
+                ],
+                ["Senden"],
+              ),
+        ],
+      ),
+    ],
+  )
+}
+
 const viewEditorModal = (
   {
     titleText,
     noun,
     isFolder,
     isTextFile,
-    isLlmBarOpen,
+    llmBarMode,
+    llmChatInput,
+    llmChatState,
+    llmChatDisplay,
+    llmViewInputs,
     isMaximized,
     isEditingExisting,
     nameValue,
@@ -2166,7 +2831,11 @@ const viewEditorModal = (
     readonly noun: "Datei" | "Ordner"
     readonly isFolder: boolean
     readonly isTextFile: boolean
-    readonly isLlmBarOpen: boolean
+    readonly llmBarMode: LlmBarMode
+    readonly llmChatInput: string
+    readonly llmChatState: LlmChatState
+    readonly llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>
+    readonly llmViewInputs: ViewInputs
     readonly isMaximized: boolean
     readonly isEditingExisting: boolean
     readonly nameValue: string
@@ -2178,6 +2847,20 @@ const viewEditorModal = (
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const saveLabel = isEditingExisting ? "Speichern" : "Erstellen"
+  const effectiveLlmBarMode: LlmBarMode =
+    !isTextFile || (llmBarMode === "Chat" && !llmViewInputs.llmEnabled) ? "Closed" : llmBarMode
+  const isLlmBarOpen = effectiveLlmBarMode !== "Closed"
+  const llmBarModeOptions: ReadonlyArray<{ readonly value: LlmBarMode; readonly label: string }> =
+    llmViewInputs.llmEnabled
+      ? [
+          { value: "Closed", label: "KI" },
+          { value: "Chat", label: "Chat" },
+          { value: "Copy", label: "Copy" },
+        ]
+      : [
+          { value: "Closed", label: "KI" },
+          { value: "Copy", label: "Copy" },
+        ]
 
   return h.div(
     [
@@ -2258,47 +2941,46 @@ const viewEditorModal = (
               h.footer(
                 [h.Class("modal-footer")],
                 [
-                  ...(isTextFile && isLlmBarOpen
-                    ? viewLlmButtons(maybePasteError, h)
-                    : isEditingExisting
-                      ? [
-                          h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("modal-btn-delete"),
-                              h.Class("btn btn-danger icon-label-btn"),
-                              h.AriaLabel("Löschen"),
-                              h.DataAttribute("tip", "Löschen"),
-                              h.OnClick(Message.ClickedDelete()),
-                            ],
-                            [
-                              h.span(
-                                [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                [viewIcon("trash", h)],
-                              ),
-                              h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
-                            ],
-                          ),
-                        ]
-                      : []),
+                  ...(effectiveLlmBarMode === "Chat"
+                    ? [viewLlmChatBar(llmChatInput, llmChatState, llmChatDisplay, llmViewInputs, h)]
+                    : effectiveLlmBarMode === "Copy"
+                      ? viewLlmButtons(maybePasteError, h)
+                      : isEditingExisting
+                        ? [
+                            h.button(
+                              [
+                                h.Type("button"),
+                                h.Id("modal-btn-delete"),
+                                h.Class("btn btn-danger icon-label-btn"),
+                                h.AriaLabel("Löschen"),
+                                h.DataAttribute("tip", "Löschen"),
+                                h.OnClick(Message.ClickedDelete()),
+                              ],
+                              [
+                                h.span(
+                                  [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                  [viewIcon("trash", h)],
+                                ),
+                                h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
+                              ],
+                            ),
+                          ]
+                        : []),
                   isTextFile
-                    ? h.button(
+                    ? h.select(
                         [
-                          h.Type("button"),
-                          h.Id("modal-btn-toggle-llm"),
-                          h.Class("btn btn-secondary icon-label-btn modal-footer-push-right"),
-                          h.AriaLabel("LLM-Werkzeuge"),
-                          h.AriaExpanded(isLlmBarOpen),
-                          h.DataAttribute("tip", "LLM-Werkzeuge"),
-                          h.OnClick(Message.ClickedToggleLlmBar()),
+                          h.Id("modal-llm-mode-select"),
+                          h.Class("form-input modal-llm-select modal-footer-push-right"),
+                          h.AriaLabel("KI-Werkzeuge"),
+                          h.Value(effectiveLlmBarMode),
+                          h.OnChange((value) => Message.SelectedLlmBarMode({ value })),
                         ],
-                        [
-                          h.span(
-                            [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                            [viewIcon("ai", h)],
+                        Array.map(llmBarModeOptions, (item) =>
+                          h.option(
+                            [h.Value(item.value), h.Selected(effectiveLlmBarMode === item.value)],
+                            [item.label],
                           ),
-                          h.span([h.Class("icon-label-btn-text")], ["LLM"]),
-                        ],
+                        ),
                       )
                     : h.empty,
                   h.button(
@@ -2524,100 +3206,120 @@ const viewConfirmOverwriteModal = (
     ],
   )
 
-export const view = Submodel.defineView<Model, Message>((model, h): Html.Html =>
-  Model.match(model, {
-    CreateFile: (state) =>
-      viewEditorModal(
-        {
-          titleText: "Neue Datei erstellen",
-          noun: "Datei",
-          isFolder: false,
-          isTextFile: true,
-          isLlmBarOpen: state.isLlmBarOpen,
-          isMaximized: state.isMaximized,
-          isEditingExisting: false,
-          nameValue: state.name,
-          maybeValidationError: state.maybeValidationError,
-          maybeAlertBanner: state.maybeAlertBanner,
-          maybePasteError: state.maybePasteError,
-          extraBodyNodes: [
-            viewTemplatePicker(state, h),
-            ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
-          ],
-        },
-        h,
-      ),
+export const view = Submodel.defineView<Model, Message, ViewInputs>(
+  (model, context, h): Html.Html =>
+    Model.match(model, {
+      CreateFile: (state) =>
+        viewEditorModal(
+          {
+            titleText: "Neue Datei erstellen",
+            noun: "Datei",
+            isFolder: false,
+            isTextFile: true,
+            llmBarMode: state.llmBarMode,
+            llmChatInput: state.llmChatInput,
+            llmChatState: state.llmChatState,
+            llmChatDisplay: state.llmChatDisplay,
+            llmViewInputs: context,
+            isMaximized: state.isMaximized,
+            isEditingExisting: false,
+            nameValue: state.name,
+            maybeValidationError: state.maybeValidationError,
+            maybeAlertBanner: state.maybeAlertBanner,
+            maybePasteError: state.maybePasteError,
+            extraBodyNodes: [
+              viewTemplatePicker(state, h),
+              ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
+            ],
+          },
+          h,
+        ),
 
-    CreateFolder: ({ name, maybeValidationError, maybeAlertBanner }) =>
-      viewEditorModal(
-        {
-          titleText: "Neuen Ordner erstellen",
-          noun: "Ordner",
-          isFolder: true,
-          isTextFile: false,
-          isLlmBarOpen: false,
-          isMaximized: false,
-          isEditingExisting: false,
-          nameValue: name,
-          maybeValidationError,
-          maybeAlertBanner,
-          maybePasteError: Option.none(),
-          extraBodyNodes: [],
-        },
-        h,
-      ),
+      CreateFolder: ({ name, maybeValidationError, maybeAlertBanner }) =>
+        viewEditorModal(
+          {
+            titleText: "Neuen Ordner erstellen",
+            noun: "Ordner",
+            isFolder: true,
+            isTextFile: false,
+            llmBarMode: "Closed",
+            llmChatInput: "",
+            llmChatState: LlmChatState.Idle(),
+            llmChatDisplay: [],
+            llmViewInputs: context,
+            isMaximized: false,
+            isEditingExisting: false,
+            nameValue: name,
+            maybeValidationError,
+            maybeAlertBanner,
+            maybePasteError: Option.none(),
+            extraBodyNodes: [],
+          },
+          h,
+        ),
 
-    EditFolder: ({ originalName, name, maybeValidationError, maybeAlertBanner }) =>
-      viewEditorModal(
-        {
-          titleText: `Ordner bearbeiten: ${originalName}`,
-          noun: "Ordner",
-          isFolder: true,
-          isTextFile: false,
-          isLlmBarOpen: false,
-          isMaximized: false,
-          isEditingExisting: true,
-          nameValue: name,
-          maybeValidationError,
-          maybeAlertBanner,
-          maybePasteError: Option.none(),
-          extraBodyNodes: [],
-        },
-        h,
-      ),
+      EditFolder: ({ originalName, name, maybeValidationError, maybeAlertBanner }) =>
+        viewEditorModal(
+          {
+            titleText: `Ordner bearbeiten: ${originalName}`,
+            noun: "Ordner",
+            isFolder: true,
+            isTextFile: false,
+            llmBarMode: "Closed",
+            llmChatInput: "",
+            llmChatState: LlmChatState.Idle(),
+            llmChatDisplay: [],
+            llmViewInputs: context,
+            isMaximized: false,
+            isEditingExisting: true,
+            nameValue: name,
+            maybeValidationError,
+            maybeAlertBanner,
+            maybePasteError: Option.none(),
+            extraBodyNodes: [],
+          },
+          h,
+        ),
 
-    EditFile: ({
-      originalName,
-      name,
-      fileMode,
-      maybeValidationError,
-      maybeAlertBanner,
-      maybePasteError,
-      isLlmBarOpen,
-      isMaximized,
-    }) =>
-      viewEditorModal(
-        {
-          titleText: `Datei bearbeiten: ${originalName}`,
-          noun: "Datei",
-          isFolder: false,
-          isTextFile: fileMode._tag === "Text",
-          isLlmBarOpen,
-          isMaximized,
-          isEditingExisting: true,
-          nameValue: name,
-          maybeValidationError,
-          maybeAlertBanner,
-          maybePasteError,
-          extraBodyNodes: viewEditorFileBody(fileMode, h),
-        },
-        h,
-      ),
+      EditFile: ({
+        originalName,
+        name,
+        fileMode,
+        maybeValidationError,
+        maybeAlertBanner,
+        maybePasteError,
+        llmBarMode,
+        llmChatInput,
+        llmChatState,
+        llmChatDisplay,
+        isMaximized,
+      }) =>
+        viewEditorModal(
+          {
+            titleText: `Datei bearbeiten: ${originalName}`,
+            noun: "Datei",
+            isFolder: false,
+            isTextFile: fileMode._tag === "Text",
+            llmBarMode,
+            llmChatInput,
+            llmChatState,
+            llmChatDisplay,
+            llmViewInputs: context,
+            isMaximized,
+            isEditingExisting: true,
+            nameValue: name,
+            maybeValidationError,
+            maybeAlertBanner,
+            maybePasteError,
+            extraBodyNodes: viewEditorFileBody(fileMode, h),
+          },
+          h,
+        ),
 
-    ConfirmDelete: ({ entryName, entryKind, maybeAlertBanner }) =>
-      viewConfirmDeleteModal(entryName, entryKind, maybeAlertBanner, h),
+      ConfirmDelete: ({ entryName, entryKind, maybeAlertBanner }) =>
+        viewConfirmDeleteModal(entryName, entryKind, maybeAlertBanner, h),
 
-    ConfirmOverwrite: ({ targetName, maybeAlertBanner }) =>
-      viewConfirmOverwriteModal(targetName, maybeAlertBanner, h),
-  }),
+      ConfirmOverwrite: ({ targetName, maybeAlertBanner }) =>
+        viewConfirmOverwriteModal(targetName, maybeAlertBanner, h),
+    }),
 )

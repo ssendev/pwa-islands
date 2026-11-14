@@ -11,6 +11,7 @@ import {
   parseModelOptions,
   parseThinkingLevels,
   parseThinkingValue,
+  runEditorChatTurn,
   streamChatParts,
   streamToolCallParts,
   testLlmConnection,
@@ -577,6 +578,181 @@ describe("testLlmConnection mit Modus", () => {
     expect(result).toEqual({
       content: 'Tool-Aufruf: ping_test({"token":"ok"})',
       reasoning: "Prüfe Tool",
+    })
+  })
+})
+
+describe("runEditorChatTurn", () => {
+  it("wendet edit-Tool-Aufruf an, fügt Tool-Nachricht an und stoppt bis zur nächsten User-Nachricht", async () => {
+    const { hashLine } = await import("./hashline")
+    const original = "<p>Alt</p>"
+    const h1 = hashLine(original)
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_1",
+                      type: "function",
+                      function: {
+                        name: "edit",
+                        arguments: JSON.stringify({
+                          edits: `REPLACE 1:${h1}\n<p>Neu</p>\nEND`,
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        baseUrl: "https://api.example.com/v1",
+        model: "gpt-4o-mini",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: original,
+      initialMessages: [
+        { _tag: "System", content: "hash-sys" },
+        { _tag: "User", content: "dts" },
+        { _tag: "User", content: "file" },
+        { _tag: "User", content: "Ändere Alt zu Neu" },
+      ],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.updatedContent).toBe("<p>Neu</p>")
+    expect(result.appliedCount).toBe(1)
+    expect(result.messages).toHaveLength(6)
+    expect(result.messages[4]?._tag).toBe("Assistant")
+    expect(result.messages[5]).toEqual({
+      _tag: "Tool",
+      toolCallId: "call_1",
+      content: expect.stringContaining("Änderungen angewendet"),
+    })
+  })
+
+  it("sendet Hashline-Fehler sofort an das LLM zurück und wendet korrigierten Versuch an", async () => {
+    const { hashLine } = await import("./hashline")
+    const original = "<p>Alt</p>"
+    const h1 = hashLine(original)
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_bad",
+                      type: "function",
+                      function: {
+                        name: "edit",
+                        arguments: JSON.stringify({
+                          edits: "REPLACE 1:000\n<p>Neu</p>\nEND",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_ok",
+                      type: "function",
+                      function: {
+                        name: "edit",
+                        arguments: JSON.stringify({
+                          edits: `REPLACE 1:${h1}\n<p>Neu</p>\nEND`,
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const updates: Array<{
+      readonly completedTurns: ReadonlyArray<{
+        readonly content: string
+        readonly reasoning: string
+        readonly isError: boolean
+      }>
+      readonly activeTurn: { readonly content: string; readonly reasoning: string }
+    }> = []
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        baseUrl: "https://api.example.com/v1",
+        model: "gpt-4o-mini",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: original,
+      initialMessages: [{ _tag: "User", content: "Ändere Alt zu Neu" }],
+      onUpdate: (parts) => {
+        updates.push(parts)
+      },
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.updatedContent).toBe("<p>Neu</p>")
+    expect(
+      result.turns.map((turn) => ({
+        isError: turn.isError,
+        hasEdit: turn.content.includes("Tool-Aufruf: edit"),
+        hasErr: turn.content.includes("Fehler beim Anwenden der Änderungen"),
+      })),
+    ).toEqual([
+      { isError: false, hasEdit: true, hasErr: false },
+      { isError: true, hasEdit: false, hasErr: true },
+      { isError: false, hasEdit: true, hasErr: false },
+    ])
+    expect(updates.at(-1)?.completedTurns).toHaveLength(2)
+    expect(result.messages[2]).toEqual({
+      _tag: "Tool",
+      toolCallId: "call_bad",
+      content: expect.stringContaining("Hash stimmt nicht überein"),
+    })
+    expect(result.messages[4]).toEqual({
+      _tag: "Tool",
+      toolCallId: "call_ok",
+      content: expect.stringContaining("Änderungen angewendet"),
     })
   })
 })

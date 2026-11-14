@@ -107,6 +107,7 @@ export const formatDocumentTitle = (state: ModalState, folderTitle: string): str
 export const openCreate = (
   target: NewTarget | "file" | "folder",
   templates: ReadonlyArray<StarterTemplate> = [],
+  defaults?: { readonly isMaximized?: boolean; readonly llmBarMode?: Editor.LlmBarMode },
 ): ModalState =>
   ModalState.Editor({
     editor:
@@ -116,7 +117,7 @@ export const openCreate = (
             maybeValidationError: Option.none(),
             maybeAlertBanner: Option.none(),
           })
-        : Editor.makeCreateFile(templates),
+        : Editor.makeCreateFile(templates, defaults),
   })
 
 export const LoadEditorUserTemplates = Command.mapMessage(Editor.LoadUserTemplates(), (message) =>
@@ -146,6 +147,63 @@ export const isEditingEntry = (state: ModalState, name: string): boolean =>
       }),
     ),
     Match.orElse(() => false),
+  )
+
+export const applyEditorPreferences = (
+  modalState: ModalState,
+  prefs: { readonly isMaximized: boolean; readonly llmBarMode: Editor.LlmBarMode },
+): ModalState =>
+  Match.value(modalState).pipe(
+    Match.tag("Editor", ({ editor }) =>
+      ModalState.Editor({
+        editor: Editor.applyPreferences(editor, prefs),
+      }),
+    ),
+    Match.orElse(() => modalState),
+  )
+
+export const applyEditorLlmChatStream = (
+  modalState: ModalState,
+  payload: {
+    readonly completedTurns: ReadonlyArray<Editor.LlmChatTurnBlock>
+    readonly activeTurn: { readonly content: string; readonly reasoning: string }
+  },
+): ModalState =>
+  Match.value(modalState).pipe(
+    Match.tag("Editor", ({ editor }) =>
+      ModalState.Editor({
+        editor: Editor.applyLlmChatStream(editor, payload),
+      }),
+    ),
+    Match.orElse(() => modalState),
+  )
+
+export const applyEditorLlmChatSuccess = (
+  modalState: ModalState,
+  payload: {
+    readonly messages: ReadonlyArray<Editor.LlmChatMessage>
+    readonly maybeUpdatedContent: Option.Option<string>
+    readonly appliedCount: number
+    readonly turns: ReadonlyArray<Editor.LlmChatTurnBlock>
+  },
+): ModalState =>
+  Match.value(modalState).pipe(
+    Match.tag("Editor", ({ editor }) =>
+      ModalState.Editor({
+        editor: Editor.applyLlmChatSuccess(editor, payload),
+      }),
+    ),
+    Match.orElse(() => modalState),
+  )
+
+export const applyEditorLlmChatFailure = (modalState: ModalState, message: string): ModalState =>
+  Match.value(modalState).pipe(
+    Match.tag("Editor", ({ editor }) =>
+      ModalState.Editor({
+        editor: Editor.applyLlmChatFailure(editor, message),
+      }),
+    ),
+    Match.orElse(() => modalState),
   )
 
 export const openHelp = (
@@ -273,7 +331,11 @@ export const resolveModalForRoute = async (
                   maybeValidationError: Option.none(),
                   maybeAlertBanner: Option.none(),
                   maybePasteError: Option.none(),
-                  isLlmBarOpen: false,
+                  llmBarMode: "Closed",
+                  llmChatInput: "",
+                  llmChatMessages: [],
+                  llmChatDisplay: [],
+                  llmChatState: Editor.LlmChatState.Idle(),
                   isMaximized: false,
                 }),
               }),
@@ -334,6 +396,18 @@ export const OutMessage = defineTaggedUnion({
   ShowAlert: {
     banner: AlertBanner,
     replaceUrl: Schema.Boolean,
+  },
+  SelectedLlmModel: {
+    value: Schema.String,
+  },
+  SelectedLlmThinkingLevel: {
+    value: Schema.String,
+  },
+  ChangedLlmBarMode: {
+    llmBarMode: Editor.LlmBarMode,
+  },
+  ChangedMaximize: {
+    isMaximized: Schema.Boolean,
   },
 })
 export type OutMessage = typeof OutMessage.Type
@@ -489,6 +563,11 @@ export const update = (
   context: {
     readonly subPath: ReadonlyArray<string>
     readonly existingEntries: ReadonlyArray<FileEntry>
+    readonly llmEnabled: boolean
+    readonly editorDefaults?: {
+      readonly isMaximized: boolean
+      readonly llmBarMode: Editor.LlmBarMode
+    }
   },
 ): {
   readonly model: ModalState
@@ -544,6 +623,26 @@ export const update = (
                 banner,
                 replaceUrl,
               }),
+            }),
+            SelectedLlmModel: ({ value }) => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.SelectedLlmModel({ value }),
+            }),
+            SelectedLlmThinkingLevel: ({ value }) => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.SelectedLlmThinkingLevel({ value }),
+            }),
+            ChangedLlmBarMode: ({ llmBarMode }) => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.ChangedLlmBarMode({ llmBarMode }),
+            }),
+            ChangedMaximize: ({ isMaximized }) => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.ChangedMaximize({ isMaximized }),
             }),
           })
         }),
@@ -607,8 +706,12 @@ export const update = (
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
-          isLlmBarOpen: false,
-          isMaximized: false,
+          llmBarMode: context.editorDefaults?.llmBarMode ?? "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: context.editorDefaults?.isMaximized ?? false,
         }),
       }),
       commands: [FocusModalNameInput()],
@@ -805,6 +908,7 @@ export type ViewInputs = {
   readonly hasDirectoryPicker: boolean
   readonly hasOPFS: boolean
   readonly hasTauri: boolean
+  readonly llm: Editor.ViewInputs
 }
 
 const viewImportConflictModal = (
@@ -926,6 +1030,7 @@ export const view = Submodel.defineView<ModalState, Message, ViewInputs>(
             h.submodel({
               slotId: "editor",
               model: editor,
+              viewInputs: context.llm,
               view: Editor.view,
               toParentMessage: (msg) => Message.GotEditorMessage({ message: msg }),
             }),

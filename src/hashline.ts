@@ -23,45 +23,57 @@ export const formatFencedHashlineFile = (_fileName: string, content: string): st
   return ["```", hashedFile, "```"].join("\n") + "\n\n"
 }
 
-export const formatLlmContext = (fileName: string, content: string, apiDts: string): string => {
-  const trimmedDts = apiDts.trimEnd()
+const HASHLINE_COMMAND_LINES = [
+  "- `REPLACE <zeile>:<hash>` oder `REPLACE <start>:<hash>..<ende>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
+  "- `INSERT_AFTER <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
+  "- `INSERT_BEFORE <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
+  "- `DELETE <zeile>:<hash>` oder `DELETE <start>:<hash>..<ende>:<hash>`",
+  "",
+  "Wichtig:",
+  "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
+  "- Schreibe in den neuen Zeilen **keine** `ZEILE:HASH|`-Präfixe.",
+  "- Verwende exakt die Zeilennummern und Hashes aus der Datei unten.",
+  "",
+  "Beispiel:",
+  "```hashline",
+  "REPLACE 12:a3f..13:b4c",
+  "  <p>Neuer Text</p>",
+  "END",
+  "INSERT_AFTER 20:c1d",
+  "  <script>console.log('ok')</script>",
+  "END",
+  "DELETE 30:e2f",
+  "```",
+]
 
+export const formatHashlineSystemPrompt = (): string =>
+  [
+    "## Anleitung für die Antwort (Hash-Anchored Line Edits)",
+    "",
+    "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
+    "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:",
+    "",
+    ...HASHLINE_COMMAND_LINES,
+  ].join("\n")
+
+export const formatApiDtsMessage = (apiDts: string): string =>
+  ["## /api.d.ts", "", "```ts", apiDts.trimEnd(), "```"].join("\n")
+
+export const formatHashedFileMessage = (fileName: string, content: string): string =>
+  [`## Datei: \`${fileName}\``, "", formatFencedHashlineFile(fileName, content)].join("\n")
+
+export const formatLlmContext = (fileName: string, content: string, apiDts: string): string => {
   return [
     "## Anleitung für die Antwort (Hash-Anchored Line Edits)",
     "",
     "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
     "Antworte **nur** mit einem Markdown-Codeblock (` ```hashline `) mit folgenden Befehlen:",
     "",
-    "- `REPLACE <zeile>:<hash>` oder `REPLACE <start>:<hash>..<ende>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
-    "- `INSERT_AFTER <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
-    "- `INSERT_BEFORE <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
-    "- `DELETE <zeile>:<hash>` oder `DELETE <start>:<hash>..<ende>:<hash>`",
+    ...HASHLINE_COMMAND_LINES,
     "",
-    "Wichtig:",
-    "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
-    "- Schreibe in den neuen Zeilen **keine** `ZEILE:HASH|`-Präfixe.",
-    "- Verwende exakt die Zeilennummern und Hashes aus der Datei unten.",
+    formatApiDtsMessage(apiDts),
     "",
-    "Beispiel:",
-    "```hashline",
-    "REPLACE 12:a3f..13:b4c",
-    "  <p>Neuer Text</p>",
-    "END",
-    "INSERT_AFTER 20:c1d",
-    "  <script>console.log('ok')</script>",
-    "END",
-    "DELETE 30:e2f",
-    "```",
-    "",
-    "## /api.d.ts",
-    "",
-    "```ts",
-    trimmedDts,
-    "```",
-    "",
-    `## Datei: \`${fileName}\``,
-    "",
-    formatFencedHashlineFile(fileName, content),
+    formatHashedFileMessage(fileName, content),
   ].join("\n")
 }
 

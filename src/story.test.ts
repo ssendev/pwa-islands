@@ -22,6 +22,7 @@ import {
   HandleIslandIpcRequest,
   InstallPrompt,
   IslandIpcAction,
+  LoadEditorLlmModels,
   Message,
   MinimizeWindow,
   type Model,
@@ -35,6 +36,7 @@ import {
   ReplaceUrl,
   ResolveIslandBackNavigation,
   SavedBackend,
+  SaveEditorPreferences,
   SaveFileInfoPreference,
   SaveLlmSettings,
   SaveStorageTypePreference,
@@ -115,6 +117,9 @@ const readyModel: Model = {
   llmModel: "",
   llmThinkingLevel: "",
   llmDiscoveredModels: [],
+  hasLoadedEditorLlmModels: false,
+  editorIsMaximized: false,
+  editorLlmBarMode: "Closed",
   llmDraftEnabled: false,
   llmDraftBaseUrl: "",
   llmDraftApiKey: "",
@@ -192,7 +197,7 @@ describe("PWA Islands Story Tests", () => {
           },
         }),
       )
-      expect(result.commands).toHaveLength(3)
+      expect(result.commands).toHaveLength(4)
     })
   })
 
@@ -1120,7 +1125,11 @@ describe("PWA Islands Story Tests", () => {
             maybeValidationError: Option.none(),
             maybeAlertBanner: Option.none(),
             maybePasteError: Option.none(),
-            isLlmBarOpen: false,
+            llmBarMode: "Closed",
+            llmChatInput: "",
+            llmChatMessages: [],
+            llmChatDisplay: [],
+            llmChatState: Editor.LlmChatState.Idle(),
             isMaximized: false,
           }),
         }),
@@ -2119,8 +2128,15 @@ describe("PWA Islands Story Tests", () => {
             thinkingLevels: "Aus=false, An=true",
             extraArgs: '{"temperature": 0.2}',
           }),
+          SaveEditorPreferences({
+            isMaximized: false,
+            llmBarMode: "Closed",
+            llmModel: "gpt-4o-mini",
+            llmThinkingLevel: "false",
+          }),
         ),
         Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
+        Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
         model((m) => {
           expect(m.llmStreaming).toBe(false)
           expect(m.llmToolCalls).toBe(false)
@@ -2221,6 +2237,208 @@ describe("PWA Islands Story Tests", () => {
           expect(m.llmTestState).toEqual(
             LlmTestState.Streaming({ mode: "tools", content: "", reasoning: "" }),
           )
+        }),
+      )
+    })
+
+    it("lädt Modelle einmalig beim ersten Öffnen des Editors, wenn keine fest eingetragen sind", () => {
+      const modelWithoutFixedModels: Model = {
+        ...readyModel,
+        llmEnabled: true,
+        llmBaseUrl: "https://api.example.com/v1",
+        llmModels: "",
+        llmDiscoveredModels: [],
+      }
+
+      story(
+        update,
+        given(modelWithoutFixedModels),
+        message(Message.ClickedNewFile()),
+        Command.expectExact(
+          PushUrl({ url: "/?pwaislands=new" }),
+          Modal.FocusModalNameInput(),
+          Modal.LoadEditorUserTemplates,
+          LoadEditorLlmModels({
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          }),
+        ),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        Command.resolve(Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
+        Command.resolve(
+          Editor.LoadUserTemplates,
+          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
+        ),
+        Command.resolve(
+          LoadEditorLlmModels,
+          Message.SucceededLoadEditorLlmModels({ models: ["qwen3", "gpt-4o"] }),
+        ),
+        model((m) => {
+          expect(m.hasLoadedEditorLlmModels).toBe(true)
+          expect(m.llmDiscoveredModels).toEqual(["qwen3", "gpt-4o"])
+          expect(m.llmModel).toBe("qwen3")
+        }),
+        message(Message.ClickedNewFile()),
+        Command.expectExact(
+          PushUrl({ url: "/?pwaislands=new" }),
+          Modal.FocusModalNameInput(),
+          Modal.LoadEditorUserTemplates,
+        ),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        Command.resolve(Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
+        Command.resolve(
+          Editor.LoadUserTemplates,
+          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
+        ),
+      )
+    })
+
+    it("lädt Modelle auch wenn CompletedLoadLlmSettings erst nach Öffnen des Editors eintrifft, und übernimmt gespeicherte Editor-Präferenzen", () => {
+      const modelWithOpenEditor: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: Editor.makeCreateFile(),
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithOpenEditor),
+        message(
+          Message.CompletedLoadEditorPreferences({
+            isMaximized: true,
+            llmBarMode: "Chat",
+            llmModel: "qwen3",
+            llmThinkingLevel: "high",
+          }),
+        ),
+        model((m) => {
+          expect(m.editorIsMaximized).toBe(true)
+          expect(m.editorLlmBarMode).toBe("Chat")
+          expect(m.llmModel).toBe("qwen3")
+          expect(m.llmThinkingLevel).toBe("high")
+        }),
+        message(
+          Message.CompletedLoadLlmSettings({
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "reasoning_effort",
+            thinkingLevels: "low, high",
+            extraArgs: "",
+          }),
+        ),
+        Command.expectExact(
+          LoadEditorLlmModels({
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "reasoning_effort",
+            thinkingLevels: "low, high",
+            extraArgs: "",
+          }),
+        ),
+        Command.resolve(
+          LoadEditorLlmModels,
+          Message.SucceededLoadEditorLlmModels({ models: ["qwen3", "gpt-4o"] }),
+        ),
+      )
+    })
+
+    it("übernimmt gespeichertes isMaximized und llmBarMode und lädt Modelle auch wenn SucceededInitializeStorage nach CompletedLoadEditorPreferences und CompletedLoadLlmSettings eintrifft", () => {
+      story(
+        update,
+        given(readyModel),
+        message(
+          Message.CompletedLoadLlmSettings({
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "reasoning_effort",
+            thinkingLevels: "low, high",
+            extraArgs: "",
+          }),
+        ),
+        message(
+          Message.CompletedLoadEditorPreferences({
+            isMaximized: true,
+            llmBarMode: "Copy",
+            llmModel: "",
+            llmThinkingLevel: "",
+          }),
+        ),
+        message(
+          Message.SucceededInitializeStorage({
+            storageType: "opfs",
+            rootName: "Browser-Speicher",
+            subPath: [],
+            entries: [],
+            otherBackend: SavedBackend.NoFolderSelected(),
+            maybeModalState: Option.some(
+              ModalState.Editor({
+                editor: Editor.Model.EditFile({
+                  originalName: "index.html",
+                  name: "index.html",
+                  fileMode: Editor.EditorFileMode.Text({ content: "<h1>Hi</h1>" }),
+                  maybeValidationError: Option.none(),
+                  maybeAlertBanner: Option.none(),
+                  maybePasteError: Option.none(),
+                  llmBarMode: "Closed",
+                  llmChatInput: "",
+                  llmChatMessages: [],
+                  llmChatDisplay: [],
+                  llmChatState: Editor.LlmChatState.Idle(),
+                  isMaximized: false,
+                }),
+              }),
+            ),
+            maybeAlertBanner: Option.none(),
+          }),
+        ),
+        Command.resolve(Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
+        Command.expectExact(
+          LoadEditorLlmModels({
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "reasoning_effort",
+            thinkingLevels: "low, high",
+            extraArgs: "",
+          }),
+        ),
+        Command.resolve(
+          LoadEditorLlmModels,
+          Message.SucceededLoadEditorLlmModels({ models: ["qwen3", "gpt-4o"] }),
+        ),
+        model((m) => {
+          expect(m.modalState._tag).toBe("Editor")
+          if (m.modalState._tag === "Editor") {
+            expect(m.modalState.editor._tag).toBe("EditFile")
+            if (m.modalState.editor._tag === "EditFile") {
+              expect(m.modalState.editor.isMaximized).toBe(true)
+              expect(m.modalState.editor.llmBarMode).toBe("Copy")
+            }
+          }
+          expect(m.llmDiscoveredModels).toEqual(["qwen3", "gpt-4o"])
         }),
       )
     })

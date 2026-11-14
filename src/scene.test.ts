@@ -1,11 +1,13 @@
 import { Option } from "effect"
 import {
   Command,
+  Subscription,
   change,
   click,
   doubleClick,
   expect as sceneExpect,
   given,
+  keydown,
   scene,
   selector,
   text,
@@ -24,6 +26,7 @@ import {
   RefreshEntries,
   ReplaceUrl,
   SavedBackend,
+  SaveEditorPreferences,
   StorageState,
   TestLlm,
   ToggleFullscreenWindow,
@@ -87,6 +90,9 @@ const readyModel: Model = {
   llmModel: "",
   llmThinkingLevel: "",
   llmDiscoveredModels: [],
+  hasLoadedEditorLlmModels: false,
+  editorIsMaximized: false,
+  editorLlmBarMode: "Closed",
   llmDraftEnabled: false,
   llmDraftBaseUrl: "",
   llmDraftApiKey: "",
@@ -158,7 +164,11 @@ describe("PWA Islands Scene Tests", () => {
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
-          isLlmBarOpen: false,
+          llmBarMode: "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
         }),
       }),
@@ -169,7 +179,7 @@ describe("PWA Islands Scene Tests", () => {
       given(binaryModel),
       sceneExpect(selector("#modal-file-preview")).toExist(),
       sceneExpect(selector("#modal-base64-editor")).toBeAbsent(),
-      sceneExpect(selector("#modal-btn-toggle-llm")).toBeAbsent(),
+      sceneExpect(selector("#modal-llm-mode-select")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
       change(selector("#modal-use-base64"), "true"),
       Command.expectExact(Editor.LoadBase64({ entryName: "bild.png", subPath: [] })),
@@ -218,16 +228,19 @@ describe("PWA Islands Scene Tests", () => {
     scene(
       { update, view },
       given(modelWithEditor),
-      sceneExpect(selector("#modal-btn-toggle-llm")).toExist(),
-      sceneExpect(selector("#modal-btn-toggle-llm")).toContainText("LLM"),
+      sceneExpect(selector("#modal-llm-mode-select")).toExist(),
+      sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Closed"),
+      sceneExpect(selector("#modal-llm-mode-select option[value='Chat']")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
-      click(selector("#modal-btn-toggle-llm")),
+      change(selector("#modal-llm-mode-select"), "Copy"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       sceneExpect(selector("#modal-btn-copy-dts")).toExist(),
       sceneExpect(selector("#modal-btn-copy-dts")).toContainText("/app.d.ts"),
       sceneExpect(selector("#modal-btn-copy-llm")).toContainText("Mit Anleitung"),
       sceneExpect(selector("#modal-btn-copy-hashes")).toContainText("Datei"),
       sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Einfügen"),
       sceneExpect(selector("#modal-btn-save-and-open")).toContainText("Anzeigen"),
+      sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
       click(selector("#modal-btn-copy-dts")),
       Command.expectExact(Editor.CopyApiDtsToClipboard()),
       Command.resolve(
@@ -248,6 +261,262 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
+  it("switches LLM bar between Closed, Chat, and Copy when LLM is enabled in settings", () => {
+    const modelWithLlmEnabled: Model = {
+      ...readyModel,
+      llmEnabled: true,
+      llmModels: "gpt-4o, qwen3",
+      llmModel: "gpt-4o",
+      llmThinkingParam: "chat_template_kwargs.enable_thinking",
+      llmThinkingLevels: "Aus=false, An=true",
+      llmThinkingLevel: "false",
+      modalState: ModalState.Editor({
+        editor: Editor.makeCreateFile(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithLlmEnabled),
+      sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Closed"),
+      sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
+      change(selector("#modal-llm-mode-select"), "Chat"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Chat"),
+      sceneExpect(selector("#modal-llm-chat-input")).toExist(),
+      sceneExpect(selector("#modal-llm-model-select")).toExist(),
+      sceneExpect(selector("#modal-llm-model-select")).toHaveValue("gpt-4o"),
+      sceneExpect(selector("#modal-llm-thinking-select")).toExist(),
+      sceneExpect(selector("#modal-llm-thinking-select")).toHaveValue("false"),
+      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-save-and-open")).toExist(),
+      type(selector("#modal-llm-chat-input"), "Mach einen Button"),
+      sceneExpect(selector("#modal-llm-chat-input")).toHaveValue("Mach einen Button"),
+      change(selector("#modal-llm-model-select"), "qwen3"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      sceneExpect(selector("#modal-llm-model-select")).toHaveValue("qwen3"),
+      change(selector("#modal-llm-thinking-select"), "true"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      sceneExpect(selector("#modal-llm-thinking-select")).toHaveValue("true"),
+      change(selector("#modal-llm-mode-select"), "Copy"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Copy"),
+      sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toExist(),
+      sceneExpect(selector("#modal-btn-copy-llm")).toExist(),
+      sceneExpect(selector("#modal-btn-copy-hashes")).toExist(),
+      sceneExpect(selector("#modal-btn-paste-llm")).toExist(),
+      change(selector("#modal-llm-mode-select"), "Closed"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      sceneExpect(selector("#modal-llm-mode-select")).toHaveValue("Closed"),
+      sceneExpect(selector("#modal-llm-chat-input")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-save-and-open")).toBeAbsent(),
+    )
+  })
+
+  it("hides thinking select in editor chat bar when fewer than two thinking options exist", () => {
+    const modelWithSingleThinking: Model = {
+      ...readyModel,
+      llmEnabled: true,
+      llmModels: "gpt-4o",
+      llmModel: "gpt-4o",
+      llmThinkingParam: "reasoning_effort",
+      llmThinkingLevels: "low",
+      llmThinkingLevel: "low",
+      modalState: ModalState.Editor({
+        editor: Editor.makeCreateFile(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithSingleThinking),
+      change(selector("#modal-llm-mode-select"), "Chat"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      sceneExpect(selector("#modal-llm-chat-input")).toExist(),
+      sceneExpect(selector("#modal-llm-model-select")).toExist(),
+      sceneExpect(selector("#modal-llm-thinking-select")).toBeAbsent(),
+    )
+  })
+
+  it("streams LLM chat response, shows questions and answers, and switches send button to Stopp", () => {
+    const modelWithLlmEnabled: Model = {
+      ...readyModel,
+      llmEnabled: true,
+      llmBaseUrl: "https://api.example.com/v1",
+      llmModels: "gpt-4o",
+      llmModel: "gpt-4o",
+      modalState: ModalState.Editor({
+        editor: Editor.makeCreateFile(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithLlmEnabled),
+      change(selector("#modal-llm-mode-select"), "Chat"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      type(selector("#modal-llm-chat-input"), "Füge Titel hinzu"),
+      keydown(selector("#modal-llm-chat-input"), "Enter"),
+      sceneExpect(selector(".modal-overlay")).toExist(),
+      sceneExpect(selector("#modal-llm-chat-input")).toHaveValue(""),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Füge Titel hinzu"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Schreibt …"),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Stopp"),
+      sceneExpect(selector("#modal-btn-send-llm")).toBeEnabled(),
+      sceneExpect(selector("#modal-btn-send-llm.btn-danger")).toExist(),
+      Subscription.emit(
+        Message.UpdatedEditorLlmChatStream({
+          completedTurns: [
+            {
+              content: "Tool-Aufruf: edit",
+              reasoning: "Erster Gedanke",
+              isError: false,
+            },
+            {
+              content: "Fehler beim Anwenden der Änderungen: Hash stimmt nicht überein",
+              reasoning: "",
+              isError: true,
+            },
+          ],
+          activeTurn: {
+            content: "Ich füge den Titel hinzu.",
+            reasoning: "Plane die Änderung",
+          },
+        }),
+      ),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Erster Gedanke"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Tool-Aufruf: edit"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText(
+        "Fehler beim Anwenden der Änderungen",
+      ),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Plane die Änderung"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Ich füge den Titel hinzu."),
+      Subscription.emit(
+        Message.SucceededEditorLlmChat({
+          messages: [
+            Editor.LlmChatMessage.System({ content: "sys" }),
+            Editor.LlmChatMessage.User({ content: "dts" }),
+            Editor.LlmChatMessage.User({ content: "file" }),
+            Editor.LlmChatMessage.User({ content: "Füge Titel hinzu" }),
+            Editor.LlmChatMessage.Assistant({
+              content: "Ich füge den Titel hinzu.",
+              toolCalls: [],
+            }),
+            Editor.LlmChatMessage.Tool({ toolCallId: "call_1", content: "ok" }),
+          ],
+          maybeUpdatedContent: Option.some("<h1>Hallo</h1>"),
+          appliedCount: 1,
+          turns: [
+            {
+              content: "Tool-Aufruf: edit",
+              reasoning: "Erster Gedanke",
+              isError: false,
+            },
+            {
+              content: "Fehler beim Anwenden der Änderungen: Hash stimmt nicht überein",
+              reasoning: "",
+              isError: true,
+            },
+            {
+              content: "Ich füge den Titel hinzu.",
+              reasoning: "Plane die Änderung",
+              isError: false,
+            },
+          ],
+        }),
+      ),
+      sceneExpect(selector("#modal-file-content")).toHaveValue("<h1>Hallo</h1>"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText(
+        "1 Bearbeitung(en) angewendet",
+      ),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Senden"),
+    )
+  })
+
+  it("stops an active LLM chat request when clicking Stopp and preserves partial output", () => {
+    const modelWithLlmEnabled: Model = {
+      ...readyModel,
+      llmEnabled: true,
+      llmBaseUrl: "https://api.example.com/v1",
+      llmModels: "gpt-4o",
+      llmModel: "gpt-4o",
+      modalState: ModalState.Editor({
+        editor: Editor.makeCreateFile(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithLlmEnabled),
+      change(selector("#modal-llm-mode-select"), "Chat"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      type(selector("#modal-llm-chat-input"), "Erkläre kurz"),
+      click(selector("#modal-btn-send-llm")),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Stopp"),
+      Subscription.emit(
+        Message.UpdatedEditorLlmChatStream({
+          completedTurns: [],
+          activeTurn: {
+            content: "Teilantwort",
+            reasoning: "",
+          },
+        }),
+      ),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Teilantwort"),
+      click(selector("#modal-btn-send-llm")),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Senden"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Erkläre kurz"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Teilantwort"),
+      sceneExpect(selector("#modal-llm-chat-history .llm-response-streaming")).toBeAbsent(),
+    )
+  })
+
+  it("re-enables send button and restores prompt when LLM chat fails", () => {
+    const modelWithLlmEnabled: Model = {
+      ...readyModel,
+      llmEnabled: true,
+      llmBaseUrl: "https://api.example.com/v1",
+      llmModels: "gpt-4o",
+      llmModel: "gpt-4o",
+      modalState: ModalState.Editor({
+        editor: Editor.makeCreateFile(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithLlmEnabled),
+      change(selector("#modal-llm-mode-select"), "Chat"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+      type(selector("#modal-llm-chat-input"), "Erkläre Fehler"),
+      click(selector("#modal-btn-send-llm")),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Stopp"),
+      Subscription.emit(
+        Message.UpdatedEditorLlmChatStream({
+          completedTurns: [],
+          activeTurn: {
+            content: "Erster Versuch",
+            reasoning: "",
+          },
+        }),
+      ),
+      Subscription.emit(
+        Message.FailedEditorLlmChat({
+          message: "HTTP 500",
+        }),
+      ),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Erster Versuch"),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("HTTP 500"),
+      sceneExpect(selector("#modal-llm-chat-input")).toHaveValue("Erkläre Fehler"),
+      sceneExpect(selector("#modal-llm-chat-input")).toBeEnabled(),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveText("Senden"),
+      sceneExpect(selector("#modal-btn-send-llm")).toBeEnabled(),
+    )
+  })
+
   it("pastes valid LLM edits and updates editor content", () => {
     const original = "<p>Alt</p>"
     const lineHash = hashLine(original)
@@ -261,7 +530,11 @@ describe("PWA Islands Scene Tests", () => {
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
-          isLlmBarOpen: true,
+          llmBarMode: "Copy",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
         }),
       }),
@@ -306,7 +579,11 @@ describe("PWA Islands Scene Tests", () => {
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
-          isLlmBarOpen: true,
+          llmBarMode: "Copy",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
         }),
       }),
@@ -344,7 +621,11 @@ describe("PWA Islands Scene Tests", () => {
       maybeValidationError: Option.none(),
       maybeAlertBanner: Option.none(),
       maybePasteError: Option.none(),
-      isLlmBarOpen: false,
+      llmBarMode: "Closed",
+      llmChatInput: "",
+      llmChatMessages: [],
+      llmChatDisplay: [],
+      llmChatState: Editor.LlmChatState.Idle(),
       isMaximized: false,
     })
     const modelWithEditFile: Model = {
@@ -361,7 +642,11 @@ describe("PWA Islands Scene Tests", () => {
       maybeValidationError: Option.none(),
       maybeAlertBanner: Option.none(),
       maybePasteError: Option.none(),
-      isLlmBarOpen: true,
+      llmBarMode: "Copy",
+      llmChatInput: "",
+      llmChatMessages: [],
+      llmChatDisplay: [],
+      llmChatState: Editor.LlmChatState.Idle(),
       isMaximized: false,
     })
 
@@ -369,7 +654,8 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(modelWithEditFile),
       sceneExpect(selector("#modal-btn-delete")).toExist(),
-      click(selector("#modal-btn-toggle-llm")),
+      change(selector("#modal-llm-mode-select"), "Copy"),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       sceneExpect(selector("#modal-btn-delete")).toBeAbsent(),
       sceneExpect(selector(".modal-footer #modal-btn-save-and-open")).toExist(),
       click(selector("#modal-btn-save-and-open")),
@@ -404,7 +690,7 @@ describe("PWA Islands Scene Tests", () => {
     scene(
       { update, view },
       given(modelWithFolderModal),
-      sceneExpect(selector("#modal-btn-toggle-llm")).toBeAbsent(),
+      sceneExpect(selector("#modal-llm-mode-select")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-copy-dts")).toBeAbsent(),
       sceneExpect(selector("#modal-btn-cancel")).toExist(),
     )
@@ -421,7 +707,11 @@ describe("PWA Islands Scene Tests", () => {
           maybeValidationError: Option.none(),
           maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
-          isLlmBarOpen: false,
+          llmBarMode: "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
           isMaximized: false,
         }),
       }),
@@ -462,10 +752,12 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
       sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
       click(selector("#modal-btn-maximize")),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Wiederherstellen"),
       sceneExpect(selector(".modal-content.is-maximized")).toExist(),
       sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toExist(),
       click(selector("#modal-btn-maximize")),
+      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
       sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Maximieren"),
       sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
       sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
