@@ -33,6 +33,7 @@ import {
   loadFileHistoryEntryAt,
   loadFileHistoryIndex,
   loadPreviousFileHistoryEntry,
+  truncateLatestFileHistoryEntry,
 } from "./history"
 import { viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
@@ -763,6 +764,11 @@ export const Message = defineMessageUnion({
   FailedClearHistory: {
     message: Schema.String,
   },
+  ClickedDeleteLatestHistoryEntry: {},
+  SucceededDeleteLatestHistoryEntry: {},
+  FailedDeleteLatestHistoryEntry: {
+    message: Schema.String,
+  },
 })
 export type Message = typeof Message.Type
 
@@ -1316,6 +1322,30 @@ export const LoadHistoryEntryAt = Command.define("LoadHistoryEntryAt", {
         Effect.succeed(
           Message.FailedLoadHistoryEntryAt({
             message: `Version konnte nicht geladen werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const DeleteLatestFileHistoryEntry = Command.define("DeleteLatestFileHistoryEntry", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+  },
+  messages: [Message.SucceededDeleteLatestHistoryEntry, Message.FailedDeleteLatestHistoryEntry],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        await truncateLatestFileHistoryEntry(args.subPath, args.fileName)
+        return Message.SucceededDeleteLatestHistoryEntry()
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedDeleteLatestHistoryEntry({
+            message: `Neueste Version konnte nicht gelöscht werden: ${error.message}`,
           }),
         ),
       ),
@@ -2986,6 +3016,48 @@ export const update = (
         outMessage: OutMessage.None(),
       }
     },
+
+    ClickedDeleteLatestHistoryEntry: () => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model,
+        commands: [
+          DeleteLatestFileHistoryEntry({
+            subPath: context.subPath,
+            fileName: model.originalName,
+          }),
+        ],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    SucceededDeleteLatestHistoryEntry: () => {
+      if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const nextEntries = model.historyState.entries.slice(1)
+      return {
+        model: modifyFields(model, {
+          maybeOpfsHistoryCursor: () => Option.none(),
+          historyState: () => HistoryState.Open({ entries: nextEntries, isConfirmingClear: false }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    FailedDeleteLatestHistoryEntry: ({ message: errorMessage }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Error({ message: errorMessage }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
   })
 
 // VIEW
@@ -4165,6 +4237,9 @@ const formatHistoryTimestamp = (timestampMs: number): string =>
 const formatHistorySize = (byteLength: number): string =>
   byteLength < 1024 ? `${byteLength} Bytes` : `${(byteLength / 1024).toFixed(1)} KB`
 
+const formatHistoryHash = (contentHash: number): string =>
+  (contentHash >>> 0).toString(16).padStart(8, "0")
+
 const viewHistoryOverlay = (
   historyState: HistoryState,
   h: Html.HtmlBuilder<Message>,
@@ -4257,6 +4332,21 @@ const viewHistoryOverlay = (
                                   h.button(
                                     [
                                       h.Type("button"),
+                                      h.Id("editor-history-delete-latest-btn"),
+                                      h.Class("btn btn-secondary icon-label-btn"),
+                                      h.OnClick(Message.ClickedDeleteLatestHistoryEntry()),
+                                    ],
+                                    [
+                                      h.span(
+                                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                        [viewIcon("trash", h)],
+                                      ),
+                                      h.span([h.Class("icon-label-btn-text")], ["Neueste löschen"]),
+                                    ],
+                                  ),
+                                  h.button(
+                                    [
+                                      h.Type("button"),
                                       h.Id("editor-history-clear-btn"),
                                       h.Class("btn btn-danger icon-label-btn"),
                                       h.OnClick(Message.ClickedRequestClearHistory()),
@@ -4288,6 +4378,10 @@ const viewHistoryOverlay = (
                                       h.span(
                                         [h.Class("editor-history-lines")],
                                         [formatHistorySize(entry.byteLength)],
+                                      ),
+                                      h.code(
+                                        [h.Class("editor-history-hash")],
+                                        [formatHistoryHash(entry.contentHash)],
                                       ),
                                     ],
                                   ),

@@ -278,6 +278,38 @@ export const loadFileHistoryEntryAt = async (
 }
 
 /**
+ * Entfernt nur den neuesten Eintrag am Dateiende durch Trunkieren der OPFS-Verlaufsdatei.
+ */
+export const truncateLatestFileHistoryEntry = async (
+  subPath: ReadonlyArray<string>,
+  fileName: string,
+): Promise<void> => {
+  const maybeFileHandle = await getOpfsHistoryFileHandle(subPath, fileName, false)
+  if (Option.isNone(maybeFileHandle)) {
+    return
+  }
+  const fileHandle = maybeFileHandle.value
+  const file = await fileHandle.getFile()
+  const maybeMeta = await readHistoryMetaAt(
+    (start, end) => file.slice(start, end).arrayBuffer(),
+    file.size,
+  )
+  if (Option.isNone(maybeMeta)) {
+    return
+  }
+  if (maybeMeta.value.offset === 0) {
+    await clearFileHistory(subPath, fileName)
+    return
+  }
+  const writable = await fileHandle.createWritable({ keepExistingData: true })
+  try {
+    await writable.truncate(maybeMeta.value.offset)
+  } finally {
+    await writable.close()
+  }
+}
+
+/**
  * Löscht die gespeicherte Versionshistorie einer Datei im OPFS.
  */
 export const clearFileHistory = async (
