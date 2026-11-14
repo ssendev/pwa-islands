@@ -1,5 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
-import { Array, Effect, Match, Option, Queue, Schema, Stream, pipe } from "effect"
+import { Array, Duration, Effect, Match, Option, Queue, Schema, Stream, pipe } from "effect"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
 import type * as Html from "foldkit/html"
@@ -60,7 +60,7 @@ import {
   checkFileExists,
 } from "./files"
 import * as Modal from "./modal"
-import { AlertBanner } from "./modal"
+import { AlertBanner, Toast, view as viewToasts } from "./toast"
 import {
   AppRoute,
   buildEditUrl,
@@ -300,7 +300,6 @@ export const ClearAllHistoryState = defineTaggedUnion({
   Confirming: {},
   Clearing: {},
   Done: {},
-  Error: { message: Schema.String },
 })
 export type ClearAllHistoryState = typeof ClearAllHistoryState.Type
 
@@ -364,7 +363,8 @@ export const Model = Schema.Struct({
   clearAllHistoryState: ClearAllHistoryState,
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
-  maybeAlertBanner: Schema.Option(AlertBanner),
+  toasts: Schema.Array(Toast),
+  nextToastId: Schema.Number,
   maybeActiveIslandUrl: Schema.Option(Schema.String),
   maybeActiveIslandPath: Schema.Option(Schema.String),
   returnClickId: Schema.Number,
@@ -435,7 +435,12 @@ export const Message = defineMessageUnion({
     entries: Schema.Array(FileEntry),
   },
   ClickedRetryList: {},
-  ClickedDismissAlert: {},
+  ClickedDismissToast: {
+    id: Schema.Number,
+  },
+  CompletedWaitBeforeDismissToast: {
+    id: Schema.Number,
+  },
   ClickedBreadcrumbRoot: {},
   ClickedBreadcrumbSegment: {
     index: Schema.Number,
@@ -1572,6 +1577,17 @@ export const CloseWindow = Command.define("CloseWindow", {
   ),
 })
 
+export const WaitBeforeDismissToast = Command.define("WaitBeforeDismissToast", {
+  args: {
+    id: Schema.Number,
+  },
+  messages: [Message.CompletedWaitBeforeDismissToast],
+  execute: ({ id }) =>
+    Effect.sleep(Duration.seconds(6)).pipe(
+      Effect.as(Message.CompletedWaitBeforeDismissToast({ id })),
+    ),
+})
+
 export const ScheduleReturnArrowClick = Command.define("ScheduleReturnArrowClick", {
   args: {
     clickId: Schema.Number,
@@ -1833,11 +1849,15 @@ export const init = (
         clearAllHistoryState: ClearAllHistoryState.Idle(),
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.getOrElse(maybeInitialModal, Modal.close),
-        maybeAlertBanner: Option.some({
-          message:
-            "Ihr Browser unterstützt weder die File System Access API noch das Origin Private File System (OPFS).",
-          variant: "warning",
-        }),
+        toasts: [
+          {
+            id: 1,
+            message:
+              "Ihr Browser unterstützt weder die File System Access API noch das Origin Private File System (OPFS).",
+            variant: "warning",
+          },
+        ],
+        nextToastId: 2,
         maybeActiveIslandUrl: Option.none(),
         maybeActiveIslandPath: Option.none(),
         returnClickId: 0,
@@ -1894,7 +1914,8 @@ export const init = (
       clearAllHistoryState: ClearAllHistoryState.Idle(),
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
-      maybeAlertBanner: Option.none(),
+      toasts: [],
+      nextToastId: 1,
       maybeActiveIslandUrl: Option.none(),
       maybeActiveIslandPath: Option.none(),
       returnClickId: 0,
@@ -1941,6 +1962,44 @@ const syncOpenEditor = (
     : { model: editorModelsLoad.model }
 }
 
+const enqueueToast = (
+  model: Model,
+  banner: AlertBanner,
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} => {
+  const toastId = model.nextToastId
+  const toast: Toast = {
+    id: toastId,
+    message: banner.message,
+    variant: banner.variant,
+  }
+  const nextModel = modifyFields(model, {
+    toasts: (toasts) => [...toasts, toast],
+    nextToastId: (id) => id + 1,
+  })
+  if (banner.variant === "info") {
+    return {
+      model: nextModel,
+      commands: [WaitBeforeDismissToast({ id: toastId })],
+    }
+  }
+  return { model: nextModel }
+}
+
+const enqueueMaybeToast = (
+  model: Model,
+  maybeBanner: Option.Option<AlertBanner>,
+): {
+  readonly model: Model
+  readonly commands?: ReadonlyArray<Command.Command<Message>>
+} =>
+  Option.match(maybeBanner, {
+    onNone: () => ({ model }),
+    onSome: (banner) => enqueueToast(model, banner),
+  })
+
 const handleStorageActivated = (
   model: Model,
   payload: {
@@ -1964,7 +2023,7 @@ const handleStorageActivated = (
     otherBackend: payload.otherBackend,
   })
 
-  const nextModel = modifyFields(model, {
+  const baseModel = modifyFields(model, {
     storageState: () => readyStorage,
     modalState: () =>
       Option.match(payload.maybeModalState, {
@@ -1976,8 +2035,8 @@ const handleStorageActivated = (
             editorSplitPercent: model.editorSplitPercent,
           }),
       }),
-    maybeAlertBanner: () => payload.maybeAlertBanner,
   })
+  const toastResult = enqueueMaybeToast(baseModel, payload.maybeAlertBanner)
 
   const editorFocusCommands: ReadonlyArray<Command.Command<Message>> = Option.exists(
     payload.maybeModalState,
@@ -1986,7 +2045,10 @@ const handleStorageActivated = (
     ? [toModalCommand(Modal.FocusModalNameInput())]
     : []
 
-  return syncOpenEditor(nextModel, editorFocusCommands)
+  return syncOpenEditor(toastResult.model, [
+    ...editorFocusCommands,
+    ...(toastResult.commands ?? []),
+  ])
 }
 
 const handlePermissionRequired = (
@@ -2177,15 +2239,11 @@ export const update = (
     CompletedInitializeStoragePermissionRequired: (payload) =>
       handlePermissionRequired(model, payload),
     CompletedInitializeStorageNoFolderSelected: (payload) => handleNoFolderSelected(model, payload),
-    FailedInitializeStorage: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
+    FailedInitializeStorage: ({ message: errorMessage }) =>
+      enqueueToast(model, {
+        message: errorMessage,
+        variant: "danger",
       }),
-    }),
     CompletedLoadFileInfoPreference: ({ visible }) => ({
       model: modifyFields(model, {
         showFileInfo: () => visible,
@@ -2203,7 +2261,6 @@ export const update = (
               subPath: () => subPath,
               entriesState: () => EntriesState.Loaded({ entries }),
             }),
-          maybeAlertBanner: () => Option.none(),
         }),
       })),
 
@@ -2225,40 +2282,37 @@ export const update = (
               subPath: () => subPath,
               entriesState: () => EntriesState.Loaded({ entries }),
             }),
-          maybeAlertBanner: () => Option.none(),
         }),
       })),
 
-    FailedNavigateToSubfolder: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
+    FailedNavigateToSubfolder: ({ message: errorMessage }) =>
+      enqueueToast(model, {
+        message: errorMessage,
+        variant: "danger",
       }),
-    }),
 
     ClickedRetryList: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
-        model: modifyFields(model, {
-          maybeAlertBanner: () => Option.none(),
-        }),
+        model,
         commands: [RefreshEntries({ subPath })],
       }
     },
 
-    ClickedDismissAlert: () => ({
+    ClickedDismissToast: ({ id }) => ({
       model: modifyFields(model, {
-        maybeAlertBanner: () => Option.none(),
+        toasts: (toasts) => Array.filter(toasts, (toast) => toast.id !== id),
+      }),
+    }),
+
+    CompletedWaitBeforeDismissToast: ({ id }) => ({
+      model: modifyFields(model, {
+        toasts: (toasts) => Array.filter(toasts, (toast) => toast.id !== id),
       }),
     }),
 
     ClickedBreadcrumbRoot: () => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () => Option.none(),
-      }),
+      model: modifyFields(model, {}),
       commands: [PushUrl({ url: buildFolderUrl([]) })],
     }),
 
@@ -2266,9 +2320,7 @@ export const update = (
       const currentSubPath = currentSubPathFromStorageState(model.storageState)
       const targetSubPath = Array.take(currentSubPath, index + 1)
       return {
-        model: modifyFields(model, {
-          maybeAlertBanner: () => Option.none(),
-        }),
+        model: modifyFields(model, {}),
         commands: [PushUrl({ url: buildFolderUrl(targetSubPath) })],
       }
     },
@@ -2278,9 +2330,7 @@ export const update = (
       if (entry.kind === "directory") {
         const targetSubPath = [...subPath, entry.name]
         return {
-          model: modifyFields(model, {
-            maybeAlertBanner: () => Option.none(),
-          }),
+          model: modifyFields(model, {}),
           commands: [PushUrl({ url: buildFolderUrl(targetSubPath) })],
         }
       }
@@ -2291,15 +2341,12 @@ export const update = (
           model: modifyFields(model, {
             maybeActiveIslandUrl: () => Option.some(islandUrl),
             maybeActiveIslandPath: () => Option.some(fileUrl),
-            maybeAlertBanner: () => Option.none(),
           }),
           commands: [PushUrl({ url: fileUrl })],
         }
       }
       return {
-        model: modifyFields(model, {
-          maybeAlertBanner: () => Option.none(),
-        }),
+        model: modifyFields(model, {}),
         commands: [
           OpenFileInBrowser({
             subPath,
@@ -2336,7 +2383,6 @@ export const update = (
           return {
             model: modifyFields(model, {
               returnClickId: () => nextClickId,
-              maybeAlertBanner: () => Option.none(),
             }),
           }
         }
@@ -2345,7 +2391,6 @@ export const update = (
         return {
           model: modifyFields(model, {
             returnClickId: () => nextClickId,
-            maybeAlertBanner: () => Option.none(),
           }),
           commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: parentSubPath })],
         }
@@ -2359,7 +2404,6 @@ export const update = (
           returnClickId: () => nextClickId,
           maybeActiveIslandUrl: () => Option.none(),
           maybeActiveIslandPath: () => Option.none(),
-          maybeAlertBanner: () => Option.none(),
         }),
         commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: folderSubPath })],
       }
@@ -2377,9 +2421,7 @@ export const update = (
         const parentSubPath = Array.dropRight(currentSubPath, 1)
         const targetUrl = buildFolderUrl(parentSubPath)
         return {
-          model: modifyFields(model, {
-            maybeAlertBanner: () => Option.none(),
-          }),
+          model: modifyFields(model, {}),
           commands: [PushUrl({ url: targetUrl }), RefreshEntries({ subPath: parentSubPath })],
         }
       }
@@ -2549,7 +2591,6 @@ export const update = (
                   model: modifyFields(modelWithRoute, {
                     isSettingsOpen: () => false,
                     modalState: () => nextModalState,
-                    maybeAlertBanner: () => Option.none(),
                   }),
                   ...(wasIslandOpen ? { commands: [RefreshEntries({ subPath })] } : {}),
                 }
@@ -2558,7 +2599,6 @@ export const update = (
                 model: modifyFields(modelWithRoute, {
                   isSettingsOpen: () => false,
                   modalState: () => nextModalState,
-                  maybeAlertBanner: () => Option.none(),
                   storageState: () =>
                     modifyFields(readyState, {
                       entriesState: () => EntriesState.Loading(),
@@ -2571,7 +2611,6 @@ export const update = (
               model: modifyFields(modelWithRoute, {
                 isSettingsOpen: () => false,
                 modalState: () => nextModalState,
-                maybeAlertBanner: () => Option.none(),
               }),
             })),
           )
@@ -2591,7 +2630,6 @@ export const update = (
             const nextModel = modifyFields(modelWithRoute, {
               isSettingsOpen: () => false,
               modalState: () => newModalState,
-              maybeAlertBanner: () => Option.none(),
               ...(isSamePath
                 ? {}
                 : {
@@ -2742,11 +2780,16 @@ export const update = (
       }),
     }),
 
-    FailedClearAllHistory: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        clearAllHistoryState: () => ClearAllHistoryState.Error({ message: errorMessage }),
-      }),
-    }),
+    FailedClearAllHistory: ({ message: errorMessage }) =>
+      enqueueToast(
+        modifyFields(model, {
+          clearAllHistoryState: () => ClearAllHistoryState.Idle(),
+        }),
+        {
+          message: errorMessage,
+          variant: "danger",
+        },
+      ),
 
     ToggledSettingsHistoryEnabled: ({ isEnabled }) => ({
       model: modifyFields(model, {
@@ -3191,65 +3234,45 @@ export const update = (
 
     SucceededPickLocalDirectory: (payload) => handleStorageActivated(model, payload),
     CancelledPickLocalDirectory: () => ({ model }),
-    FailedPickLocalDirectory: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
+    FailedPickLocalDirectory: ({ message: errorMessage }) =>
+      enqueueToast(model, {
+        message: errorMessage,
+        variant: "danger",
       }),
-    }),
 
     SucceededGrantDirectoryPermission: (payload) => handleStorageActivated(model, payload),
     CompletedGrantDirectoryPermissionNoFolderSelected: (payload) =>
       handleNoFolderSelected(model, payload),
-    FailedGrantDirectoryPermission: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
+    FailedGrantDirectoryPermission: ({ message: errorMessage }) =>
+      enqueueToast(model, {
+        message: errorMessage,
+        variant: "danger",
       }),
-    }),
 
     SucceededActivateOpfsBackend: (payload) => handleStorageActivated(model, payload),
-    FailedActivateOpfsBackend: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
+    FailedActivateOpfsBackend: ({ message: errorMessage }) =>
+      enqueueToast(model, {
+        message: errorMessage,
+        variant: "danger",
       }),
-    }),
 
     SucceededActivateFsaBackend: (payload) => handleStorageActivated(model, payload),
     CompletedActivateFsaBackendPermissionRequired: (payload) =>
       handlePermissionRequired(model, payload),
     CompletedActivateFsaBackendNoFolderSelected: (payload) =>
       handleNoFolderSelected(model, payload),
-    FailedActivateFsaBackend: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
+    FailedActivateFsaBackend: ({ message: errorMessage }) =>
+      enqueueToast(model, {
+        message: errorMessage,
+        variant: "danger",
       }),
-    }),
 
     SucceededDisconnectStorage: (payload) => handleNoFolderSelected(model, payload),
-    FailedDisconnectStorage: ({ message: errorMessage }) => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () =>
-          Option.some({
-            message: errorMessage,
-            variant: "danger",
-          }),
+    FailedDisconnectStorage: ({ message: errorMessage }) =>
+      enqueueToast(model, {
+        message: errorMessage,
+        variant: "danger",
       }),
-    }),
 
     // Toolbar & Triggers
     ClickedNewFile: () => {
@@ -3262,7 +3285,6 @@ export const update = (
               llmBarMode: model.editorLlmBarMode,
               editorSplitPercent: model.editorSplitPercent,
             }),
-          maybeAlertBanner: () => Option.none(),
         }),
         [
           PushUrl({ url: buildNewUrl(subPath, "file") }),
@@ -3277,7 +3299,6 @@ export const update = (
       return {
         model: modifyFields(model, {
           modalState: () => Modal.openCreate("folder"),
-          maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           PushUrl({ url: buildNewUrl(subPath, "folder") }),
@@ -3287,9 +3308,7 @@ export const update = (
     },
 
     ClickedImportFiles: () => ({
-      model: modifyFields(model, {
-        maybeAlertBanner: () => Option.none(),
-      }),
+      model: modifyFields(model, {}),
       commands: [toModalCommand(Modal.SelectImportFiles())],
     }),
 
@@ -3299,7 +3318,6 @@ export const update = (
         return {
           model: modifyFields(model, {
             modalState: () => Modal.openEditFolder(entry.name),
-            maybeAlertBanner: () => Option.none(),
           }),
           commands: [
             PushUrl({ url: buildEditUrl(subPath, entry.name) }),
@@ -3310,9 +3328,7 @@ export const update = (
 
       const editorModelsLoad = maybeLoadEditorLlmModels(model)
       return {
-        model: modifyFields(editorModelsLoad.model, {
-          maybeAlertBanner: () => Option.none(),
-        }),
+        model: modifyFields(editorModelsLoad.model, {}),
         commands: [
           PushUrl({ url: buildEditUrl(subPath, entry.name) }),
           toModalCommand(Modal.InspectFileForEditor({ entryName: entry.name, subPath })),
@@ -3329,7 +3345,6 @@ export const update = (
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           modalState: () => Modal.openHelp(Option.some(activeTopic)),
-          maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           PushUrl({
@@ -3387,7 +3402,6 @@ export const update = (
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           modalState: Modal.close,
-          maybeAlertBanner: () => Option.none(),
         }),
         commands: [
           ReplaceUrl({ url: buildFolderUrl(subPath) }),
@@ -3483,7 +3497,6 @@ export const update = (
         ReplaceUrl: ({ url }) => ({
           model: modifyFields(model, {
             modalState: () => modalResult.model,
-            maybeAlertBanner: () => Option.none(),
           }),
           commands: [...mappedCommands, ReplaceUrl({ url })],
         }),
@@ -3506,29 +3519,37 @@ export const update = (
             Match.orElse(() => model.storageState),
           )
 
-          const commands: ReadonlyArray<Command.Command<Message>> = shouldReplaceUrl
-            ? [...mappedCommands, ReplaceUrl({ url: buildFolderUrl(subPath) })]
-            : mappedCommands
+          const baseModel = modifyFields(model, {
+            storageState: () => nextStorageState,
+            modalState: () => modalResult.model,
+          })
+          const toastResult = enqueueMaybeToast(baseModel, maybeAlertBanner)
+          const commands: ReadonlyArray<Command.Command<Message>> = [
+            ...mappedCommands,
+            ...(shouldReplaceUrl ? [ReplaceUrl({ url: buildFolderUrl(subPath) })] : []),
+            ...(toastResult.commands ?? []),
+          ]
 
           return {
-            model: modifyFields(model, {
-              storageState: () => nextStorageState,
-              modalState: () => modalResult.model,
-              maybeAlertBanner: () => maybeAlertBanner,
-            }),
+            model: toastResult.model,
             commands,
           }
         },
 
         ShowAlert: ({ banner, replaceUrl: shouldReplaceUrl }) => {
-          const commands: ReadonlyArray<Command.Command<Message>> = shouldReplaceUrl
-            ? [...mappedCommands, ReplaceUrl({ url: buildFolderUrl(subPath) })]
-            : mappedCommands
-          return {
-            model: modifyFields(model, {
+          const toastResult = enqueueToast(
+            modifyFields(model, {
               modalState: () => modalResult.model,
-              maybeAlertBanner: () => Option.some(banner),
             }),
+            banner,
+          )
+          const commands: ReadonlyArray<Command.Command<Message>> = [
+            ...mappedCommands,
+            ...(shouldReplaceUrl ? [ReplaceUrl({ url: buildFolderUrl(subPath) })] : []),
+            ...(toastResult.commands ?? []),
+          ]
+          return {
+            model: toastResult.model,
             commands,
           }
         },
@@ -4656,22 +4677,6 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           ),
                         ],
                       ),
-                    Error: ({ message: errorMessage }) =>
-                      h.div(
-                        [h.Class("settings-group-actions")],
-                        [
-                          h.div([h.Class("alert alert-danger"), h.Role("alert")], [errorMessage]),
-                          h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-clear-all-history"),
-                              h.Class("btn btn-danger"),
-                              h.OnClick(Message.ClickedRequestClearAllHistory()),
-                            ],
-                            [viewIcon("trash", h), " Alle Versionen löschen"],
-                          ),
-                        ],
-                      ),
                   }),
                 ],
               ),
@@ -5224,35 +5229,6 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
 
 // VIEW CONTENT
 
-const viewAlertContainer = (model: Model, h: HtmlBuilder): Html.Html =>
-  Option.match(model.maybeAlertBanner, {
-    onNone: () => h.div([h.Id("files-alert-area"), h.AriaLive("polite")]),
-    onSome: (banner) =>
-      h.div(
-        [h.Id("files-alert-area"), h.AriaLive("polite")],
-        [
-          h.div(
-            [
-              h.Class(`alert alert-${banner.variant} alert-dismissible`),
-              h.Role(banner.variant === "danger" ? "alert" : "status"),
-            ],
-            [
-              h.span([h.Class("alert-message")], [banner.message]),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Class("alert-close-btn"),
-                  h.AriaLabel("Hinweis schließen"),
-                  h.OnClick(Message.ClickedDismissAlert()),
-                ],
-                [viewIcon("close", h)],
-              ),
-            ],
-          ),
-        ],
-      ),
-  })
-
 const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): Html.Html => {
   const isDir = entry.kind === "directory"
   const icon = fileIconFor(entry.name, isDir)
@@ -5723,7 +5699,6 @@ const viewManagerMain = (model: Model, title: string, h: HtmlBuilder): Html.Html
         [h.Class(showWindowsTitlebar ? "files-page has-windows-titlebar" : "files-page")],
         [
           viewToolbar(model, h),
-          viewAlertContainer(model, h),
           viewContentSection(model, h),
           viewModalContainer(model, h),
           viewSettingsDialog(model, h),
@@ -5753,6 +5728,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
               h,
             ),
         }),
+        viewToasts(model.toasts, (id) => Message.ClickedDismissToast({ id }), h),
       ],
     ),
   }

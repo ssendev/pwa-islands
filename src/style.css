@@ -59,6 +59,24 @@
     background-color: rgba(59, 130, 246, 0.15);
     border-color: rgba(59, 130, 246, 0.35);
   }
+
+  .toast.alert-info {
+    background-color: #172554;
+    border-color: #3b82f6;
+    color: #bfdbfe;
+  }
+
+  .toast.alert-warning {
+    background-color: #451a03;
+    border-color: #f59e0b;
+    color: #fde68a;
+  }
+
+  .toast.alert-danger {
+    background-color: #450a0a;
+    border-color: #ef4444;
+    color: #fecaca;
+  }
 }
 
 body {
@@ -727,6 +745,62 @@ code {
   background-color: rgba(59, 130, 246, 0.1);
   border: 1px solid rgba(59, 130, 246, 0.3);
   color: #1d4ed8;
+}
+
+/* Global Floating Toasts */
+.toast-container {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  max-width: 100%;
+  margin-bottom: 0;
+  padding: 14px 18px;
+  font-size: 18px;
+  box-shadow:
+    0 10px 25px rgba(0, 0, 0, 0.18),
+    0 4px 10px rgba(0, 0, 0, 0.1);
+  animation: toastSlideIn 0.18s ease-out;
+}
+
+.toast.alert-info {
+  background-color: #eff6ff;
+  border-color: #93c5fd;
+  color: #1e40af;
+}
+
+.toast.alert-warning {
+  background-color: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.toast.alert-danger {
+  background-color: #fef2f2;
+  border-color: #fca5a5;
+  color: #991b1b;
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Modal Dialog Styles */

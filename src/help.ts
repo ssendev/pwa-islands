@@ -9,6 +9,7 @@ import { modifyFields } from "foldkit/struct"
 import { viewIcon } from "./icons"
 import { HelpTopic, buildHelpUrl } from "./route"
 import { OPFS_APP_FOLDER } from "./storage"
+import { AlertBanner } from "./toast"
 
 export { HelpTopic }
 
@@ -20,9 +21,6 @@ export const CopyDtsState = defineTaggedUnion({
   Idle: {},
   Copying: {},
   Copied: {},
-  Error: {
-    message: Schema.String,
-  },
 })
 export type CopyDtsState = typeof CopyDtsState.Type
 
@@ -54,6 +52,9 @@ export const OutMessage = defineTaggedUnion({
   None: {},
   ReplaceUrl: {
     url: Schema.String,
+  },
+  ShowAlert: {
+    banner: AlertBanner,
   },
   CloseModal: {},
 })
@@ -176,16 +177,20 @@ export const update = (
           }),
         Idle: () => model,
         Copying: () => model,
-        Error: () => model,
       }),
       outMessage: OutMessage.None(),
     }),
 
     FailedCopyApiDtsToClipboard: ({ message: errorMessage }) => ({
       model: modifyFields(model, {
-        copyDtsState: () => CopyDtsState.Error({ message: errorMessage }),
+        copyDtsState: () => CopyDtsState.Idle(),
       }),
-      outMessage: OutMessage.None(),
+      outMessage: OutMessage.ShowAlert({
+        banner: {
+          message: `Kopieren hat nicht geklappt: ${errorMessage} Öffnen Sie /api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`,
+          variant: "danger",
+        },
+      }),
     }),
 
     CompletedScrollHelpTopicIntoView: () => ({
@@ -980,18 +985,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                     ),
                   ],
                 ),
-                CopyDtsState.match(model.copyDtsState, {
-                  Error: ({ message }) =>
-                    h.div(
-                      [h.Id("help-copy-error"), h.Class("alert alert-danger")],
-                      [
-                        `Kopieren hat nicht geklappt: ${message} Öffnen Sie ${context.origin}/api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`,
-                      ],
-                    ),
-                  Copied: () => h.empty,
-                  Copying: () => h.empty,
-                  Idle: () => h.empty,
-                }),
               ],
             ),
             h.footer(
@@ -1013,7 +1006,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                             Idle: () => false,
                             Copying: () => true,
                             Copied: () => false,
-                            Error: () => false,
                           }),
                         ),
                         h.OnClick(Message.ClickedCopyDts()),
@@ -1035,11 +1027,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                             h.span(
                               [h.Class("icon-label-btn-text")],
                               [viewIcon("check", h), " Kopiert!"],
-                            ),
-                          Error: () =>
-                            h.span(
-                              [h.Class("icon-label-btn-text")],
-                              ["/api.d.ts", h.span([h.Class("copy-dts-action")], [" kopieren"])],
                             ),
                         }),
                       ],

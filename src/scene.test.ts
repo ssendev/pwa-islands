@@ -33,6 +33,7 @@ import {
   StorageState,
   TestLlm,
   ToggleFullscreenWindow,
+  WaitBeforeDismissToast,
   update,
   view,
   LlmTestState,
@@ -116,7 +117,8 @@ const readyModel: Model = {
   clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
-  maybeAlertBanner: Option.none(),
+  toasts: [],
+  nextToastId: 1,
   maybeActiveIslandUrl: Option.none(),
   maybeActiveIslandPath: Option.none(),
   returnClickId: 0,
@@ -171,7 +173,6 @@ describe("PWA Islands Scene Tests", () => {
             edit: BinaryEdit.Disabled(),
           }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Closed",
           llmChatInput: "",
@@ -265,6 +266,7 @@ describe("PWA Islands Scene Tests", () => {
         Editor.Message.SucceededCopyApiDtsToClipboard(),
       ),
       sceneExpect(text("/api.d.ts in die Zwischenablage kopiert")).toExist(),
+      Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
       click(selector("#modal-btn-copy-hashes")),
       Command.expectExact(
         Editor.CopyFileHashesToClipboard({
@@ -275,6 +277,7 @@ describe("PWA Islands Scene Tests", () => {
       ),
       Command.resolve(Editor.CopyFileHashesToClipboard, Editor.Message.SucceededCopyFileHashes()),
       sceneExpect(text("Datei mit Hashes in die Zwischenablage kopiert")).toExist(),
+      Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 2 })),
       click(selector("#modal-btn-copy-llm")),
       Command.expectExact(
         Editor.CopyLlmContextToClipboard({
@@ -284,9 +287,11 @@ describe("PWA Islands Scene Tests", () => {
         }),
       ),
       Command.resolve(Editor.CopyLlmContextToClipboard, Editor.Message.SucceededCopyLlmContext()),
-      sceneExpect(text("Datei und /api.d.ts für KI in die Zwischenablage kopiert")).toExist(),
-      sceneExpect(selector(".modal-overlay #modal-alert-area")).toExist(),
-      sceneExpect(selector("#files-alert-area .alert")).toBeAbsent(),
+      sceneExpect(selector("#toast-container .toast.alert-info")).toContainText(
+        "Datei und /api.d.ts für KI in die Zwischenablage kopiert",
+      ),
+      Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 3 })),
+      sceneExpect(selector("#toast-container .toast")).toBeAbsent(),
     )
   })
 
@@ -557,7 +562,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: original }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Copy",
           llmChatInput: "",
@@ -593,14 +597,12 @@ describe("PWA Islands Scene Tests", () => {
           fileName: "index.html",
           changedLines: `1:${hashLine("<p>Neu</p>")}|<p>Neu</p>`,
         }),
+        WaitBeforeDismissToast({ id: 1 }),
       ),
-      Command.resolve(
-        Editor.CopyUpdatedHashesToClipboard,
-        Editor.Message.SucceededCopyUpdatedHashes(),
+      Command.resolveAll(
+        [Editor.CopyUpdatedHashesToClipboard, Editor.Message.SucceededCopyUpdatedHashes()],
+        [WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })],
       ),
-      sceneExpect(
-        text("1 Bearbeitung(en) angewendet – neue Hashes in die Zwischenablage kopiert"),
-      ).toExist(),
       sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Einfügen"),
     )
   })
@@ -615,7 +617,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: "<p>Alt</p>" }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Copy",
           llmChatInput: "",
@@ -646,12 +647,11 @@ describe("PWA Islands Scene Tests", () => {
           text: "<<<<<<< SEARCH\n<p>Alt</p>\n=======\n<p>Neu</p>\n>>>>>>> REPLACE",
         }),
       ),
-      Command.expectExact(Editor.ClearClipboardAfterPaste()),
-      Command.resolve(
-        Editor.ClearClipboardAfterPaste,
-        Editor.Message.CompletedClearClipboardAfterPaste(),
+      Command.expectExact(Editor.ClearClipboardAfterPaste(), WaitBeforeDismissToast({ id: 1 })),
+      Command.resolveAll(
+        [Editor.ClearClipboardAfterPaste, Editor.Message.CompletedClearClipboardAfterPaste()],
+        [WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })],
       ),
-      sceneExpect(text("1 Bearbeitung(en) angewendet – Zwischenablage geleert")).toExist(),
     )
   })
 
@@ -664,7 +664,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: "<p>Alt</p>" }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Copy",
           llmChatInput: "",
@@ -714,7 +713,6 @@ describe("PWA Islands Scene Tests", () => {
       name: "index.html",
       fileMode: EditorFileMode.Text({ content: "<p>Test</p>" }),
       maybeValidationError: Option.none(),
-      maybeAlertBanner: Option.none(),
       maybePasteError: Option.none(),
       llmBarMode: "Closed",
       llmChatInput: "",
@@ -768,7 +766,6 @@ describe("PWA Islands Scene Tests", () => {
         editor: Editor.Model.CreateFolder({
           name: "Neuer Ordner",
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
         }),
       }),
     }
@@ -791,7 +788,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Closed",
           llmChatInput: "",
@@ -856,7 +852,6 @@ describe("PWA Islands Scene Tests", () => {
         editor: Editor.Model.CreateFolder({
           name: "Neuer Ordner",
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
         }),
       }),
     }
@@ -1254,7 +1249,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Closed",
           llmChatInput: "",
@@ -1304,7 +1298,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: "<p>Aktuell</p>" }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Closed",
           llmChatInput: "",
@@ -1439,7 +1432,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "app.html",
           fileMode: EditorFileMode.Text({ content: "<p>Hallo</p>" }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Closed",
           llmChatInput: "",
@@ -1491,7 +1483,6 @@ describe("PWA Islands Scene Tests", () => {
           name: "index.html",
           fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: "Closed",
           llmChatInput: "",
@@ -1518,7 +1509,33 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolve(Editor.SaveChanges, Editor.Message.SucceededSaveChanges({ entries: [] })),
       sceneExpect(selector(".modal-overlay")).toExist(),
       sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Original</p>"),
-      sceneExpect(selector(".modal-body .alert-info")).toContainText("Gespeichert."),
+      sceneExpect(selector("#toast-container .toast.alert-info")).toContainText("Gespeichert."),
+      Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
+      sceneExpect(selector("#toast-container .toast")).toBeAbsent(),
+    )
+  })
+
+  it("schließt einen Fehler-Toast beim Klick auf den Schließen-Button", () => {
+    const modelWithDangerToast: Model = {
+      ...readyModel,
+      toasts: [
+        {
+          id: 1,
+          message: "Speichern fehlgeschlagen",
+          variant: "danger",
+        },
+      ],
+      nextToastId: 2,
+    }
+
+    scene(
+      { update, view },
+      given(modelWithDangerToast),
+      sceneExpect(selector("#toast-container .toast.alert-danger")).toContainText(
+        "Speichern fehlgeschlagen",
+      ),
+      click(selector("#toast-container .alert-close-btn")),
+      sceneExpect(selector("#toast-container .toast")).toBeAbsent(),
     )
   })
 

@@ -9,7 +9,7 @@ import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
 import type { EditFormat } from "./edit-format"
 import * as Editor from "./editor"
-import { AlertBanner } from "./editor"
+import { AlertBanner } from "./toast"
 import {
   BinaryEdit,
   EditorFileMode,
@@ -35,7 +35,7 @@ import {
 import type { StorageBackend } from "./files"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
-export { AlertVariant, AlertBanner } from "./editor"
+export { AlertVariant, AlertBanner } from "./toast"
 
 // MODEL
 
@@ -141,7 +141,6 @@ export const openCreate = (
         ? Editor.Model.CreateFolder({
             name: "Neuer Ordner",
             maybeValidationError: Option.none(),
-            maybeAlertBanner: Option.none(),
           })
         : Editor.makeCreateFile(templates, defaults),
   })
@@ -156,7 +155,6 @@ export const openEditFolder = (name: string): ModalState =>
       originalName: name,
       name,
       maybeValidationError: Option.none(),
-      maybeAlertBanner: Option.none(),
     }),
   })
 
@@ -363,7 +361,6 @@ export const resolveModalForRoute = async (
                   name: targetEntry.name,
                   fileMode,
                   maybeValidationError: Option.none(),
-                  maybeAlertBanner: Option.none(),
                   maybePasteError: Option.none(),
                   llmBarMode: "Closed",
                   llmChatInput: "",
@@ -660,14 +657,14 @@ export const update = (
                 ? OutMessage.ReplaceUrl({ url: buildFolderUrl(context.subPath) })
                 : OutMessage.None(),
             }),
-            EntriesUpdated: ({ entries, closeModal }) => ({
+            EntriesUpdated: ({ entries, closeModal, maybeAlertBanner }) => ({
               model: closeModal
                 ? ModalState.Closed()
                 : ModalState.Editor({ editor: editorResult.model }),
               commands: mappedCommands,
               outMessage: OutMessage.EntriesUpdated({
                 entries,
-                maybeAlertBanner: Option.none(),
+                maybeAlertBanner,
                 replaceUrl: closeModal,
               }),
             }),
@@ -746,6 +743,23 @@ export const update = (
                     model: ModalState.Help({ help: helpResult.model }),
                     outMessage: OutMessage.ReplaceUrl({ url }),
                   },
+            ShowAlert: ({ banner }) =>
+              Array.isReadonlyArrayNonEmpty(mappedCommands)
+                ? {
+                    model: ModalState.Help({ help: helpResult.model }),
+                    commands: mappedCommands,
+                    outMessage: OutMessage.ShowAlert({
+                      banner,
+                      replaceUrl: false,
+                    }),
+                  }
+                : {
+                    model: ModalState.Help({ help: helpResult.model }),
+                    outMessage: OutMessage.ShowAlert({
+                      banner,
+                      replaceUrl: false,
+                    }),
+                  },
             CloseModal: () => ({
               model: ModalState.Closed(),
               commands: [...mappedCommands, RevokeActivePreviewUrl()],
@@ -771,7 +785,6 @@ export const update = (
           name: originalName,
           fileMode,
           maybeValidationError: Option.none(),
-          maybeAlertBanner: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: context.editorDefaults?.llmBarMode ?? "Closed",
           llmChatInput: "",

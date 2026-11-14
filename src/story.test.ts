@@ -1,4 +1,4 @@
-import { Match, Option } from "effect"
+import { Option } from "effect"
 import { modifyFields } from "foldkit/struct"
 import { Command, given, message, model, story } from "foldkit/story"
 import { fromString } from "foldkit/url"
@@ -47,6 +47,7 @@ import {
   ToggleMaximizeWindow,
   ToggleFullscreenWindow,
   ExitFullscreenWindow,
+  WaitBeforeDismissToast,
   init,
   parseIslandWindowMessage,
   update,
@@ -140,7 +141,8 @@ const readyModel: Model = {
   clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
-  maybeAlertBanner: Option.none(),
+  toasts: [],
+  nextToastId: 1,
   maybeActiveIslandUrl: Option.none(),
   maybeActiveIslandPath: Option.none(),
   returnClickId: 0,
@@ -171,7 +173,8 @@ describe("PWA Islands Story Tests", () => {
           Ready: () => false,
         }),
       ).toBe(true)
-      expect(Option.isSome(result.model.maybeAlertBanner)).toBe(true)
+      expect(result.model.toasts).toHaveLength(1)
+      expect(result.model.toasts[0]?.variant).toBe("warning")
       expect(result.commands).toBeUndefined()
     })
 
@@ -989,7 +992,6 @@ describe("PWA Islands Story Tests", () => {
           editor: Editor.Model.CreateFolder({
             name: "",
             maybeValidationError: Option.none(),
-            maybeAlertBanner: Option.none(),
           }),
         }),
       }
@@ -1005,7 +1007,6 @@ describe("PWA Islands Story Tests", () => {
               editor: Editor.Model.CreateFolder({
                 name: "",
                 maybeValidationError: Option.some("Bitte geben Sie einen Ordnernamen ein."),
-                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1021,7 +1022,6 @@ describe("PWA Islands Story Tests", () => {
                 maybeValidationError: Option.some(
                   "Der Ordnername darf keine Schrägstriche enthalten.",
                 ),
-                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1036,7 +1036,6 @@ describe("PWA Islands Story Tests", () => {
           editor: Editor.Model.CreateFolder({
             name: "projekte",
             maybeValidationError: Option.none(),
-            maybeAlertBanner: Option.none(),
           }),
         }),
       }
@@ -1054,7 +1053,6 @@ describe("PWA Islands Story Tests", () => {
                 maybeValidationError: Option.some(
                   'Ein Eintrag mit dem Namen "projekte" existiert bereits.',
                 ),
-                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1089,7 +1087,6 @@ describe("PWA Islands Story Tests", () => {
                   selectedTemplateId: "builtin:empty",
                   userTemplates: [],
                 }),
-                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1104,7 +1101,6 @@ describe("PWA Islands Story Tests", () => {
                 selectedTemplateId: "builtin:empty",
                 userTemplates: [],
               }),
-              maybeAlertBanner: Option.none(),
             }),
             subPath: [],
           }),
@@ -1157,7 +1153,6 @@ describe("PWA Islands Story Tests", () => {
             name: "index.html",
             fileMode: EditorFileMode.Text({ content: "<p>Hello</p>" }),
             maybeValidationError: Option.none(),
-            maybeAlertBanner: Option.none(),
             maybePasteError: Option.none(),
             llmBarMode: "Closed",
             llmChatInput: "",
@@ -1188,7 +1183,6 @@ describe("PWA Islands Story Tests", () => {
               editor: Editor.Model.ConfirmDelete({
                 entryName: "index.html",
                 entryKind: "file",
-                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -1209,7 +1203,7 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
-    it("handles copying LLM context in the Editor modal and keeps the alert inside the modal", () => {
+    it("handles copying LLM context in the Editor modal and shows a global toast", () => {
       const modelWithEditor: Model = {
         ...readyModel,
         modalState: ModalState.Editor({
@@ -1229,29 +1223,24 @@ describe("PWA Islands Story Tests", () => {
           }),
         ),
         Command.resolve(Editor.CopyLlmContextToClipboard, Editor.Message.SucceededCopyLlmContext()),
+        Command.expectExact(WaitBeforeDismissToast({ id: 1 })),
         model((m) => {
-          expect(m.maybeAlertBanner).toEqual(Option.none())
-          expect(
-            Match.value(m.modalState).pipe(
-              Match.tag("Editor", ({ editor }) =>
-                Match.value(editor).pipe(
-                  Match.tag("CreateFile", (createFile) => createFile.maybeAlertBanner),
-                  Match.orElse(() => Option.none()),
-                ),
-              ),
-              Match.orElse(() => Option.none()),
-            ),
-          ).toEqual(
-            Option.some({
+          expect(m.toasts).toEqual([
+            {
+              id: 1,
               message: "Datei und /api.d.ts für KI in die Zwischenablage kopiert",
               variant: "info",
-            }),
-          )
+            },
+          ])
+        }),
+        Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
+        model((m) => {
+          expect(m.toasts).toEqual([])
         }),
       )
     })
 
-    it("displays save failure alert inside the modal and not in the main app", () => {
+    it("displays save failure as a global danger toast without auto-dismiss", () => {
       const modelWithEditor: Model = {
         ...readyModel,
         modalState: ModalState.Editor({
@@ -1271,175 +1260,48 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.expectNone(),
         model((m) => {
-          expect(m.maybeAlertBanner).toEqual(Option.none())
-          expect(
-            Match.value(m.modalState).pipe(
-              Match.tag("Editor", ({ editor }) =>
-                Match.value(editor).pipe(
-                  Match.tag("CreateFile", (createFile) => createFile.maybeAlertBanner),
-                  Match.orElse(() => Option.none()),
-                ),
-              ),
-              Match.orElse(() => Option.none()),
-            ),
-          ).toEqual(
-            Option.some({
+          expect(m.toasts).toEqual([
+            {
+              id: 1,
               message: "Konnte Datei nicht speichern: Speicher voll",
               variant: "danger",
-            }),
-          )
+            },
+          ])
         }),
       )
     })
 
-    it("clears the modal alert banner when user clicks Save again in the Editor", () => {
-      const baseCreate = modifyFields(Editor.makeCreateFile(), {
-        name: () => "test.html",
-        content: () => "hello",
-      })
-      const modelWithAlert: Model = {
+    it("dismisses a global toast via ClickedDismissToast", () => {
+      const modelWithToasts: Model = {
         ...readyModel,
-        modalState: ModalState.Editor({
-          editor: modifyFields(baseCreate, {
-            maybeAlertBanner: () =>
-              Option.some({
-                message: "Ein Fehler ist aufgetreten",
-                variant: "danger",
-              }),
-          }),
-        }),
+        toasts: [
+          {
+            id: 1,
+            message: "Vorheriger Fehler",
+            variant: "danger",
+          },
+          {
+            id: 2,
+            message: "Hinweis",
+            variant: "info",
+          },
+        ],
+        nextToastId: 3,
       }
 
       story(
         update,
-        given(modelWithAlert),
-        message(editorMsg(Editor.Message.ClickedSave())),
-        Command.expectExact(
-          SaveChanges({
-            model: baseCreate,
-            subPath: [],
-          }),
-        ),
-        Command.resolve(
-          SaveChanges,
-          Editor.Message.SucceededSaveChanges({ entries: sampleEntries }),
-        ),
-        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
-        model((m) => {
-          expect(m.modalState).toEqual(ModalState.Closed())
-        }),
-      )
-    })
-
-    it("clears the modal alert banner when user clicks dismiss in the Editor", () => {
-      const modelWithAlert: Model = {
-        ...readyModel,
-        modalState: ModalState.Editor({
-          editor: modifyFields(Editor.makeCreateFile(), {
-            maybeAlertBanner: () =>
-              Option.some({
-                message: "/api.d.ts in die Zwischenablage kopiert",
-                variant: "info",
-              }),
-          }),
-        }),
-      }
-
-      story(
-        update,
-        given(modelWithAlert),
-        message(editorMsg(Editor.Message.ClickedDismissAlert())),
+        given(modelWithToasts),
+        message(Message.ClickedDismissToast({ id: 1 })),
         Command.expectNone(),
         model((m) => {
-          expect(
-            Match.value(m.modalState).pipe(
-              Match.tag("Editor", ({ editor }) =>
-                Match.value(editor).pipe(
-                  Match.tag("CreateFile", (createFile) => createFile.maybeAlertBanner),
-                  Match.orElse(() => Option.some({ message: "wrong", variant: "danger" })),
-                ),
-              ),
-              Match.orElse(() => Option.some({ message: "wrong", variant: "danger" })),
-            ),
-          ).toEqual(Option.none())
-        }),
-      )
-    })
-
-    it("clears the main app alert banner when navigating into a folder, opening/closing editor, or clicking dismiss", () => {
-      const modelWithMainAlert: Model = {
-        ...readyModel,
-        maybeAlertBanner: Option.some({
-          message: "Vorheriger Fehler",
-          variant: "danger",
-        }),
-      }
-
-      // Dismissing via ClickedDismissAlert
-      story(
-        update,
-        given(modelWithMainAlert),
-        message(Message.ClickedDismissAlert()),
-        Command.expectNone(),
-        model((m) => {
-          expect(m.maybeAlertBanner).toEqual(Option.none())
-        }),
-      )
-
-      // Clicking folder row clears main alert
-      story(
-        update,
-        given(modelWithMainAlert),
-        message(Message.ClickedEntryRow({ entry: sampleEntries[0] })),
-        Command.expectExact(PushUrl({ url: "/projekte?pwaislands" })),
-        Command.resolve(PushUrl, Message.CompletedPushUrl()),
-        model((m) => {
-          expect(m.maybeAlertBanner).toEqual(Option.none())
-        }),
-      )
-
-      // Opening editor clears main alert
-      story(
-        update,
-        given(modelWithMainAlert),
-        message(Message.ClickedNewFile()),
-        Command.expectExact(
-          PushUrl({ url: "/?pwaislands=new" }),
-          FocusModalNameInput(),
-          Editor.LoadUserTemplates(),
-        ),
-        Command.resolve(PushUrl, Message.CompletedPushUrl()),
-        Command.resolve(
-          Editor.LoadUserTemplates,
-          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
-        ),
-        Command.resolve(FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
-        model((m) => {
-          expect(m.maybeAlertBanner).toEqual(Option.none())
-          expect(m.modalState).toEqual(
-            ModalState.Editor({
-              editor: Editor.makeCreateFile(),
-            }),
-          )
-        }),
-      )
-
-      // Closing editor via Escape clears main alert
-      story(
-        update,
-        given({
-          ...modelWithMainAlert,
-          modalState: ModalState.Editor({
-            editor: Editor.makeCreateFile(),
-          }),
-        }),
-        message(Message.PressedEscape()),
-        Command.expectExact(ReplaceUrl({ url: "/?pwaislands" }), RevokeActivePreviewUrl()),
-        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
-        Command.resolve(RevokeActivePreviewUrl, Modal.Message.CompletedRevokeActivePreviewUrl()),
-        model((m) => {
-          expect(m.maybeAlertBanner).toEqual(Option.none())
-          expect(m.modalState).toEqual(ModalState.Closed())
+          expect(m.toasts).toEqual([
+            {
+              id: 2,
+              message: "Hinweis",
+              variant: "info",
+            },
+          ])
         }),
       )
     })
@@ -1685,7 +1547,6 @@ describe("PWA Islands Story Tests", () => {
               editor: Editor.Model.CreateFolder({
                 name: "Neuer Ordner",
                 maybeValidationError: Option.none(),
-                maybeAlertBanner: Option.none(),
               }),
             }),
           )
@@ -2453,7 +2314,6 @@ describe("PWA Islands Story Tests", () => {
                   name: "index.html",
                   fileMode: Editor.EditorFileMode.Text({ content: "<h1>Hi</h1>" }),
                   maybeValidationError: Option.none(),
-                  maybeAlertBanner: Option.none(),
                   maybePasteError: Option.none(),
                   llmBarMode: "Closed",
                   llmChatInput: "",
