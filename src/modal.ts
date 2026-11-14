@@ -7,6 +7,7 @@ import type * as Html from "foldkit/html"
 import { defineMessageUnion } from "foldkit/message"
 import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
+import type { EditFormat } from "./edit-format"
 import * as Editor from "./editor"
 import { AlertBanner } from "./editor"
 import {
@@ -564,6 +565,7 @@ export const update = (
     readonly subPath: ReadonlyArray<string>
     readonly existingEntries: ReadonlyArray<FileEntry>
     readonly llmEnabled: boolean
+    readonly llmEditFormat: EditFormat
     readonly editorDefaults?: {
       readonly isMaximized: boolean
       readonly llmBarMode: Editor.LlmBarMode

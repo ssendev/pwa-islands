@@ -106,6 +106,7 @@ const readyModel: Model = {
   isSettingsOpen: false,
   isSettingsDialogOpen: false,
   llmEnabled: false,
+  llmEditFormat: "hashline",
   llmBaseUrl: "",
   llmApiKey: "",
   llmModels: "",
@@ -121,6 +122,7 @@ const readyModel: Model = {
   editorIsMaximized: false,
   editorLlmBarMode: "Closed",
   llmDraftEnabled: false,
+  llmDraftEditFormat: "hashline",
   llmDraftBaseUrl: "",
   llmDraftApiKey: "",
   llmDraftModels: "",
@@ -1180,7 +1182,11 @@ describe("PWA Islands Story Tests", () => {
         given(modelWithEditor),
         message(editorMsg(Editor.Message.ClickedCopyLlmContext())),
         Command.expectExact(
-          Editor.CopyLlmContextToClipboard({ fileName: "Neu.html", content: "" }),
+          Editor.CopyLlmContextToClipboard({
+            fileName: "Neu.html",
+            content: "",
+            editFormat: "hashline",
+          }),
         ),
         Command.resolve(Editor.CopyLlmContextToClipboard, Editor.Message.SucceededCopyLlmContext()),
         model((m) => {
@@ -2094,6 +2100,7 @@ describe("PWA Islands Story Tests", () => {
           TestLlm({
             mode: "chat",
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "gpt-4o-mini",
@@ -2119,6 +2126,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(
           SaveLlmSettings({
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "gpt-4o-mini",
@@ -2204,6 +2212,7 @@ describe("PWA Islands Story Tests", () => {
           TestLlm({
             mode: "models",
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "",
@@ -2260,6 +2269,7 @@ describe("PWA Islands Story Tests", () => {
           Modal.LoadEditorUserTemplates,
           LoadEditorLlmModels({
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "",
@@ -2328,6 +2338,7 @@ describe("PWA Islands Story Tests", () => {
         message(
           Message.CompletedLoadLlmSettings({
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "",
@@ -2341,6 +2352,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(
           LoadEditorLlmModels({
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "",
@@ -2365,6 +2377,7 @@ describe("PWA Islands Story Tests", () => {
         message(
           Message.CompletedLoadLlmSettings({
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "",
@@ -2415,6 +2428,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(
           LoadEditorLlmModels({
             enabled: true,
+            editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
             models: "",

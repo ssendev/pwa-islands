@@ -86,10 +86,14 @@ import {
   testLlmConnection,
 } from "./agent"
 import {
-  formatApiDtsMessage,
-  formatHashedFileMessage,
-  formatHashlineSystemPrompt,
-} from "./hashline"
+  DEFAULT_EDIT_FORMAT,
+  EDIT_FORMAT_OPTIONS,
+  EditFormat,
+  formatFileMessageForFormat,
+  formatSystemPromptForFormat,
+  parseEditFormat,
+} from "./edit-format"
+import { formatApiDtsMessage } from "./hashline"
 import * as Editor from "./editor"
 import * as LlmResponse from "./llm-response"
 import {
@@ -314,6 +318,7 @@ export const Model = Schema.Struct({
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
   llmEnabled: Schema.Boolean,
+  llmEditFormat: EditFormat,
   llmBaseUrl: Schema.String,
   llmApiKey: Schema.String,
   llmModels: Schema.String,
@@ -329,6 +334,7 @@ export const Model = Schema.Struct({
   editorIsMaximized: Schema.Boolean,
   editorLlmBarMode: Editor.LlmBarMode,
   llmDraftEnabled: Schema.Boolean,
+  llmDraftEditFormat: EditFormat,
   llmDraftBaseUrl: Schema.String,
   llmDraftApiKey: Schema.String,
   llmDraftModels: Schema.String,
@@ -495,6 +501,7 @@ export const Message = defineMessageUnion({
   },
   FailedTestLlm: { message: Schema.String },
   ToggledLlmEnabled: { isChecked: Schema.Boolean },
+  UpdatedLlmEditFormat: { value: Schema.String },
   UpdatedLlmBaseUrl: { value: Schema.String },
   UpdatedLlmApiKey: { value: Schema.String },
   UpdatedLlmModels: { value: Schema.String },
@@ -508,6 +515,7 @@ export const Message = defineMessageUnion({
   UpdatedLlmExtraArgs: { value: Schema.String },
   CompletedLoadLlmSettings: {
     enabled: Schema.Boolean,
+    editFormat: EditFormat,
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
@@ -755,6 +763,7 @@ export const LoadLlmSettings = Command.define("LoadLlmSettings", {
     Effect.map((settings) =>
       Message.CompletedLoadLlmSettings({
         enabled: settings.enabled,
+        editFormat: settings.editFormat,
         baseUrl: settings.baseUrl,
         apiKey: settings.apiKey,
         models: settings.models,
@@ -771,6 +780,7 @@ export const LoadLlmSettings = Command.define("LoadLlmSettings", {
 export const SaveLlmSettings = Command.define("SaveLlmSettings", {
   args: {
     enabled: Schema.Boolean,
+    editFormat: EditFormat,
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
@@ -786,6 +796,7 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
       try: () =>
         storeLlmSettings({
           enabled: args.enabled,
+          editFormat: args.editFormat,
           baseUrl: args.baseUrl,
           apiKey: args.apiKey,
           models: args.models,
@@ -843,6 +854,7 @@ export const SaveEditorPreferences = Command.define("SaveEditorPreferences", {
 export const LoadEditorLlmModels = Command.define("LoadEditorLlmModels", {
   args: {
     enabled: Schema.Boolean,
+    editFormat: EditFormat,
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
@@ -898,6 +910,7 @@ export const TestLlm = Command.define("TestLlm", {
   args: {
     mode: LlmTestMode,
     enabled: Schema.Boolean,
+    editFormat: EditFormat,
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
@@ -1724,6 +1737,7 @@ export const init = (
         isSettingsOpen: false,
         isSettingsDialogOpen: false,
         llmEnabled: false,
+        llmEditFormat: DEFAULT_EDIT_FORMAT,
         llmBaseUrl: "",
         llmApiKey: "",
         llmModels: "",
@@ -1739,6 +1753,7 @@ export const init = (
         editorIsMaximized: false,
         editorLlmBarMode: "Closed",
         llmDraftEnabled: false,
+        llmDraftEditFormat: DEFAULT_EDIT_FORMAT,
         llmDraftBaseUrl: "",
         llmDraftApiKey: "",
         llmDraftModels: "",
@@ -1780,6 +1795,7 @@ export const init = (
       isSettingsOpen: false,
       isSettingsDialogOpen: false,
       llmEnabled: false,
+      llmEditFormat: DEFAULT_EDIT_FORMAT,
       llmBaseUrl: "",
       llmApiKey: "",
       llmModels: "",
@@ -1795,6 +1811,7 @@ export const init = (
       editorIsMaximized: false,
       editorLlmBarMode: "Closed",
       llmDraftEnabled: false,
+      llmDraftEditFormat: DEFAULT_EDIT_FORMAT,
       llmDraftBaseUrl: "",
       llmDraftApiKey: "",
       llmDraftModels: "",
@@ -2063,6 +2080,7 @@ const maybeLoadEditorLlmModels = (
     commands: [
       LoadEditorLlmModels({
         enabled: model.llmEnabled,
+        editFormat: model.llmEditFormat,
         baseUrl: model.llmBaseUrl,
         apiKey: model.llmApiKey,
         models: model.llmModels,
@@ -2604,6 +2622,7 @@ export const update = (
         isSettingsOpen: () => false,
         isSettingsDialogOpen: () => true,
         llmDraftEnabled: () => model.llmEnabled,
+        llmDraftEditFormat: () => model.llmEditFormat,
         llmDraftBaseUrl: () => model.llmBaseUrl,
         llmDraftApiKey: () => model.llmApiKey,
         llmDraftModels: () => model.llmModels,
@@ -2629,6 +2648,7 @@ export const update = (
       model: modifyFields(model, {
         isSettingsDialogOpen: () => false,
         llmEnabled: () => model.llmDraftEnabled,
+        llmEditFormat: () => model.llmDraftEditFormat,
         llmBaseUrl: () => model.llmDraftBaseUrl,
         llmApiKey: () => model.llmDraftApiKey,
         llmModels: () => model.llmDraftModels,
@@ -2644,6 +2664,7 @@ export const update = (
       commands: [
         SaveLlmSettings({
           enabled: model.llmDraftEnabled,
+          editFormat: model.llmDraftEditFormat,
           baseUrl: model.llmDraftBaseUrl,
           apiKey: model.llmDraftApiKey,
           models: model.llmDraftModels,
@@ -2665,6 +2686,13 @@ export const update = (
     ToggledLlmEnabled: ({ isChecked }) => ({
       model: modifyFields(model, {
         llmDraftEnabled: () => isChecked,
+        llmTestState: () => LlmTestState.Idle(),
+      }),
+    }),
+
+    UpdatedLlmEditFormat: ({ value }) => ({
+      model: modifyFields(model, {
+        llmDraftEditFormat: () => parseEditFormat(value),
         llmTestState: () => LlmTestState.Idle(),
       }),
     }),
@@ -2770,6 +2798,7 @@ export const update = (
           : (parseModelList(model.llmDraftModels)[0] ?? model.llmDiscoveredModels[0] ?? "")
       const config = {
         enabled: model.llmDraftEnabled,
+        editFormat: model.llmDraftEditFormat,
         baseUrl: model.llmDraftBaseUrl,
         apiKey: model.llmDraftApiKey,
         models: model.llmDraftModels,
@@ -2826,6 +2855,7 @@ export const update = (
 
     CompletedLoadLlmSettings: ({
       enabled,
+      editFormat,
       baseUrl,
       apiKey,
       models,
@@ -2838,6 +2868,8 @@ export const update = (
       const nextModel = modifyFields(model, {
         llmEnabled: () => enabled,
         llmDraftEnabled: () => enabled,
+        llmEditFormat: () => editFormat,
+        llmDraftEditFormat: () => editFormat,
         llmBaseUrl: () => baseUrl,
         llmApiKey: () => apiKey,
         llmDraftBaseUrl: () => baseUrl,
@@ -3281,6 +3313,7 @@ export const update = (
         subPath,
         existingEntries,
         llmEnabled: model.llmEnabled,
+        llmEditFormat: model.llmEditFormat,
         editorDefaults: {
           isMaximized: model.editorIsMaximized,
           llmBarMode: model.editorLlmBarMode,
@@ -3679,6 +3712,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       isStreaming: Schema.Boolean,
       mode: LlmTestMode,
       enabled: Schema.Boolean,
+      editFormat: EditFormat,
       baseUrl: Schema.String,
       apiKey: Schema.String,
       models: Schema.String,
@@ -3695,6 +3729,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
         isStreaming: model.llmTestState._tag === "Streaming",
         mode: model.llmTestState._tag === "Streaming" ? model.llmTestState.mode : "chat",
         enabled: model.llmDraftEnabled,
+        editFormat: model.llmDraftEditFormat,
         baseUrl: model.llmDraftBaseUrl,
         apiKey: model.llmDraftApiKey,
         models: model.llmDraftModels,
@@ -3779,6 +3814,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       content: Schema.String,
       messages: Schema.Array(Editor.LlmChatMessage),
       enabled: Schema.Boolean,
+      editFormat: EditFormat,
       baseUrl: Schema.String,
       apiKey: Schema.String,
       models: Schema.String,
@@ -3818,6 +3854,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           content: sending?.content ?? "",
           messages: sending?.messages ?? [],
           enabled: model.llmEnabled,
+          editFormat: model.llmEditFormat,
           baseUrl: model.llmBaseUrl,
           apiKey: model.llmApiKey,
           models: model.llmModels,
@@ -3851,11 +3888,18 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                         }
                         const apiDts = await res.text()
                         return [
-                          { _tag: "System" as const, content: formatHashlineSystemPrompt() },
+                          {
+                            _tag: "System" as const,
+                            content: formatSystemPromptForFormat(deps.editFormat),
+                          },
                           { _tag: "User" as const, content: formatApiDtsMessage(apiDts) },
                           {
                             _tag: "User" as const,
-                            content: formatHashedFileMessage(deps.fileName, deps.content),
+                            content: formatFileMessageForFormat(
+                              deps.editFormat,
+                              deps.fileName,
+                              deps.content,
+                            ),
                           },
                           { _tag: "User" as const, content: deps.prompt },
                         ]
@@ -3868,6 +3912,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                 return runEditorChatTurn({
                   config: {
                     enabled: deps.enabled,
+                    editFormat: deps.editFormat,
                     baseUrl: deps.baseUrl,
                     apiKey: deps.apiKey,
                     models: deps.models,
@@ -4355,6 +4400,29 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 [h.Class("settings-group"), h.Id("settings-group-llm")],
                 [
                   h.h4([h.Class("settings-group-title")], ["KI"]),
+                  h.div(
+                    [h.Class("form-group")],
+                    [
+                      h.label([h.For("llm-edit-format")], ["Bearbeitungsformat"]),
+                      h.select(
+                        [
+                          h.Id("llm-edit-format"),
+                          h.Class("form-input"),
+                          h.Value(model.llmDraftEditFormat),
+                          h.OnChange((value) => Message.UpdatedLlmEditFormat({ value })),
+                        ],
+                        EDIT_FORMAT_OPTIONS.map((item) =>
+                          h.option(
+                            [
+                              h.Value(item.value),
+                              h.Selected(model.llmDraftEditFormat === item.value),
+                            ],
+                            [item.label],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                   h.div(
                     [h.Class("form-group")],
                     [

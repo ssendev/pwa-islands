@@ -166,6 +166,7 @@ export async function storeFileInfoVisible(visible: boolean): Promise<void> {
 }
 
 import { emptyLlmSettings, type LlmSettings } from "./agent"
+import { parseEditFormat } from "./edit-format"
 
 const LLM_SETTINGS_KEY = "llm_settings"
 
@@ -184,6 +185,10 @@ export async function getStoredLlmSettings(): Promise<LlmSettings> {
           "enabled" in record && typeof record.enabled === "boolean"
             ? record.enabled
             : baseUrl.trim() !== ""
+        const editFormat =
+          "editFormat" in record && typeof record.editFormat === "string"
+            ? parseEditFormat(record.editFormat)
+            : emptyLlmSettings.editFormat
         const apiKey = "apiKey" in record && typeof record.apiKey === "string" ? record.apiKey : ""
         const models = "models" in record && typeof record.models === "string" ? record.models : ""
         const streaming =
@@ -202,6 +207,7 @@ export async function getStoredLlmSettings(): Promise<LlmSettings> {
           "extraArgs" in record && typeof record.extraArgs === "string" ? record.extraArgs : ""
         resolve({
           enabled,
+          editFormat,
           baseUrl,
           apiKey,
           models,

@@ -353,7 +353,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                     h.code([], ["END"]),
                                     ") und klicke auf ",
                                     h.strong([], ["Einfügen"]),
-                                    ". Bei Erfolg werden nur die geänderten Zeilen mit den neuen Hashes wieder in die Zwischenablage kopiert. Bei Fehlern landet die Fehlermeldung direkt in der Zwischenablage.",
+                                    ". Bei Erfolg werden nur die geänderten Zeilen mit den neuen Hashes wieder in die Zwischenablage kopiert (bei anderen Formaten wird die Zwischenablage geleert). Bei Fehlern landet die Fehlermeldung direkt in der Zwischenablage.",
                                   ],
                                 ),
                                 h.li(

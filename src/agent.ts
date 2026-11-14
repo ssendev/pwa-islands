@@ -1,10 +1,18 @@
 // LLM / AGENT
 // Alles rund um den OpenAI-kompatiblen LLM-Zugang lebt hier.
 
-import { HashlineApplyResult, applyHashlineEdits, formatUpdatedHashlines } from "./hashline"
+import {
+  DEFAULT_EDIT_FORMAT,
+  EditApplyResult,
+  type EditFormat,
+  applyEditsForFormat,
+  formatToolResultForFormat,
+  getEditorEditToolForFormat,
+} from "./edit-format"
 
 export type LlmSettings = {
   enabled: boolean
+  editFormat: EditFormat
   baseUrl: string
   apiKey: string
   models: string
@@ -83,6 +91,7 @@ export const THINKING_PRESETS: ReadonlyArray<ThinkingPreset> = [
 
 export const emptyLlmSettings: LlmSettings = {
   enabled: false,
+  editFormat: DEFAULT_EDIT_FORMAT,
   baseUrl: "",
   apiKey: "",
   models: "",
@@ -945,7 +954,7 @@ export const requestEditorChatCompletion = async (
   const requestBody = buildChatRequestBody({ ...config, model: activeModel }, "", {
     messages: toOpenAiEditorMessages(messages),
     max_tokens: 4096,
-    tools: [EDITOR_EDIT_TOOL],
+    tools: [getEditorEditToolForFormat(config.editFormat)],
     tool_choice: "auto",
   })
   const response = await fetch(joinUrl(config.baseUrl, "/chat/completions"), {
@@ -1125,14 +1134,14 @@ export const runEditorChatTurn = async ({
     }
 
     const editsText = extractEditorToolArgs(editCall.arguments)
-    const applyResult = applyHashlineEdits(currentContent, editsText)
+    const applyResult = applyEditsForFormat(config.editFormat, currentContent, editsText)
 
-    return HashlineApplyResult.match(applyResult, {
-      Ok: ({ content: nextContent, appliedCount, changedLines }) => {
+    return EditApplyResult.match(applyResult, {
+      Ok: ({ content: nextContent, appliedCount, updatedSnippet }) => {
         const toolMsg: EditorChatMessage = {
           _tag: "Tool",
           toolCallId: editCall.id,
-          content: formatUpdatedHashlines(fileName, changedLines),
+          content: formatToolResultForFormat(config.editFormat, fileName, updatedSnippet),
         }
         return {
           messages: [...messages, assistantMsg, toolMsg],

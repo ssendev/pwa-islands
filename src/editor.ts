@@ -19,12 +19,13 @@ import {
   revokeActivePreviewUrl,
 } from "./files"
 import {
-  applyHashlineEdits,
-  formatFencedHashlineFile,
-  formatLlmContext,
-  formatUpdatedHashlines,
-  HashlineApplyResult,
-} from "./hashline"
+  EditApplyResult,
+  EditFormat,
+  applyEditsForFormat,
+  formatFencedFileForFormat,
+  formatLlmContextForFormat,
+} from "./edit-format"
+import { formatUpdatedHashlines } from "./hashline"
 import { viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { encodeSubPath } from "./route"
@@ -605,6 +606,7 @@ export const Message = defineMessageUnion({
     message: Schema.String,
   },
   CompletedFocusNameInput: {},
+  CompletedClearClipboardAfterPaste: {},
 })
 export type Message = typeof Message.Type
 
@@ -929,12 +931,15 @@ export const CopyFileHashesToClipboard = Command.define("CopyFileHashesToClipboa
   args: {
     fileName: Schema.String,
     content: Schema.String,
+    editFormat: EditFormat,
   },
   messages: [Message.SucceededCopyFileHashes, Message.FailedCopyFileHashes],
-  execute: ({ fileName, content }) =>
+  execute: ({ fileName, content, editFormat }) =>
     Effect.tryPromise({
       try: async () => {
-        await navigator.clipboard.writeText(formatFencedHashlineFile(fileName, content))
+        await navigator.clipboard.writeText(
+          formatFencedFileForFormat(editFormat, fileName, content),
+        )
         return Message.SucceededCopyFileHashes()
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -953,9 +958,10 @@ export const CopyLlmContextToClipboard = Command.define("CopyLlmContextToClipboa
   args: {
     fileName: Schema.String,
     content: Schema.String,
+    editFormat: EditFormat,
   },
   messages: [Message.SucceededCopyLlmContext, Message.FailedCopyLlmContext],
-  execute: ({ fileName, content }) =>
+  execute: ({ fileName, content, editFormat }) =>
     Effect.tryPromise({
       try: async () => {
         const res = await fetch("/api.d.ts", { cache: "no-cache" })
@@ -963,7 +969,7 @@ export const CopyLlmContextToClipboard = Command.define("CopyLlmContextToClipboa
           throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
         }
         const dtsText = await res.text()
-        const promptText = formatLlmContext(fileName, content, dtsText)
+        const promptText = formatLlmContextForFormat(editFormat, fileName, content, dtsText)
         await navigator.clipboard.writeText(promptText)
         return Message.SucceededCopyLlmContext()
       },
@@ -1035,6 +1041,17 @@ export const CopyPasteErrorToClipboard = Command.define("CopyPasteErrorToClipboa
       },
       catch: () => undefined,
     }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedCopyPasteErrorToClipboard()))),
+})
+
+export const ClearClipboardAfterPaste = Command.define("ClearClipboardAfterPaste", {
+  messages: [Message.CompletedClearClipboardAfterPaste],
+  execute: Effect.tryPromise({
+    try: async () => {
+      await navigator.clipboard.writeText("")
+      return Message.CompletedClearClipboardAfterPaste()
+    },
+    catch: () => undefined,
+  }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedClearClipboardAfterPaste()))),
 })
 
 // UPDATE
@@ -1313,6 +1330,7 @@ export const update = (
     readonly subPath: ReadonlyArray<string>
     readonly existingEntries: ReadonlyArray<FileEntry>
     readonly llmEnabled: boolean
+    readonly llmEditFormat: EditFormat
   },
 ): {
   readonly model: Model
@@ -1859,7 +1877,9 @@ export const update = (
         onNone: () => ({ model, outMessage: OutMessage.None() }),
         onSome: ({ fileName, content }) => ({
           model: setAlertBanner(setPasteError(model, Option.none()), Option.none()),
-          commands: [CopyLlmContextToClipboard({ fileName, content })],
+          commands: [
+            CopyLlmContextToClipboard({ fileName, content, editFormat: context.llmEditFormat }),
+          ],
           outMessage: OutMessage.None(),
         }),
       }),
@@ -1896,7 +1916,9 @@ export const update = (
         onNone: () => ({ model, outMessage: OutMessage.None() }),
         onSome: ({ fileName, content }) => ({
           model: setAlertBanner(setPasteError(model, Option.none()), Option.none()),
-          commands: [CopyFileHashesToClipboard({ fileName, content })],
+          commands: [
+            CopyFileHashesToClipboard({ fileName, content, editFormat: context.llmEditFormat }),
+          ],
           outMessage: OutMessage.None(),
         }),
       }),
@@ -1905,7 +1927,10 @@ export const update = (
       model: setAlertBanner(
         model,
         Option.some({
-          message: "Datei mit Hashes in die Zwischenablage kopiert",
+          message:
+            context.llmEditFormat === "hashline"
+              ? "Datei mit Hashes in die Zwischenablage kopiert"
+              : "Datei in die Zwischenablage kopiert",
           variant: "info",
         }),
       ),
@@ -1933,19 +1958,35 @@ export const update = (
       Option.match(getTextFileContext(model), {
         onNone: () => ({ model, outMessage: OutMessage.None() }),
         onSome: ({ fileName, content: currentContent }) =>
-          HashlineApplyResult.match(applyHashlineEdits(currentContent, text), {
-            Ok: ({ content: nextContent, appliedCount, changedLines }) => ({
-              model: applyTextContentUpdate(
-                model,
-                nextContent,
-                Option.some({
-                  message: `${appliedCount} Bearbeitung(en) angewendet – neue Hashes in die Zwischenablage kopiert`,
-                  variant: "info",
-                }),
-              ),
-              commands: [CopyUpdatedHashesToClipboard({ fileName, changedLines })],
-              outMessage: OutMessage.None(),
-            }),
+          EditApplyResult.match(applyEditsForFormat(context.llmEditFormat, currentContent, text), {
+            Ok: ({ content: nextContent, appliedCount, updatedSnippet }) =>
+              context.llmEditFormat === "hashline"
+                ? {
+                    model: applyTextContentUpdate(
+                      model,
+                      nextContent,
+                      Option.some({
+                        message: `${appliedCount} Bearbeitung(en) angewendet – neue Hashes in die Zwischenablage kopiert`,
+                        variant: "info",
+                      }),
+                    ),
+                    commands: [
+                      CopyUpdatedHashesToClipboard({ fileName, changedLines: updatedSnippet }),
+                    ],
+                    outMessage: OutMessage.None(),
+                  }
+                : {
+                    model: applyTextContentUpdate(
+                      model,
+                      nextContent,
+                      Option.some({
+                        message: `${appliedCount} Bearbeitung(en) angewendet – Zwischenablage geleert`,
+                        variant: "info",
+                      }),
+                    ),
+                    commands: [ClearClipboardAfterPaste()],
+                    outMessage: OutMessage.None(),
+                  },
             Error: ({ message: errorMessage }) => ({
               model: setAlertBanner(
                 setPasteError(model, Option.some(errorMessage)),
@@ -1961,6 +2002,11 @@ export const update = (
       }),
 
     SucceededCopyUpdatedHashes: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
+    CompletedClearClipboardAfterPaste: () => ({
       model,
       outMessage: OutMessage.None(),
     }),

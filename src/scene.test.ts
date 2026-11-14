@@ -79,6 +79,7 @@ const readyModel: Model = {
   isSettingsOpen: false,
   isSettingsDialogOpen: false,
   llmEnabled: false,
+  llmEditFormat: "hashline",
   llmBaseUrl: "",
   llmApiKey: "",
   llmModels: "",
@@ -94,6 +95,7 @@ const readyModel: Model = {
   editorIsMaximized: false,
   editorLlmBarMode: "Closed",
   llmDraftEnabled: false,
+  llmDraftEditFormat: "hashline",
   llmDraftBaseUrl: "",
   llmDraftApiKey: "",
   llmDraftModels: "",
@@ -249,11 +251,23 @@ describe("PWA Islands Scene Tests", () => {
       ),
       sceneExpect(text("/api.d.ts in die Zwischenablage kopiert")).toExist(),
       click(selector("#modal-btn-copy-hashes")),
-      Command.expectExact(Editor.CopyFileHashesToClipboard({ fileName: "Neu.html", content: "" })),
+      Command.expectExact(
+        Editor.CopyFileHashesToClipboard({
+          fileName: "Neu.html",
+          content: "",
+          editFormat: "hashline",
+        }),
+      ),
       Command.resolve(Editor.CopyFileHashesToClipboard, Editor.Message.SucceededCopyFileHashes()),
       sceneExpect(text("Datei mit Hashes in die Zwischenablage kopiert")).toExist(),
       click(selector("#modal-btn-copy-llm")),
-      Command.expectExact(Editor.CopyLlmContextToClipboard({ fileName: "Neu.html", content: "" })),
+      Command.expectExact(
+        Editor.CopyLlmContextToClipboard({
+          fileName: "Neu.html",
+          content: "",
+          editFormat: "hashline",
+        }),
+      ),
       Command.resolve(Editor.CopyLlmContextToClipboard, Editor.Message.SucceededCopyLlmContext()),
       sceneExpect(text("Datei und /api.d.ts für KI in die Zwischenablage kopiert")).toExist(),
       sceneExpect(selector(".modal-overlay #modal-alert-area")).toExist(),
@@ -565,6 +579,48 @@ describe("PWA Islands Scene Tests", () => {
         text("1 Bearbeitung(en) angewendet – neue Hashes in die Zwischenablage kopiert"),
       ).toExist(),
       sceneExpect(selector("#modal-btn-paste-llm")).toContainText("Einfügen"),
+    )
+  })
+
+  it("clears clipboard after pasting search-replace edits", () => {
+    const modelWithEditFile: Model = {
+      ...readyModel,
+      llmEditFormat: "search-replace",
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Alt</p>" }),
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Copy",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithEditFile),
+      click(selector("#modal-btn-paste-llm")),
+      Command.expectExact(Editor.ReadClipboardForLlmEdits()),
+      Command.resolve(
+        Editor.ReadClipboardForLlmEdits,
+        Editor.Message.SucceededReadClipboardForLlmEdits({
+          text: "<<<<<<< SEARCH\n<p>Alt</p>\n=======\n<p>Neu</p>\n>>>>>>> REPLACE",
+        }),
+      ),
+      Command.expectExact(Editor.ClearClipboardAfterPaste()),
+      Command.resolve(
+        Editor.ClearClipboardAfterPaste,
+        Editor.Message.CompletedClearClipboardAfterPaste(),
+      ),
+      sceneExpect(text("1 Bearbeitung(en) angewendet – Zwischenablage geleert")).toExist(),
     )
   })
 
@@ -1037,8 +1093,13 @@ describe("PWA Islands Scene Tests", () => {
       given(readyModel),
       click(selector("#btn-settings")),
       click(selector("#btn-open-settings")),
+      sceneExpect(selector("#llm-edit-format")).toExist(),
+      sceneExpect(selector("#llm-edit-format")).toHaveValue("hashline"),
       sceneExpect(selector("#llm-enabled")).toExist(),
       sceneExpect(selector("#llm-base-url")).toBeAbsent(),
+      change(selector("#llm-edit-format"), "search-replace"),
+      sceneExpect(selector("#llm-edit-format")).toHaveValue("search-replace"),
+      change(selector("#llm-edit-format"), "hashline"),
       change(selector("#llm-enabled"), "true"),
       sceneExpect(selector("#llm-streaming")).toExist(),
       sceneExpect(selector("#llm-tool-calls")).toExist(),
@@ -1067,6 +1128,7 @@ describe("PWA Islands Scene Tests", () => {
         TestLlm({
           mode: "chat",
           enabled: true,
+          editFormat: "hashline",
           baseUrl: "https://api.example.com/v1",
           apiKey: "",
           models: "gpt-4o-mini",
