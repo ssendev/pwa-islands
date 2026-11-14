@@ -39,6 +39,7 @@ import {
 import { viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { monacoEditorElement } from "./monaco-element"
+import { buildEditUrl, buildNewUrl } from "./route"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
   clampEditorSplitPercent,
@@ -474,6 +475,30 @@ export const isPreviewOpen = (model: Model): boolean =>
     ConfirmOverwrite: () => false,
   })
 
+export const isEditorPreviewOpen = (model: Model): boolean =>
+  Model.match(model, {
+    CreateFile: (state) => state.isPreviewOpen,
+    EditFile: (state) =>
+      state.fileMode._tag === "Text" &&
+      state.isPreviewOpen &&
+      !(
+        state.historyState._tag === "Open" && Option.isSome(state.historyState.maybePreviewContent)
+      ),
+    CreateFolder: () => false,
+    EditFolder: () => false,
+    ConfirmOverwrite: () => false,
+  })
+
+export const setPreviewOpen = (model: Model, isOpen: boolean): Model =>
+  Model.match(model, {
+    CreateFile: (state) => modifyFields(state, { isPreviewOpen: () => isOpen }),
+    EditFile: (state) =>
+      state.fileMode._tag === "Text" ? modifyFields(state, { isPreviewOpen: () => isOpen }) : state,
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
 export const closePreview = (model: Model): Model =>
   Model.match(model, {
     CreateFile: (state) => modifyFields(state, { isPreviewOpen: () => false }),
@@ -759,6 +784,8 @@ export type Message = typeof Message.Type
 export const OutMessage = defineTaggedUnion({
   None: {},
   CloseModal: { replaceUrl: Schema.Boolean },
+  PushUrl: { url: Schema.String },
+  NavigateBack: {},
   EntriesUpdated: {
     entries: Schema.Array(FileEntry),
     closeModal: Schema.Boolean,
@@ -2543,23 +2570,32 @@ export const update = (
 
     ClickedSave: () => handleSaveAction(model, context),
 
-    ClickedOpenPreview: () => ({
-      model: Model.match(model, {
-        CreateFile: (state) => modifyFields(state, { isPreviewOpen: () => true }),
+    ClickedOpenPreview: () =>
+      Model.match(model, {
+        CreateFile: (state) => ({
+          model: modifyFields(state, { isPreviewOpen: () => true }),
+          outMessage: OutMessage.PushUrl({ url: buildNewUrl(context.subPath, "file", true) }),
+        }),
         EditFile: (state) =>
           state.fileMode._tag === "Text"
-            ? modifyFields(state, { isPreviewOpen: () => true })
-            : state,
-        CreateFolder: () => model,
-        EditFolder: () => model,
-        ConfirmOverwrite: () => model,
+            ? {
+                model: modifyFields(state, { isPreviewOpen: () => true }),
+                outMessage: OutMessage.PushUrl({
+                  url: buildEditUrl(context.subPath, state.originalName, true),
+                }),
+              }
+            : {
+                model,
+                outMessage: OutMessage.None(),
+              },
+        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
+        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
-      outMessage: OutMessage.None(),
-    }),
 
     ClickedClosePreview: () => ({
       model: closePreview(model),
-      outMessage: OutMessage.None(),
+      outMessage: isEditorPreviewOpen(model) ? OutMessage.NavigateBack() : OutMessage.None(),
     }),
 
     ClickedConfirmOverwrite: () => ({

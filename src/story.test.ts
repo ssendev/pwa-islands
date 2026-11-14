@@ -1131,16 +1131,56 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(modelWithCreate),
         message(editorMsg(Editor.Message.ClickedOpenPreview())),
-        Command.expectNone(),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=new-preview" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
         model((m) => {
           expect(Modal.isOpen(m.modalState)).toBe(true)
           expect(Modal.isPreviewOpen(m.modalState)).toBe(true)
         }),
         message(Message.PressedEscape()),
+        Command.expectExact(NavigateHistoryBack()),
+        Command.resolve(NavigateHistoryBack, Message.CompletedNavigateHistoryBack()),
+        model((m) => {
+          expect(Modal.isOpen(m.modalState)).toBe(true)
+          expect(Modal.isPreviewOpen(m.modalState)).toBe(false)
+        }),
+      )
+    })
+
+    it("closes editor preview on browser back without losing unsaved changes", () => {
+      const modelWithCreate: Model = {
+        ...readyModel,
+        modalState: ModalState.Editor({
+          editor: modifyFields(Editor.makeCreateFile(), {
+            content: () => "<h1>Ungespeichert</h1>",
+          }),
+        }),
+      }
+
+      const previewUrl = Option.getOrThrow(
+        fromString("http://localhost:5173/?pwaislands=new-preview"),
+      )
+      const createUrl = Option.getOrThrow(fromString("http://localhost:5173/?pwaislands=new"))
+
+      story(
+        update,
+        given(modelWithCreate),
+        message(editorMsg(Editor.Message.ClickedOpenPreview())),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=new-preview" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        message(Message.ChangedUrl({ url: previewUrl })),
+        Command.expectNone(),
+        model((m) => {
+          expect(Modal.isPreviewOpen(m.modalState)).toBe(true)
+        }),
+        message(Message.ChangedUrl({ url: createUrl })),
         Command.expectNone(),
         model((m) => {
           expect(Modal.isOpen(m.modalState)).toBe(true)
           expect(Modal.isPreviewOpen(m.modalState)).toBe(false)
+          if (m.modalState._tag === "Editor" && m.modalState.editor._tag === "CreateFile") {
+            expect(m.modalState.editor.content).toBe("<h1>Ungespeichert</h1>")
+          }
         }),
       )
     })

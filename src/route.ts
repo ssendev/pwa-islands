@@ -17,10 +17,12 @@ export const AppRoute = defineRouteUnion({
   New: {
     subPath: Schema.Array(Schema.String),
     target: NewTarget,
+    isPreview: Schema.Boolean,
   },
   Edit: {
     subPath: Schema.Array(Schema.String),
     name: Schema.String,
+    isPreview: Schema.Boolean,
   },
   Help: {
     subPath: Schema.Array(Schema.String),
@@ -40,15 +42,26 @@ export const buildFolderUrl = (subPath: ReadonlyArray<string>): string => {
   return `${pathPart}?pwaislands`
 }
 
-export const buildNewUrl = (subPath: ReadonlyArray<string>, target: NewTarget): string => {
+export const buildNewUrl = (
+  subPath: ReadonlyArray<string>,
+  target: NewTarget,
+  isPreview = false,
+): string => {
   const encoded = encodeSubPath(subPath)
   const pathPart = encoded !== "" ? `/${encoded}` : "/"
-  return `${pathPart}?pwaislands=${target === "folder" ? "new-folder" : "new"}`
+  if (target === "folder") {
+    return `${pathPart}?pwaislands=new-folder`
+  }
+  return `${pathPart}?pwaislands=${isPreview ? "new-preview" : "new"}`
 }
 
-export const buildEditUrl = (subPath: ReadonlyArray<string>, entryName: string): string => {
+export const buildEditUrl = (
+  subPath: ReadonlyArray<string>,
+  entryName: string,
+  isPreview = false,
+): string => {
   const encoded = encodeSubPath([...subPath, entryName])
-  return `/${encoded}?pwaislands=edit`
+  return `/${encoded}?pwaislands=${isPreview ? "edit-preview" : "edit"}`
 }
 
 export const buildHelpUrl = (
@@ -89,15 +102,21 @@ const parseHelpValue = (
 
 export const parseNewActionParam = (
   maybeRaw: Option.Option<string>,
-): Option.Option<{ readonly target: NewTarget }> => Option.flatMap(maybeRaw, parseNewActionValue)
+): Option.Option<{ readonly target: NewTarget; readonly isPreview: boolean }> =>
+  Option.flatMap(maybeRaw, parseNewActionValue)
 
-const parseNewActionValue = (raw: string): Option.Option<{ readonly target: NewTarget }> => {
+const parseNewActionValue = (
+  raw: string,
+): Option.Option<{ readonly target: NewTarget; readonly isPreview: boolean }> => {
   const normalized = raw.trim().toLowerCase()
   if (normalized === "new" || normalized === "neu" || normalized === "new-file") {
-    return Option.some({ target: "file" as const })
+    return Option.some({ target: "file" as const, isPreview: false })
+  }
+  if (normalized === "new-preview") {
+    return Option.some({ target: "file" as const, isPreview: true })
   }
   if (normalized === "new-folder" || normalized === "neuer-ordner") {
-    return Option.some({ target: "folder" as const })
+    return Option.some({ target: "folder" as const, isPreview: false })
   }
   return Option.none()
 }
@@ -159,14 +178,16 @@ export const parsePathAndSearchToRoute = (pathname: string, search: string): App
     return AppRoute.New({
       subPath: segments,
       target: maybeNew.value.target,
+      isPreview: maybeNew.value.isPreview,
     })
   }
 
-  if (isEditActionParam(maybePwaislandsParam)) {
+  const maybeEdit = parseEditActionParam(maybePwaislandsParam)
+  if (Option.isSome(maybeEdit)) {
     if (Array.isReadonlyArrayNonEmpty(segments)) {
       const name = Array.lastNonEmpty(segments)
       const subPath = Array.dropRight(segments, 1)
-      return AppRoute.Edit({ subPath, name })
+      return AppRoute.Edit({ subPath, name, isPreview: maybeEdit.value.isPreview })
     }
   }
 
@@ -178,15 +199,25 @@ export const parseUrlToRoute = (url: Url): AppRoute => {
   return parsePathAndSearchToRoute(url.pathname, searchStr)
 }
 
-export const isEditActionParam = (maybeRaw: Option.Option<string>): boolean =>
-  Option.exists(maybeRaw, isEditActionValue)
+export const parseEditActionParam = (
+  maybeRaw: Option.Option<string>,
+): Option.Option<{ readonly isPreview: boolean }> => Option.flatMap(maybeRaw, parseEditActionValue)
 
-const isEditActionValue = (raw: string): boolean => {
+const parseEditActionValue = (raw: string): Option.Option<{ readonly isPreview: boolean }> => {
   const normalized = raw.trim().toLowerCase()
-  return (
+  if (
     normalized === "edit" ||
     normalized === "e" ||
     normalized === "bearbeiten" ||
     normalized === "true"
-  )
+  ) {
+    return Option.some({ isPreview: false })
+  }
+  if (normalized === "edit-preview") {
+    return Option.some({ isPreview: true })
+  }
+  return Option.none()
 }
+
+export const isEditActionParam = (maybeRaw: Option.Option<string>): boolean =>
+  Option.isSome(parseEditActionParam(maybeRaw))

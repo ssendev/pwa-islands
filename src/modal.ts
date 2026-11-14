@@ -92,6 +92,28 @@ export const isPreviewOpen = (state: ModalState): boolean =>
     Help: () => false,
   })
 
+export const isEditorPreviewOpen = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: ({ editor }) => Editor.isEditorPreviewOpen(editor),
+    ImportConflict: () => false,
+    Help: () => false,
+  })
+
+export const setPreviewOpen = (state: ModalState, isOpen: boolean): ModalState =>
+  ModalState.match(state, {
+    Closed: () => state,
+    Editor: ({ editor }) => ModalState.Editor({ editor: Editor.setPreviewOpen(editor, isOpen) }),
+    ImportConflict: () => state,
+    Help: () => state,
+  })
+
+export const isCreatingFile = (state: ModalState): boolean =>
+  Match.value(state).pipe(
+    Match.tag("Editor", ({ editor }) => editor._tag === "CreateFile"),
+    Match.orElse(() => false),
+  )
+
 export const closePreview = (state: ModalState): ModalState =>
   ModalState.match(state, {
     Closed: () => state,
@@ -434,6 +456,10 @@ export type Message = typeof Message.Type
 
 export const OutMessage = defineTaggedUnion({
   None: {},
+  PushUrl: {
+    url: Schema.String,
+  },
+  NavigateBack: {},
   ReplaceUrl: {
     url: Schema.String,
   },
@@ -662,6 +688,16 @@ export const update = (
               outMessage: replaceUrl
                 ? OutMessage.ReplaceUrl({ url: buildFolderUrl(context.subPath) })
                 : OutMessage.None(),
+            }),
+            PushUrl: ({ url }) => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.PushUrl({ url }),
+            }),
+            NavigateBack: () => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.NavigateBack(),
             }),
             EntriesUpdated: ({ entries, closeModal, maybeAlertBanner }) => ({
               model: closeModal

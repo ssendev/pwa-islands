@@ -2705,12 +2705,23 @@ export const update = (
           )
         },
 
-        New: ({ subPath, target }) => {
-          const newModalState = Modal.openCreate(target, [], {
+        New: ({ subPath, target, isPreview }) => {
+          if (target === "file" && Modal.isCreatingFile(modelWithRoute.modalState)) {
+            return {
+              model: modifyFields(modelWithRoute, {
+                isSettingsOpen: () => false,
+                modalState: (modalState) => Modal.setPreviewOpen(modalState, isPreview),
+              }),
+            }
+          }
+
+          const baseModalState = Modal.openCreate(target, [], {
             isMaximized: modelWithRoute.editorIsMaximized,
             llmBarMode: modelWithRoute.editorLlmBarMode,
             editorSplitPercent: modelWithRoute.editorSplitPercent,
           })
+          const newModalState =
+            target === "file" ? Modal.setPreviewOpen(baseModalState, isPreview) : baseModalState
           const templateLoadCommands =
             target === "file" ? [toModalCommand(Modal.LoadEditorUserTemplates)] : []
 
@@ -2737,9 +2748,14 @@ export const update = (
           })
         },
 
-        Edit: ({ subPath, name }) => {
+        Edit: ({ subPath, name, isPreview }) => {
           if (Modal.isEditingEntry(modelWithRoute.modalState, name)) {
-            return { model: modelWithRoute }
+            return {
+              model: modifyFields(modelWithRoute, {
+                isSettingsOpen: () => false,
+                modalState: (modalState) => Modal.setPreviewOpen(modalState, isPreview),
+              }),
+            }
           }
 
           return whenReady(modelWithRoute, (readyState) => {
@@ -3489,10 +3505,12 @@ export const update = (
         return { model }
       }
       if (Modal.isPreviewOpen(model.modalState)) {
+        const shouldNavigateBack = Modal.isEditorPreviewOpen(model.modalState)
         return {
           model: modifyFields(model, {
             modalState: Modal.closePreview,
           }),
+          ...(shouldNavigateBack ? { commands: [NavigateHistoryBack()] } : {}),
         }
       }
       const subPath = currentSubPathFromStorageState(model.storageState)
@@ -3591,6 +3609,20 @@ export const update = (
             }),
             mappedCommands,
           ),
+
+        PushUrl: ({ url }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+          }),
+          commands: [...mappedCommands, PushUrl({ url })],
+        }),
+
+        NavigateBack: () => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+          }),
+          commands: [...mappedCommands, NavigateHistoryBack()],
+        }),
 
         ReplaceUrl: ({ url }) => ({
           model: modifyFields(model, {
