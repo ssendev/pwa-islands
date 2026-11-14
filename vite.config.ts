@@ -306,6 +306,7 @@ export default defineConfig({
       injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico,d.ts}"],
         globIgnores: ["**/downloads/**"],
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
 
         // Vite 8 hat `inlineDynamicImports` durch `codeSplitting: false` ersetzt;
         // das Plugin setzt im Service-Worker-Build noch die alte Option.

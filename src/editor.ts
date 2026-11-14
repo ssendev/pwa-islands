@@ -38,6 +38,7 @@ import {
 } from "./history"
 import { viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
+import { monacoEditorElement } from "./monaco-element"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
   clampEditorSplitPercent,
@@ -3511,25 +3512,30 @@ const viewPreviewContent = (preview: PreviewContent, h: Html.HtmlBuilder<Message
 
 const viewEditorFileBody = (
   fileMode: EditorFileMode,
+  filename: string,
   h: Html.HtmlBuilder<Message>,
 ): ReadonlyArray<Html.Html> =>
   EditorFileMode.match(fileMode, {
-    Text: ({ content }) => [
-      h.div(
-        [h.Class("form-group")],
-        [
-          h.textarea([
-            h.Id("modal-file-content"),
-            h.Class("form-textarea"),
-            h.AriaLabel("Inhalt"),
-            h.Placeholder("Geben Sie hier den Dateiinhalt ein..."),
-            h.Spellcheck(false),
-            h.Value(content),
-            h.OnInput((text) => Message.UpdatedTextContent({ content: text })),
-          ]),
-        ],
-      ),
-    ],
+    Text: ({ content }) => {
+      const monacoEditor = monacoEditorElement.withMessage(h)
+      return [
+        h.div(
+          [h.Class("form-group")],
+          [
+            monacoEditor([
+              monacoEditor.Value(content),
+              monacoEditor.Filename(filename),
+              monacoEditor.OnContentChanged((detail) =>
+                Message.UpdatedTextContent({ content: detail.value }),
+              ),
+              h.Id("modal-file-content"),
+              h.Class("monaco-editor-host"),
+              h.AriaLabel("Inhalt"),
+            ]),
+          ],
+        ),
+      ]
+    },
 
     Binary: ({ preview, edit }) => {
       const { isLocked, isChecked, isLoading, isEditing, lockReason, base64Content } =
@@ -4715,7 +4721,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 maybePasteError: state.maybePasteError,
                 extraBodyNodes: [
                   viewTemplatePicker(state, h),
-                  ...viewEditorFileBody(EditorFileMode.Text({ content: state.content }), h),
+                  ...viewEditorFileBody(
+                    EditorFileMode.Text({ content: state.content }),
+                    state.name,
+                    h,
+                  ),
                 ],
               },
               h,
@@ -4821,7 +4831,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 nameValue: name,
                 maybeValidationError,
                 maybePasteError,
-                extraBodyNodes: viewEditorFileBody(fileMode, h),
+                extraBodyNodes: viewEditorFileBody(fileMode, name, h),
                 historyControls:
                   fileMode._tag === "Text"
                     ? {

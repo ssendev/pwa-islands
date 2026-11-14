@@ -13,6 +13,9 @@ import {
   toggleFullscreenWindow,
 } from "./files"
 import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
+import { registerMonacoEditorElement } from "./monaco-element"
+
+registerMonacoEditorElement()
 
 if (supportsTauri()) {
   // In nativen Tauri-Apps sind alle Web-Assets bereits lokal in der Binärdatei gebündelt.

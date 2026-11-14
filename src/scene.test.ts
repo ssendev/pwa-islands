@@ -1,6 +1,7 @@
 import { Effect, Option } from "effect"
 import {
   Command,
+  CustomElement,
   Subscription,
   change,
   click,
@@ -16,6 +17,7 @@ import {
 } from "foldkit/scene"
 import { describe, expect, it } from "vitest"
 import { hashLine } from "./hashline"
+import { monacoEditorElement } from "./monaco-element"
 import {
   ActivateOpfsBackend,
   ClearAllHistory,
@@ -153,7 +155,9 @@ describe("PWA Islands Scene Tests", () => {
       ),
       sceneExpect(selector(".modal-title")).toHaveText("Neue Datei erstellen"),
       type(selector("#modal-file-name"), "hallo.html"),
-      type(selector("#modal-file-content"), "<h1>Hallo Welt</h1>"),
+      CustomElement.emit(monacoEditorElement, selector("#modal-file-content"), "content-changed", {
+        value: "<h1>Hallo Welt</h1>",
+      }),
       click(selector("#modal-btn-save")),
       Command.resolveAll(
         [Editor.SaveChanges, Editor.Message.SucceededSaveChanges({ entries: updatedEntries })],
@@ -1403,7 +1407,9 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-btn-history")).toExist(),
       sceneExpect(selector("#modal-btn-redo")).toExist(),
       sceneExpect(selector("#modal-btn-redo")).toBeDisabled(),
-      type(selector("#modal-file-content"), "<p>Bearbeitet</p>"),
+      CustomElement.emit(monacoEditorElement, selector("#modal-file-content"), "content-changed", {
+        value: "<p>Bearbeitet</p>",
+      }),
       Command.expectNone(),
       sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Bearbeitet</p>"),
       click(selector("#modal-btn-undo")),
