@@ -759,12 +759,19 @@ code {
   align-items: center;
   gap: 10px;
   width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   pointer-events: none;
 }
 
 .toast {
   pointer-events: auto;
   max-width: 100%;
+  max-height: calc(100dvh - 64px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
   margin-bottom: 0;
   padding: 14px 18px;
   font-size: 18px;
@@ -772,6 +779,17 @@ code {
     0 10px 25px rgba(0, 0, 0, 0.18),
     0 4px 10px rgba(0, 0, 0, 0.1);
   animation: toastSlideIn 0.18s ease-out;
+}
+
+.toast .alert-message {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.toast .alert-close-btn {
+  align-self: flex-start;
+  position: sticky;
+  top: 0;
 }
 
 .toast.alert-info {

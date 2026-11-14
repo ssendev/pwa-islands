@@ -1995,6 +1995,14 @@ const enqueueToast = (
   readonly model: Model
   readonly commands?: ReadonlyArray<Command.Command<Message>>
 } => {
+  const alreadyVisible = Array.some(
+    model.toasts,
+    (existing) => existing.message === banner.message && existing.variant === banner.variant,
+  )
+  if (alreadyVisible) {
+    return { model }
+  }
+
   const toastId = model.nextToastId
   const toast: Toast = {
     id: toastId,
@@ -3381,14 +3389,9 @@ export const update = (
         }
       }
 
-      const editorModelsLoad = maybeLoadEditorLlmModels(model)
       return {
-        model: modifyFields(editorModelsLoad.model, {}),
-        commands: [
-          PushUrl({ url: buildEditUrl(subPath, entry.name) }),
-          toModalCommand(Modal.InspectFileForEditor({ entryName: entry.name, subPath })),
-          ...(editorModelsLoad.commands ?? []),
-        ],
+        model,
+        commands: [PushUrl({ url: buildEditUrl(subPath, entry.name) })],
       }
     },
 
