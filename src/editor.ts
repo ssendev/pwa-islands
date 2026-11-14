@@ -36,7 +36,7 @@ import {
   loadPreviousFileHistoryEntry,
   truncateLatestFileHistoryEntry,
 } from "./history"
-import { viewIcon } from "./icons"
+import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { monacoEditorElement } from "./monaco-element"
 import { buildEditUrl, buildNewUrl } from "./route"
@@ -167,6 +167,7 @@ export const Model = defineTaggedUnion({
     maybeValidationError: Schema.Option(Schema.String),
     maybePasteError: Schema.Option(Schema.String),
     llmBarMode: LlmBarMode,
+    isLlmModeMenuOpen: Schema.optionalKey(Schema.Boolean),
     llmChatInput: Schema.String,
     llmChatMessages: Schema.Array(LlmChatMessage),
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
@@ -193,6 +194,7 @@ export const Model = defineTaggedUnion({
     maybeValidationError: Schema.Option(Schema.String),
     maybePasteError: Schema.Option(Schema.String),
     llmBarMode: LlmBarMode,
+    isLlmModeMenuOpen: Schema.optionalKey(Schema.Boolean),
     llmChatInput: Schema.String,
     llmChatMessages: Schema.Array(LlmChatMessage),
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
@@ -240,6 +242,7 @@ export const makeCreateFile = (
   maybeValidationError: Option.none(),
   maybePasteError: Option.none(),
   llmBarMode: defaults?.llmBarMode ?? "Closed",
+  isLlmModeMenuOpen: false,
   llmChatInput: "",
   llmChatMessages: [],
   llmChatDisplay: [],
@@ -548,12 +551,41 @@ const parseLlmBarMode = (value: string, llmEnabled: boolean): LlmBarMode => {
 
 const setLlmBarMode = (model: Model, llmBarMode: LlmBarMode): Model =>
   Model.match(model, {
-    CreateFile: (state) => modifyFields(state, { llmBarMode: () => llmBarMode }),
-    EditFile: (state) => modifyFields(state, { llmBarMode: () => llmBarMode }),
+    CreateFile: (state) =>
+      modifyFields(state, {
+        llmBarMode: () => llmBarMode,
+        isLlmModeMenuOpen: () => false,
+      }),
+    EditFile: (state) =>
+      modifyFields(state, {
+        llmBarMode: () => llmBarMode,
+        isLlmModeMenuOpen: () => false,
+      }),
     CreateFolder: () => model,
     EditFolder: () => model,
     ConfirmOverwrite: () => model,
   })
+
+export const isLlmModeMenuOpen = (model: Model): boolean =>
+  Model.match(model, {
+    CreateFile: (state) => state.isLlmModeMenuOpen ?? false,
+    EditFile: (state) => state.isLlmModeMenuOpen ?? false,
+    CreateFolder: () => false,
+    EditFolder: () => false,
+    ConfirmOverwrite: () => false,
+  })
+
+export const setLlmModeMenuOpen = (model: Model, isOpen: boolean): Model =>
+  Model.match(model, {
+    CreateFile: (state) => modifyFields(state, { isLlmModeMenuOpen: () => isOpen }),
+    EditFile: (state) => modifyFields(state, { isLlmModeMenuOpen: () => isOpen }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+const toggleLlmModeMenu = (model: Model): Model =>
+  setLlmModeMenuOpen(model, !isLlmModeMenuOpen(model))
 
 const setPasteError = (model: Model, maybePasteError: Option.Option<string>): Model =>
   Model.match(model, {
@@ -637,6 +669,8 @@ export const Message = defineMessageUnion({
   SelectedLlmBarMode: {
     value: Schema.String,
   },
+  ClickedToggleLlmModeMenu: {},
+  ClickedOutsideLlmModeMenu: {},
   UpdatedLlmChatInput: {
     value: Schema.String,
   },
@@ -2066,6 +2100,16 @@ export const update = (
           }
     },
 
+    ClickedToggleLlmModeMenu: () => ({
+      model: toggleLlmModeMenu(model),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedOutsideLlmModeMenu: () => ({
+      model: setLlmModeMenuOpen(model, false),
+      outMessage: OutMessage.None(),
+    }),
+
     UpdatedLlmChatInput: ({ value }) => ({
       model: Model.match(model, {
         CreateFile: (state) => modifyFields(state, { llmChatInput: () => value }),
@@ -2620,6 +2664,7 @@ export const update = (
                 maybeValidationError: Option.none(),
                 maybePasteError: Option.none(),
                 llmBarMode: "Closed",
+                isLlmModeMenuOpen: false,
                 llmChatInput: "",
                 llmChatMessages: [],
                 llmChatDisplay: [],
@@ -2639,6 +2684,7 @@ export const update = (
                 maybeValidationError: Option.none(),
                 maybePasteError: Option.none(),
                 llmBarMode: "Closed",
+                isLlmModeMenuOpen: false,
                 llmChatInput: "",
                 llmChatMessages: [],
                 llmChatDisplay: [],
@@ -2764,6 +2810,7 @@ export const update = (
             maybeValidationError: Option.none(),
             maybePasteError: Option.none(),
             llmBarMode: model.llmBarMode,
+            isLlmModeMenuOpen: false,
             llmChatInput: model.llmChatInput,
             llmChatMessages: model.llmChatMessages,
             llmChatDisplay: model.llmChatDisplay,
@@ -3985,6 +4032,7 @@ const viewEditorModal = (
     isFolder,
     isTextFile,
     llmBarMode,
+    isLlmModeMenuOpen: isLlmModeMenuOpenProp = false,
     llmChatInput,
     llmChatState,
     llmChatDisplay,
@@ -4006,6 +4054,7 @@ const viewEditorModal = (
     readonly isFolder: boolean
     readonly isTextFile: boolean
     readonly llmBarMode: LlmBarMode
+    readonly isLlmModeMenuOpen?: boolean
     readonly llmChatInput: string
     readonly llmChatState: LlmChatState
     readonly llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>
@@ -4031,17 +4080,24 @@ const viewEditorModal = (
   const saveLabel = isEditingExisting ? "Speichern" : "Erstellen"
   const effectiveLlmBarMode: LlmBarMode =
     !isTextFile || (llmBarMode === "Chat" && !llmViewInputs.llmEnabled) ? "Closed" : llmBarMode
-  const llmBarModeOptions: ReadonlyArray<{ readonly value: LlmBarMode; readonly label: string }> =
-    llmViewInputs.llmEnabled
-      ? [
-          { value: "Closed", label: "KI" },
-          { value: "Chat", label: "Chat" },
-          { value: "Copy", label: "Copy" },
-        ]
-      : [
-          { value: "Closed", label: "KI" },
-          { value: "Copy", label: "Copy" },
-        ]
+  const llmBarModeOptions: ReadonlyArray<{
+    readonly value: LlmBarMode
+    readonly label: string
+    readonly icon: IconId
+  }> = llmViewInputs.llmEnabled
+    ? [
+        { value: "Closed", label: "Bearbeiten", icon: "edit" },
+        { value: "Chat", label: "Chat", icon: "ai" },
+        { value: "Copy", label: "Kopieren", icon: "clipboard" },
+      ]
+    : [
+        { value: "Closed", label: "Bearbeiten", icon: "edit" },
+        { value: "Copy", label: "Kopieren", icon: "clipboard" },
+      ]
+  const activeLlmBarModeOption = Array.findFirst(
+    llmBarModeOptions,
+    (item) => item.value === effectiveLlmBarMode,
+  ).pipe(Option.getOrElse(() => llmBarModeOptions[0]))
 
   return h.div(
     [
@@ -4185,20 +4241,57 @@ const viewEditorModal = (
                       ? viewLlmButtons(maybePasteError, h)
                       : []),
                   isTextFile
-                    ? h.select(
+                    ? h.div(
                         [
-                          h.Id("modal-llm-mode-select"),
-                          h.Class("form-input modal-llm-select modal-footer-push-right"),
-                          h.AriaLabel("KI-Werkzeuge"),
-                          h.Value(effectiveLlmBarMode),
-                          h.OnChange((value) => Message.SelectedLlmBarMode({ value })),
+                          h.Id("modal-llm-mode-menu"),
+                          h.Class("settings-menu modal-llm-mode-menu modal-footer-push-right"),
                         ],
-                        Array.map(llmBarModeOptions, (item) =>
-                          h.option(
-                            [h.Value(item.value), h.Selected(effectiveLlmBarMode === item.value)],
-                            [item.label],
+                        [
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("modal-llm-mode-select"),
+                              h.Class("btn btn-secondary btn-icon modal-llm-mode-trigger"),
+                              h.Title(`Modus: ${activeLlmBarModeOption.label}`),
+                              h.AriaLabel(`Modus: ${activeLlmBarModeOption.label}`),
+                              h.AriaHasPopup("true"),
+                              h.AriaExpanded(isLlmModeMenuOpenProp),
+                              h.Attribute("data-mode", effectiveLlmBarMode),
+                              h.OnClick(Message.ClickedToggleLlmModeMenu(), {
+                                propagation: "Stop",
+                              }),
+                            ],
+                            [
+                              viewIcon(activeLlmBarModeOption.icon, h),
+                              h.span([h.Class("modal-llm-mode-caret"), h.AriaHidden(true)], ["▾"]),
+                            ],
                           ),
-                        ),
+                          h.div(
+                            [
+                              h.Id("modal-llm-mode-menu-list"),
+                              h.Class("settings-menu-list modal-llm-mode-menu-list"),
+                              h.Hidden(!isLlmModeMenuOpenProp),
+                              h.Role("menu"),
+                            ],
+                            Array.map(llmBarModeOptions, (item) =>
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id(`modal-llm-mode-option-${item.value}`),
+                                  h.Class(
+                                    effectiveLlmBarMode === item.value
+                                      ? "settings-menu-item is-active"
+                                      : "settings-menu-item",
+                                  ),
+                                  h.Role("menuitem"),
+                                  h.Attribute("data-mode", item.value),
+                                  h.OnClick(Message.SelectedLlmBarMode({ value: item.value })),
+                                ],
+                                [viewIcon(item.icon, h), ` ${item.label}`],
+                              ),
+                            ),
+                          ),
+                        ],
                       )
                     : h.empty,
                   ...(historyControls !== undefined
@@ -4746,6 +4839,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 isFolder: false,
                 isTextFile: true,
                 llmBarMode: state.llmBarMode,
+                isLlmModeMenuOpen: state.isLlmModeMenuOpen ?? false,
                 llmChatInput: state.llmChatInput,
                 llmChatState: state.llmChatState,
                 llmChatDisplay: state.llmChatDisplay,
@@ -4811,6 +4905,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 isFolder: true,
                 isTextFile: false,
                 llmBarMode: "Closed",
+                isLlmModeMenuOpen: false,
                 llmChatInput: "",
                 llmChatState: LlmChatState.Idle(),
                 llmChatDisplay: [],
@@ -4839,6 +4934,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         maybeValidationError,
         maybePasteError,
         llmBarMode,
+        isLlmModeMenuOpen: isLlmModeMenuOpenFlag,
         llmChatInput,
         llmChatState,
         llmChatDisplay,
@@ -4865,6 +4961,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 isFolder: false,
                 isTextFile: fileMode._tag === "Text",
                 llmBarMode,
+                isLlmModeMenuOpen: isLlmModeMenuOpenFlag ?? false,
                 llmChatInput,
                 llmChatState,
                 llmChatDisplay,

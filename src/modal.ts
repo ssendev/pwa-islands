@@ -114,6 +114,22 @@ export const isCreatingFile = (state: ModalState): boolean =>
     Match.orElse(() => false),
   )
 
+export const isLlmModeMenuOpen = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: ({ editor }) => Editor.isLlmModeMenuOpen(editor),
+    ImportConflict: () => false,
+    Help: () => false,
+  })
+
+export const closeLlmModeMenu = (state: ModalState): ModalState =>
+  ModalState.match(state, {
+    Closed: () => state,
+    Editor: ({ editor }) => ModalState.Editor({ editor: Editor.setLlmModeMenuOpen(editor, false) }),
+    ImportConflict: () => state,
+    Help: () => state,
+  })
+
 export const closePreview = (state: ModalState): ModalState =>
   ModalState.match(state, {
     Closed: () => state,
@@ -390,6 +406,7 @@ export const resolveModalForRoute = async (
                   maybeValidationError: Option.none(),
                   maybePasteError: Option.none(),
                   llmBarMode: "Closed",
+                  isLlmModeMenuOpen: false,
                   llmChatInput: "",
                   llmChatMessages: [],
                   llmChatDisplay: [],
@@ -829,6 +846,7 @@ export const update = (
           maybeValidationError: Option.none(),
           maybePasteError: Option.none(),
           llmBarMode: context.editorDefaults?.llmBarMode ?? "Closed",
+          isLlmModeMenuOpen: false,
           llmChatInput: "",
           llmChatMessages: [],
           llmChatDisplay: [],

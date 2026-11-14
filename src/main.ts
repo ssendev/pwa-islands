@@ -515,6 +515,7 @@ export const Message = defineMessageUnion({
   // Settings & Storage Actions
   ClickedToggleSettings: {},
   ClickedOutsideSettingsMenu: {},
+  ClickedOutsideLlmModeMenu: {},
   ClickedOpenSettingsDialog: {},
   ClickedCloseSettingsDialog: {},
   ClickedSaveSettingsDialog: {},
@@ -2831,6 +2832,12 @@ export const update = (
       }),
     }),
 
+    ClickedOutsideLlmModeMenu: () => ({
+      model: modifyFields(model, {
+        modalState: Modal.closeLlmModeMenu,
+      }),
+    }),
+
     ClickedOpenSettingsDialog: () => ({
       model: modifyFields(model, {
         isSettingsOpen: () => false,
@@ -3513,6 +3520,13 @@ export const update = (
           ...(shouldNavigateBack ? { commands: [NavigateHistoryBack()] } : {}),
         }
       }
+      if (Modal.isLlmModeMenuOpen(model.modalState)) {
+        return {
+          model: modifyFields(model, {
+            modalState: Modal.closeLlmModeMenu,
+          }),
+        }
+      }
       const subPath = currentSubPathFromStorageState(model.storageState)
       return {
         model: modifyFields(model, {
@@ -3932,6 +3946,36 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
             },
           }),
           Effect.sync(() => isSettingsOpen),
+        ),
+    },
+  ),
+
+  outsideLlmModeMenuClick: entry(
+    {
+      isLlmModeMenuOpen: Schema.Boolean,
+    },
+    {
+      modelToDependencies: (model) => ({
+        isLlmModeMenuOpen: Modal.isLlmModeMenuOpen(model.modalState),
+      }),
+      dependenciesToStream: ({ isLlmModeMenuOpen }) =>
+        Stream.when(
+          Dom.streamFromEventFilterMap({
+            target: document,
+            type: "click",
+            filterMapEvent: (event) => {
+              const target = event.target
+              if (!(target instanceof Node)) {
+                return Option.none()
+              }
+              const menuRoot = document.getElementById("modal-llm-mode-menu")
+              if (menuRoot && !menuRoot.contains(target)) {
+                return Option.some(Message.ClickedOutsideLlmModeMenu())
+              }
+              return Option.none()
+            },
+          }),
+          Effect.sync(() => isLlmModeMenuOpen),
         ),
     },
   ),
