@@ -26,6 +26,14 @@ import {
   formatLlmContextForFormat,
 } from "./edit-format"
 import { formatUpdatedHashlines } from "./hashline"
+import {
+  appendFileHistory,
+  clearFileHistory,
+  hashAndMeasureHistoryContent,
+  loadFileHistoryEntryAt,
+  loadFileHistoryIndex,
+  loadPreviousFileHistoryEntry,
+} from "./history"
 import { viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import {
@@ -127,6 +135,28 @@ export const EditorSplitDrag = Schema.Struct({
 })
 export type EditorSplitDrag = typeof EditorSplitDrag.Type
 
+export const HistoryEntry = Schema.Struct({
+  offset: Schema.Number,
+  endOffset: Schema.Number,
+  timestampMs: Schema.Number,
+  byteLength: Schema.Number,
+  contentHash: Schema.Number,
+})
+export type HistoryEntry = typeof HistoryEntry.Type
+
+export const HistoryState = defineTaggedUnion({
+  Closed: {},
+  Loading: {},
+  Open: {
+    entries: Schema.Array(HistoryEntry),
+    isConfirmingClear: Schema.Boolean,
+  },
+  Error: {
+    message: Schema.String,
+  },
+})
+export type HistoryState = typeof HistoryState.Type
+
 export const Model = defineTaggedUnion({
   CreateFile: {
     name: Schema.String,
@@ -177,6 +207,10 @@ export const Model = defineTaggedUnion({
     isPreviewOpen: Schema.Boolean,
     editorSplitPercent: Schema.Number,
     editorSplitDrag: Schema.Option(EditorSplitDrag),
+    undoStack: Schema.Array(Schema.String),
+    redoStack: Schema.Array(Schema.String),
+    maybeOpfsHistoryCursor: Schema.Option(Schema.Number),
+    historyState: HistoryState,
   },
   ConfirmDelete: {
     entryName: Schema.String,
@@ -286,6 +320,24 @@ const sendingEntriesToDisplay = (chatState: LlmChatState): ReadonlyArray<LlmChat
     : completed
 }
 
+const pushUndoSnapshot = (
+  state: EditFileModel,
+  nextContent: string,
+  onlyIfStackEmpty: boolean,
+): {
+  readonly undoStack: ReadonlyArray<string>
+  readonly redoStack: ReadonlyArray<string>
+} => {
+  if (state.fileMode._tag !== "Text" || state.fileMode.content === nextContent) {
+    return { undoStack: state.undoStack, redoStack: state.redoStack }
+  }
+  const nextUndoStack =
+    onlyIfStackEmpty && Array.isReadonlyArrayNonEmpty(state.undoStack)
+      ? state.undoStack
+      : [...state.undoStack, state.fileMode.content]
+  return { undoStack: nextUndoStack, redoStack: [] }
+}
+
 export const applyLlmChatStream = (
   model: Model,
   {
@@ -370,17 +422,24 @@ export const applyLlmChatSuccess = (
         llmChatDisplay: (current) => [...current, ...newDisplayEntries],
         llmChatState: () => LlmChatState.Idle(),
       }),
-    EditFile: (state) =>
-      modifyFields(state, {
+    EditFile: (state) => {
+      const historyUpdate = Option.match(maybeUpdatedContent, {
+        onNone: () => ({ undoStack: state.undoStack, redoStack: state.redoStack }),
+        onSome: (nextContent) => pushUndoSnapshot(state, nextContent, false),
+      })
+      return modifyFields(state, {
         fileMode: (current) =>
           Option.match(maybeUpdatedContent, {
             onSome: (nextContent) => EditorFileMode.Text({ content: nextContent }),
             onNone: () => current,
           }),
+        undoStack: () => historyUpdate.undoStack,
+        redoStack: () => historyUpdate.redoStack,
         llmChatMessages: () => messages,
         llmChatDisplay: (current) => [...current, ...newDisplayEntries],
         llmChatState: () => LlmChatState.Idle(),
-      }),
+      })
+    },
     CreateFolder: () => model,
     EditFolder: () => model,
     ConfirmDelete: () => model,
@@ -516,12 +575,16 @@ const applyTextContentUpdate = (
       }),
     EditFile: (state) =>
       EditorFileMode.match(state.fileMode, {
-        Text: () =>
-          modifyFields(state, {
+        Text: () => {
+          const historyUpdate = pushUndoSnapshot(state, content, false)
+          return modifyFields(state, {
             fileMode: () => EditorFileMode.Text({ content }),
+            undoStack: () => historyUpdate.undoStack,
+            redoStack: () => historyUpdate.redoStack,
             maybeAlertBanner: () => maybeAlertBanner,
             maybePasteError: () => Option.none(),
-          }),
+          })
+        },
         Binary: () => state,
       }),
     CreateFolder: () => model,
@@ -663,6 +726,43 @@ export const Message = defineMessageUnion({
   },
   EndedResizeEditorSplit: {},
   ClickedToggleEditName: {},
+  ClickedUndo: {},
+  ClickedRedo: {},
+  SucceededLoadPreviousHistoryEntry: {
+    maybeEntry: Schema.Option(
+      Schema.Struct({
+        content: Schema.String,
+        startOffset: Schema.Number,
+      }),
+    ),
+  },
+  FailedLoadPreviousHistoryEntry: {
+    message: Schema.String,
+  },
+  ClickedOpenHistory: {},
+  ClickedCloseHistory: {},
+  SucceededLoadFullHistory: {
+    entries: Schema.Array(HistoryEntry),
+  },
+  FailedLoadFullHistory: {
+    message: Schema.String,
+  },
+  ClickedRestoreHistoryEntry: {
+    endOffset: Schema.Number,
+  },
+  SucceededLoadHistoryEntryAt: {
+    maybeContent: Schema.Option(Schema.String),
+  },
+  FailedLoadHistoryEntryAt: {
+    message: Schema.String,
+  },
+  ClickedRequestClearHistory: {},
+  ClickedCancelClearHistory: {},
+  ClickedConfirmClearHistory: {},
+  SucceededClearHistory: {},
+  FailedClearHistory: {
+    message: Schema.String,
+  },
 })
 export type Message = typeof Message.Type
 
@@ -803,15 +903,33 @@ export const LoadBase64 = Command.define("LoadBase64", {
     ),
 })
 
+const recordPreviousFileVersion = async (
+  storage: ReturnType<typeof requireActiveStorage>,
+  subPath: ReadonlyArray<string>,
+  readFromName: string,
+  historyTargetName: string,
+  timestampMs: number,
+): Promise<void> => {
+  try {
+    const buffer = await storage.readFileBuffer(subPath, readFromName)
+    const oldContent = new TextDecoder("utf-8").decode(buffer)
+    await appendFileHistory(subPath, historyTargetName, oldContent, timestampMs)
+  } catch {
+    // NOTE: Fehlende Quelldatei oder nicht verfügbares OPFS darf das Speichern nicht blockieren
+  }
+}
+
 const executeSaveChanges = async (
   model: Model,
   subPath: ReadonlyArray<string>,
+  timestampMs: number,
 ): Promise<{ readonly entries: ReadonlyArray<FileEntry>; readonly savedFileName: string }> => {
   const storage = requireActiveStorage()
 
   const saveEditedFile = (originalName: string, targetName: string, fileMode: EditorFileMode) =>
     BinaryOrText(fileMode, {
       text: async (content) => {
+        await recordPreviousFileVersion(storage, subPath, originalName, targetName, timestampMs)
         await storage.writeFile(subPath, targetName, content)
         if (originalName !== targetName) {
           await storage.deleteEntry(subPath, originalName, "file")
@@ -852,6 +970,7 @@ const executeSaveChanges = async (
     Match.tag("ConfirmOverwrite", async ({ targetName, source }) => {
       await Match.value(source).pipe(
         Match.tag("CreateFile", async ({ content }) => {
+          await recordPreviousFileVersion(storage, subPath, targetName, targetName, timestampMs)
           await storage.writeFile(subPath, targetName, content)
         }),
         Match.tag("EditFile", async ({ originalName, fileMode }) => {
@@ -877,13 +996,16 @@ export const SaveChanges = Command.define("SaveChanges", {
   },
   messages: [Message.SucceededSaveChanges, Message.FailedSaveChanges],
   execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        const { entries } = await executeSaveChanges(args.model, args.subPath)
-        return Message.SucceededSaveChanges({ entries })
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((timestampMs) =>
+        Effect.tryPromise({
+          try: async () => {
+            const { entries } = await executeSaveChanges(args.model, args.subPath, timestampMs)
+            return Message.SucceededSaveChanges({ entries })
+          },
+          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+        }),
+      ),
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedSaveChanges({
@@ -1093,6 +1215,135 @@ export const StartEditorSplitDrag = Command.define("StartEditorSplitDrag", {
       const startWidthPx = body ? body.getBoundingClientRect().width : 0
       return Message.MeasuredEditorSplitDrag({ startWidthPx, containerWidthPx })
     }),
+})
+
+export const LoadPreviousHistoryEntry = Command.define("LoadPreviousHistoryEntry", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+    maybeCursor: Schema.Option(Schema.Number),
+  },
+  messages: [Message.SucceededLoadPreviousHistoryEntry, Message.FailedLoadPreviousHistoryEntry],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const maybeRecord = await loadPreviousFileHistoryEntry(
+          args.subPath,
+          args.fileName,
+          args.maybeCursor,
+        )
+        return Message.SucceededLoadPreviousHistoryEntry({
+          maybeEntry: Option.map(maybeRecord, (record) => ({
+            content: record.content,
+            startOffset: record.startOffset,
+          })),
+        })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedLoadPreviousHistoryEntry({
+            message: `Ältere Version konnte nicht geladen werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const LoadFullHistory = Command.define("LoadFullHistory", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+  },
+  messages: [Message.SucceededLoadFullHistory, Message.FailedLoadFullHistory],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        const entries = await loadFileHistoryIndex(args.subPath, args.fileName)
+        return Message.SucceededLoadFullHistory({ entries })
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedLoadFullHistory({
+            message: `Verlauf konnte nicht geladen werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const LoadHistoryEntryAt = Command.define("LoadHistoryEntryAt", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+    endOffset: Schema.Number,
+    maybeSaveCurrentContent: Schema.Option(Schema.String),
+  },
+  messages: [Message.SucceededLoadHistoryEntryAt, Message.FailedLoadHistoryEntryAt],
+  execute: (args) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((timestampMs) =>
+        Effect.tryPromise({
+          try: async () => {
+            const maybeRecord = await loadFileHistoryEntryAt(
+              args.subPath,
+              args.fileName,
+              args.endOffset,
+            )
+            if (Option.isSome(maybeRecord) && Option.isSome(args.maybeSaveCurrentContent)) {
+              try {
+                await appendFileHistory(
+                  args.subPath,
+                  args.fileName,
+                  args.maybeSaveCurrentContent.value,
+                  timestampMs,
+                )
+              } catch {
+                // NOTE: Nicht verfügbares OPFS darf die Wiederherstellung nicht blockieren
+              }
+            }
+            return Message.SucceededLoadHistoryEntryAt({
+              maybeContent: Option.map(maybeRecord, (record) => record.content),
+            })
+          },
+          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+        }),
+      ),
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedLoadHistoryEntryAt({
+            message: `Version konnte nicht geladen werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const ClearFileHistory = Command.define("ClearFileHistory", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+  },
+  messages: [Message.SucceededClearHistory, Message.FailedClearHistory],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: async () => {
+        await clearFileHistory(args.subPath, args.fileName)
+        return Message.SucceededClearHistory()
+      },
+      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedClearHistory({
+            message: `Verlauf konnte nicht gelöscht werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
 })
 
 // UPDATE
@@ -1420,12 +1671,16 @@ export const update = (
         EditFolder: () => model,
         EditFile: (state) =>
           EditorFileMode.match(state.fileMode, {
-            Text: () =>
-              modifyFields(state, {
+            Text: () => {
+              const historyUpdate = pushUndoSnapshot(state, content, true)
+              return modifyFields(state, {
                 fileMode: () => EditorFileMode.Text({ content }),
+                undoStack: () => historyUpdate.undoStack,
+                redoStack: () => historyUpdate.redoStack,
                 maybeAlertBanner: () => Option.none(),
                 maybePasteError: () => Option.none(),
-              }),
+              })
+            },
             Binary: () => state,
           }),
         ConfirmDelete: () => model,
@@ -2282,6 +2537,10 @@ export const update = (
                 isPreviewOpen: false,
                 editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
                 editorSplitDrag: Option.none(),
+                undoStack: [],
+                redoStack: [],
+                maybeOpfsHistoryCursor: Option.none(),
+                historyState: HistoryState.Closed(),
               }),
               outMessage: OutMessage.None(),
             }),
@@ -2379,6 +2638,305 @@ export const update = (
       model,
       outMessage: OutMessage.None(),
     }),
+
+    ClickedUndo: () => {
+      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const currentContent = model.fileMode.content
+      if (Array.isReadonlyArrayNonEmpty(model.undoStack)) {
+        const previousContent = model.undoStack[model.undoStack.length - 1]
+        const nextUndoStack = model.undoStack.slice(0, -1)
+        const nextRedoStack = [...model.redoStack, currentContent]
+        return {
+          model: modifyFields(model, {
+            fileMode: () => EditorFileMode.Text({ content: previousContent }),
+            undoStack: () => nextUndoStack,
+            redoStack: () => nextRedoStack,
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }
+      }
+      if (Option.exists(model.maybeOpfsHistoryCursor, (cursor) => cursor <= 0)) {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model,
+        commands: [
+          LoadPreviousHistoryEntry({
+            subPath: context.subPath,
+            fileName: model.originalName,
+            maybeCursor: model.maybeOpfsHistoryCursor,
+          }),
+        ],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedRedo: () => {
+      if (
+        model._tag !== "EditFile" ||
+        model.fileMode._tag !== "Text" ||
+        Array.isReadonlyArrayEmpty(model.redoStack)
+      ) {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const currentContent = model.fileMode.content
+      const nextContent = model.redoStack[model.redoStack.length - 1]
+      const nextRedoStack = model.redoStack.slice(0, -1)
+      const nextUndoStack = [...model.undoStack, currentContent]
+      return {
+        model: modifyFields(model, {
+          fileMode: () => EditorFileMode.Text({ content: nextContent }),
+          undoStack: () => nextUndoStack,
+          redoStack: () => nextRedoStack,
+          maybeAlertBanner: () => Option.none(),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    SucceededLoadPreviousHistoryEntry: ({ maybeEntry }) => {
+      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const currentContent = model.fileMode.content
+      return Option.match(maybeEntry, {
+        onNone: () => ({
+          model: modifyFields(model, {
+            maybeOpfsHistoryCursor: () => Option.some(0),
+            maybeAlertBanner: () =>
+              Option.some({
+                message: "Keine ältere Version vorhanden.",
+                variant: "info",
+              }),
+          }),
+          outMessage: OutMessage.None(),
+        }),
+        onSome: ({ content, startOffset }) => ({
+          model: modifyFields(model, {
+            fileMode: () => EditorFileMode.Text({ content }),
+            redoStack: (stack) => [...stack, currentContent],
+            maybeOpfsHistoryCursor: () => Option.some(startOffset),
+            maybeAlertBanner: () => Option.none(),
+          }),
+          outMessage: OutMessage.None(),
+        }),
+      })
+    },
+
+    FailedLoadPreviousHistoryEntry: ({ message: errorMessage }) => ({
+      model: setAlertBanner(
+        model,
+        Option.some({
+          message: errorMessage,
+          variant: "danger",
+        }),
+      ),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedOpenHistory: () => {
+      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Loading(),
+        }),
+        commands: [
+          LoadFullHistory({
+            subPath: context.subPath,
+            fileName: model.originalName,
+          }),
+        ],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedCloseHistory: () => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Closed(),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    SucceededLoadFullHistory: ({ entries }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Open({ entries, isConfirmingClear: false }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    FailedLoadFullHistory: ({ message: errorMessage }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Error({ message: errorMessage }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedRestoreHistoryEntry: ({ endOffset }) => {
+      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const currentContent = model.fileMode.content
+      const { contentHash: currentHash, byteLength: currentByteLength } =
+        hashAndMeasureHistoryContent(currentContent)
+      const isCurrentInHistory =
+        model.historyState._tag === "Open" &&
+        Array.some(
+          model.historyState.entries,
+          (entry) => entry.contentHash === currentHash && entry.byteLength === currentByteLength,
+        )
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Loading(),
+        }),
+        commands: [
+          LoadHistoryEntryAt({
+            subPath: context.subPath,
+            fileName: model.originalName,
+            endOffset,
+            maybeSaveCurrentContent: isCurrentInHistory
+              ? Option.none()
+              : Option.some(currentContent),
+          }),
+        ],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    SucceededLoadHistoryEntryAt: ({ maybeContent }) => {
+      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return Option.match(maybeContent, {
+        onNone: () => ({
+          model: modifyFields(model, {
+            historyState: () =>
+              HistoryState.Error({ message: "Version konnte nicht geladen werden." }),
+          }),
+          outMessage: OutMessage.None(),
+        }),
+        onSome: (content) => {
+          const historyUpdate = pushUndoSnapshot(model, content, false)
+          return {
+            model: modifyFields(model, {
+              fileMode: () => EditorFileMode.Text({ content }),
+              undoStack: () => historyUpdate.undoStack,
+              redoStack: () => historyUpdate.redoStack,
+              maybeOpfsHistoryCursor: () => Option.none(),
+              historyState: () => HistoryState.Closed(),
+              maybeAlertBanner: () => Option.none(),
+            }),
+            outMessage: OutMessage.None(),
+          }
+        },
+      })
+    },
+
+    FailedLoadHistoryEntryAt: ({ message: errorMessage }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Error({ message: errorMessage }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedRequestClearHistory: () => {
+      if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const openState = model.historyState
+      return {
+        model: modifyFields(model, {
+          historyState: () =>
+            HistoryState.Open({
+              entries: openState.entries,
+              isConfirmingClear: true,
+            }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedCancelClearHistory: () => {
+      if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const openState = model.historyState
+      return {
+        model: modifyFields(model, {
+          historyState: () =>
+            HistoryState.Open({
+              entries: openState.entries,
+              isConfirmingClear: false,
+            }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedConfirmClearHistory: () => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model,
+        commands: [
+          ClearFileHistory({
+            subPath: context.subPath,
+            fileName: model.originalName,
+          }),
+        ],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    SucceededClearHistory: () => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          maybeOpfsHistoryCursor: () => Option.some(0),
+          historyState: () => HistoryState.Open({ entries: [], isConfirmingClear: false }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    FailedClearHistory: ({ message: errorMessage }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Error({ message: errorMessage }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
   })
 
 // VIEW
@@ -3053,6 +3611,7 @@ const viewEditorModal = (
     maybeAlertBanner,
     maybePasteError,
     extraBodyNodes,
+    historyControls,
   }: {
     readonly titleText: string
     readonly noun: "Datei" | "Ordner"
@@ -3074,6 +3633,10 @@ const viewEditorModal = (
     readonly maybeAlertBanner: Option.Option<AlertBanner>
     readonly maybePasteError: Option.Option<string>
     readonly extraBodyNodes: ReadonlyArray<Html.Html>
+    readonly historyControls?: {
+      readonly canUndo: boolean
+      readonly canRedo: boolean
+    }
   },
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
@@ -3248,27 +3811,72 @@ const viewEditorModal = (
                         ),
                       )
                     : h.empty,
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Id("modal-btn-cancel"),
-                      h.Class(
-                        isTextFile
-                          ? "btn btn-secondary icon-label-btn"
-                          : "btn btn-secondary icon-label-btn modal-footer-push-right",
-                      ),
-                      h.AriaLabel("Abbrechen"),
-                      h.DataAttribute("tip", "Abbrechen"),
-                      h.OnClick(Message.ClickedClose()),
-                    ],
-                    [
-                      h.span(
-                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                        [viewIcon("close", h)],
-                      ),
-                      h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
-                    ],
-                  ),
+                  ...(historyControls !== undefined
+                    ? [
+                        h.div(
+                          [h.Class("editor-history-nav"), h.Role("group"), h.AriaLabel("Verlauf")],
+                          [
+                            h.button(
+                              [
+                                h.Type("button"),
+                                h.Id("modal-btn-undo"),
+                                h.Class("btn btn-secondary btn-icon"),
+                                h.AriaLabel("Zurück"),
+                                h.Title("Zurück (Ältere Version)"),
+                                h.Disabled(!historyControls.canUndo),
+                                h.OnClick(Message.ClickedUndo()),
+                              ],
+                              [viewIcon("undo", h)],
+                            ),
+                            h.button(
+                              [
+                                h.Type("button"),
+                                h.Id("modal-btn-history"),
+                                h.Class("btn btn-secondary btn-icon"),
+                                h.AriaLabel("Versionsverlauf"),
+                                h.Title("Versionsverlauf"),
+                                h.OnClick(Message.ClickedOpenHistory()),
+                              ],
+                              [viewIcon("history", h)],
+                            ),
+                            h.button(
+                              [
+                                h.Type("button"),
+                                h.Id("modal-btn-redo"),
+                                h.Class("btn btn-secondary btn-icon"),
+                                h.AriaLabel("Vor"),
+                                h.Title("Vor (Neuere Version)"),
+                                h.Disabled(!historyControls.canRedo),
+                                h.OnClick(Message.ClickedRedo()),
+                              ],
+                              [viewIcon("redo", h)],
+                            ),
+                          ],
+                        ),
+                      ]
+                    : [
+                        h.button(
+                          [
+                            h.Type("button"),
+                            h.Id("modal-btn-cancel"),
+                            h.Class(
+                              isTextFile
+                                ? "btn btn-secondary icon-label-btn"
+                                : "btn btn-secondary icon-label-btn modal-footer-push-right",
+                            ),
+                            h.AriaLabel("Abbrechen"),
+                            h.DataAttribute("tip", "Abbrechen"),
+                            h.OnClick(Message.ClickedClose()),
+                          ],
+                          [
+                            h.span(
+                              [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                              [viewIcon("close", h)],
+                            ),
+                            h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
+                          ],
+                        ),
+                      ]),
                   h.button(
                     [
                       h.Type("submit"),
@@ -3499,6 +4107,169 @@ const viewPreviewOverlay = (content: string, h: Html.HtmlBuilder<Message>): Html
     ],
   )
 
+const formatHistoryTimestamp = (timestampMs: number): string =>
+  new Date(timestampMs).toLocaleString("de-DE", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  })
+
+const formatHistorySize = (byteLength: number): string =>
+  byteLength < 1024 ? `${byteLength} Bytes` : `${(byteLength / 1024).toFixed(1)} KB`
+
+const viewHistoryOverlay = (
+  historyState: HistoryState,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html => {
+  if (historyState._tag === "Closed") {
+    return h.empty
+  }
+
+  return h.div(
+    [
+      h.Id("editor-history-overlay"),
+      h.Class("modal-overlay"),
+      h.Role("dialog"),
+      h.AriaModal(true),
+      h.AriaLabel("Versionsverlauf"),
+    ],
+    [
+      h.div(
+        [h.Class("modal-content editor-history-modal")],
+        [
+          h.header(
+            [h.Class("modal-header")],
+            [
+              h.h3([h.Class("modal-title")], ["Versionsverlauf"]),
+              h.button(
+                [
+                  h.Type("button"),
+                  h.Id("editor-history-close"),
+                  h.Class("modal-close-btn"),
+                  h.AriaLabel("Verlauf schließen"),
+                  h.OnClick(Message.ClickedCloseHistory()),
+                ],
+                [viewIcon("close", h)],
+              ),
+            ],
+          ),
+          h.div(
+            [h.Class("modal-body")],
+            [
+              HistoryState.match(historyState, {
+                Closed: () => h.empty,
+                Loading: () => h.p([h.Class("editor-history-empty")], ["Verlauf wird geladen..."]),
+                Error: ({ message: errorMessage }) =>
+                  h.div([h.Class("alert alert-danger"), h.Role("alert")], [errorMessage]),
+                Open: ({ entries, isConfirmingClear }) =>
+                  Array.match(entries, {
+                    onEmpty: () =>
+                      h.p(
+                        [h.Class("editor-history-empty")],
+                        ["Noch keine gespeicherten Versionen vorhanden."],
+                      ),
+                    onNonEmpty: (nonEmptyEntries) =>
+                      h.div(
+                        [h.Class("editor-history-content")],
+                        [
+                          isConfirmingClear
+                            ? h.div(
+                                [
+                                  h.Id("editor-history-clear-confirm"),
+                                  h.Class("template-save-row"),
+                                ],
+                                [
+                                  h.span(
+                                    [h.Class("template-delete-prompt")],
+                                    ["Gesamten Verlauf wirklich löschen?"],
+                                  ),
+                                  h.button(
+                                    [
+                                      h.Type("button"),
+                                      h.Id("editor-history-clear-cancel"),
+                                      h.Class("btn btn-secondary"),
+                                      h.OnClick(Message.ClickedCancelClearHistory()),
+                                    ],
+                                    ["Abbrechen"],
+                                  ),
+                                  h.button(
+                                    [
+                                      h.Type("button"),
+                                      h.Id("editor-history-clear-confirm-btn"),
+                                      h.Class("btn btn-danger"),
+                                      h.OnClick(Message.ClickedConfirmClearHistory()),
+                                    ],
+                                    ["Endgültig löschen"],
+                                  ),
+                                ],
+                              )
+                            : h.div(
+                                [h.Class("editor-history-toolbar")],
+                                [
+                                  h.button(
+                                    [
+                                      h.Type("button"),
+                                      h.Id("editor-history-clear-btn"),
+                                      h.Class("btn btn-danger icon-label-btn"),
+                                      h.OnClick(Message.ClickedRequestClearHistory()),
+                                    ],
+                                    [
+                                      h.span(
+                                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                        [viewIcon("trash", h)],
+                                      ),
+                                      h.span([h.Class("icon-label-btn-text")], ["Verlauf löschen"]),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                          h.ul(
+                            [h.Class("editor-history-list")],
+                            Array.map(nonEmptyEntries, (entry) =>
+                              h.keyed("li")(
+                                String(entry.offset),
+                                [h.Class("editor-history-item")],
+                                [
+                                  h.div(
+                                    [h.Class("editor-history-meta")],
+                                    [
+                                      h.span(
+                                        [h.Class("editor-history-date")],
+                                        [formatHistoryTimestamp(entry.timestampMs)],
+                                      ),
+                                      h.span(
+                                        [h.Class("editor-history-lines")],
+                                        [formatHistorySize(entry.byteLength)],
+                                      ),
+                                    ],
+                                  ),
+                                  h.button(
+                                    [
+                                      h.Type("button"),
+                                      h.Class("btn btn-secondary editor-history-restore-btn"),
+                                      h.OnClick(
+                                        Message.ClickedRestoreHistoryEntry({
+                                          endOffset: entry.endOffset,
+                                        }),
+                                      ),
+                                    ],
+                                    ["Wiederherstellen"],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  }),
+              }),
+            ],
+          ),
+        ],
+      ),
+    ],
+  )
+}
+
 export const view = Submodel.defineView<Model, Message, ViewInputs>(
   (model, context, h): Html.Html =>
     Model.match(model, {
@@ -3608,6 +4379,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         isPreviewOpen: previewOpen,
         editorSplitPercent,
         editorSplitDrag,
+        undoStack,
+        redoStack,
+        maybeOpfsHistoryCursor,
+        historyState,
       }) =>
         h.div(
           [h.Class("editor-modal-host")],
@@ -3634,12 +4409,22 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 maybeAlertBanner,
                 maybePasteError,
                 extraBodyNodes: viewEditorFileBody(fileMode, h),
+                historyControls:
+                  fileMode._tag === "Text"
+                    ? {
+                        canUndo:
+                          Array.isReadonlyArrayNonEmpty(undoStack) ||
+                          !Option.exists(maybeOpfsHistoryCursor, (cursor) => cursor <= 0),
+                        canRedo: Array.isReadonlyArrayNonEmpty(redoStack),
+                      }
+                    : undefined,
               },
               h,
             ),
             previewOpen && fileMode._tag === "Text"
               ? viewPreviewOverlay(fileMode.content, h)
               : h.empty,
+            fileMode._tag === "Text" ? viewHistoryOverlay(historyState, h) : h.empty,
           ],
         ),
 

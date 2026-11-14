@@ -17,6 +17,7 @@ import iconFolder from "./emoji/📁.svg"
 import iconFolderOpen from "./emoji/📂.svg"
 import iconFont from "./emoji/🔤.svg"
 import iconHelp from "./emoji/❓.svg"
+import iconHistory from "./emoji/🕒.svg"
 import iconHtml from "./emoji/🌐.svg"
 import iconImage from "./emoji/🖼️.svg"
 import iconInfo from "./emoji/ℹ️.svg"
@@ -29,6 +30,7 @@ import iconPlug from "./emoji/🔌.svg"
 import iconPlus from "./emoji/➕.svg"
 import iconPuzzle from "./emoji/🧩.svg"
 import iconQuickstart from "./emoji/⚡.svg"
+import iconRedo from "./emoji/↪️.svg"
 import iconRestore from "./emoji/↙️.svg"
 import iconSave from "./emoji/💾.svg"
 import iconScroll from "./emoji/📜.svg"
@@ -36,6 +38,7 @@ import iconSettings from "./emoji/⚙️.svg"
 import iconStop from "./emoji/⏹️.svg"
 import iconText from "./emoji/📝.svg"
 import iconTrash from "./emoji/🗑️.svg"
+import iconUndo from "./emoji/↩️.svg"
 import iconUpload from "./emoji/📤.svg"
 import iconVideo from "./emoji/🎬.svg"
 import iconWarning from "./emoji/⚠️.svg"
@@ -80,6 +83,9 @@ export const ICONS = {
   ai: iconAi,
   quickstart: iconQuickstart,
   stop: iconStop,
+  undo: iconUndo,
+  history: iconHistory,
+  redo: iconRedo,
 } as const
 
 export type IconId = keyof typeof ICONS

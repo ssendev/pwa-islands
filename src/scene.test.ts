@@ -177,6 +177,10 @@ describe("PWA Islands Scene Tests", () => {
           isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
         }),
       }),
     }
@@ -559,6 +563,10 @@ describe("PWA Islands Scene Tests", () => {
           isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
         }),
       }),
     }
@@ -613,6 +621,10 @@ describe("PWA Islands Scene Tests", () => {
           isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
         }),
       }),
     }
@@ -658,6 +670,10 @@ describe("PWA Islands Scene Tests", () => {
           isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
         }),
       }),
     }
@@ -704,6 +720,10 @@ describe("PWA Islands Scene Tests", () => {
       isPreviewOpen: false,
       editorSplitPercent: 62,
       editorSplitDrag: Option.none(),
+      undoStack: [],
+      redoStack: [],
+      maybeOpfsHistoryCursor: Option.none(),
+      historyState: Editor.HistoryState.Closed(),
     })
     const modelWithEditFile: Model = {
       ...readyModel,
@@ -777,6 +797,10 @@ describe("PWA Islands Scene Tests", () => {
           isPreviewOpen: false,
           editorSplitPercent: 62,
           editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
         }),
       }),
     }
@@ -1212,6 +1236,154 @@ describe("PWA Islands Scene Tests", () => {
       }),
       sceneExpect(selector('#llm-active-model option[value="gpt-4o-mini"]')).toHaveText("Schnell"),
       sceneExpect(selector('#llm-active-model option[value="qwen3"]')).toHaveText("Lokal"),
+    )
+  })
+
+  it("ersetzt Abbrechen im Text-Editor durch Zurück/History/Vor und unterstützt Undo/Redo", () => {
+    const modelWithEditFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithEditFile),
+      sceneExpect(selector("#modal-btn-cancel")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-undo")).toExist(),
+      sceneExpect(selector("#modal-btn-history")).toExist(),
+      sceneExpect(selector("#modal-btn-redo")).toExist(),
+      sceneExpect(selector("#modal-btn-redo")).toBeDisabled(),
+      type(selector("#modal-file-content"), "<p>Bearbeitet</p>"),
+      Command.expectNone(),
+      sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Bearbeitet</p>"),
+      click(selector("#modal-btn-undo")),
+      Command.expectNone(),
+      sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Original</p>"),
+      sceneExpect(selector("#modal-btn-redo")).not.toBeDisabled(),
+      click(selector("#modal-btn-redo")),
+      Command.expectNone(),
+      sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Bearbeitet</p>"),
+    )
+  })
+
+  it("lädt ältere Versionen aus OPFS erst bei Klick auf Zurück und Verlauf erst bei Klick auf History", () => {
+    const modelWithEditFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Aktuell</p>" }),
+          maybeValidationError: Option.none(),
+          maybeAlertBanner: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithEditFile),
+      click(selector("#modal-btn-undo")),
+      Command.resolve(
+        Editor.LoadPreviousHistoryEntry,
+        Editor.Message.SucceededLoadPreviousHistoryEntry({
+          maybeEntry: Option.some({ content: "<p>Vorher</p>", startOffset: 10 }),
+        }),
+      ),
+      sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Vorher</p>"),
+      click(selector("#modal-btn-history")),
+      Command.resolve(
+        Editor.LoadFullHistory,
+        Editor.Message.SucceededLoadFullHistory({
+          entries: [
+            {
+              offset: 10,
+              endOffset: 35,
+              timestampMs: 1731580000000,
+              byteLength: 13,
+              contentHash: 111,
+            },
+            {
+              offset: 0,
+              endOffset: 10,
+              timestampMs: 1731570000000,
+              byteLength: 10,
+              contentHash: 222,
+            },
+          ],
+        }),
+      ),
+      sceneExpect(selector("#editor-history-overlay")).toExist(),
+      click(selector(".editor-history-restore-btn")),
+      Command.resolve(
+        Editor.LoadHistoryEntryAt,
+        Editor.Message.SucceededLoadHistoryEntryAt({
+          maybeContent: Option.some("<p>Wiederhergestellt</p>"),
+        }),
+      ),
+      sceneExpect(selector("#editor-history-overlay")).toBeAbsent(),
+      sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Wiederhergestellt</p>"),
+      click(selector("#modal-btn-history")),
+      Command.resolve(
+        Editor.LoadFullHistory,
+        Editor.Message.SucceededLoadFullHistory({
+          entries: [
+            {
+              offset: 10,
+              endOffset: 35,
+              timestampMs: 1731580000000,
+              byteLength: 13,
+              contentHash: 111,
+            },
+          ],
+        }),
+      ),
+      click(selector("#editor-history-clear-btn")),
+      Command.expectNone(),
+      sceneExpect(selector("#editor-history-clear-confirm")).toExist(),
+      click(selector("#editor-history-clear-confirm-btn")),
+      Command.resolve(Editor.ClearFileHistory, Editor.Message.SucceededClearHistory()),
+      sceneExpect(selector(".editor-history-empty")).toContainText(
+        "Noch keine gespeicherten Versionen vorhanden.",
+      ),
     )
   })
 })
