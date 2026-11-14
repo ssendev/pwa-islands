@@ -753,6 +753,15 @@ fn history_clear_at_path(path: &Path) -> Result<(), String> {
   }
 }
 
+fn history_clear_all_under(base_dir: &Path) -> Result<(), String> {
+  let history_root = base_dir.join(HISTORY_FOLDER_NAME);
+  match fs::remove_dir_all(&history_root) {
+    Ok(()) => Ok(()),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    Err(e) => Err(format!("Fehler beim Löschen des gesamten Versionsverlaufs: {e}")),
+  }
+}
+
 fn history_read_index_at_path(path: &Path) -> Result<Vec<HistoryEntryMeta>, String> {
   if !path.is_file() {
     return Ok(Vec::new());
@@ -843,6 +852,15 @@ fn tauri_history_truncate(
 fn tauri_history_clear(app: tauri::AppHandle, sub_path: Vec<String>, file_name: String) -> Result<(), String> {
   let path = resolve_history_path(&app, &sub_path, &file_name)?;
   history_clear_at_path(&path)
+}
+
+#[tauri::command]
+fn tauri_history_clear_all(app: tauri::AppHandle) -> Result<(), String> {
+  let base_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| format!("Konnte App-Datenordner nicht ermitteln: {e}"))?;
+  history_clear_all_under(&base_dir)
 }
 
 #[tauri::command]
@@ -1107,6 +1125,7 @@ pub fn run() {
       tauri_history_read_slice,
       tauri_history_truncate,
       tauri_history_clear,
+      tauri_history_clear_all,
       tauri_history_read_index,
     ])
     .run(tauri::generate_context!())
@@ -1338,6 +1357,11 @@ mod tests {
     history_clear_at_path(&path).unwrap();
     assert!(!path.exists());
     history_clear_at_path(&path).unwrap();
+
+    history_append_at_path(&path, b"xyz").unwrap();
+    history_clear_all_under(&base_dir).unwrap();
+    assert!(!base_dir.join(HISTORY_FOLDER_NAME).exists());
+    history_clear_all_under(&base_dir).unwrap();
 
     let _ = fs::remove_dir_all(&base_dir);
   }

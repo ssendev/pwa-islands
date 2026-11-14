@@ -3,6 +3,7 @@ import { Option } from "effect"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   appendFileHistory,
+  clearAllFileHistory,
   clearFileHistory,
   encodeHistoryRecord,
   hashHistoryContent,
@@ -57,6 +58,10 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (cmd === "tauri_history_clear") {
       tauriFiles.delete(key)
+      return undefined
+    }
+    if (cmd === "tauri_history_clear_all") {
+      tauriFiles.clear()
       return undefined
     }
     if (cmd === "tauri_history_read_index") {
@@ -240,5 +245,11 @@ describe("tauri history backend", () => {
 
     await clearFileHistory(subPath, fileName)
     expect(await loadFileHistoryIndex(subPath, fileName)).toEqual([])
+
+    await appendFileHistory(["a"], "one.html", "1", 100)
+    await appendFileHistory(["b"], "two.html", "2", 200)
+    await clearAllFileHistory()
+    expect(await loadFileHistoryIndex(["a"], "one.html")).toEqual([])
+    expect(await loadFileHistoryIndex(["b"], "two.html")).toEqual([])
   })
 })

@@ -11,6 +11,7 @@ import { modifyFields } from "foldkit/struct"
 import * as Subscription from "foldkit/subscription"
 import { Url, toString as urlToString } from "foldkit/url"
 import rootIconUrl from "./assets/pwa-islands.svg"
+import { clearAllFileHistory } from "./history"
 import { type IconId, viewIcon } from "./icons"
 import {
   FileSystemHandleStorage,
@@ -101,8 +102,10 @@ import {
   OPFS_APP_FOLDER,
   getFileExtension,
   getStoredEditorPreferences,
+  getStoredHistoryEnabled,
   getStoredLlmSettings,
   storeEditorPreferences,
+  storeHistoryEnabled,
   storeLlmSettings,
 } from "./storage"
 
@@ -292,6 +295,15 @@ export const IslandIpcAction = defineTaggedUnion({
 })
 export type IslandIpcAction = typeof IslandIpcAction.Type
 
+export const ClearAllHistoryState = defineTaggedUnion({
+  Idle: {},
+  Confirming: {},
+  Clearing: {},
+  Done: {},
+  Error: { message: Schema.String },
+})
+export type ClearAllHistoryState = typeof ClearAllHistoryState.Type
+
 export const Flags = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
@@ -348,6 +360,8 @@ export const Model = Schema.Struct({
   llmDraftModel: Schema.String,
   llmDraftThinkingLevel: Schema.String,
   llmTestState: LlmTestState,
+  historyEnabled: Schema.Boolean,
+  clearAllHistoryState: ClearAllHistoryState,
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
   maybeAlertBanner: Schema.Option(AlertBanner),
@@ -491,6 +505,13 @@ export const Message = defineMessageUnion({
   ClickedOpenSettingsDialog: {},
   ClickedCloseSettingsDialog: {},
   ClickedSaveSettingsDialog: {},
+  ClickedRequestClearAllHistory: {},
+  ClickedCancelClearAllHistory: {},
+  ClickedConfirmClearAllHistory: {},
+  SucceededClearAllHistory: {},
+  FailedClearAllHistory: { message: Schema.String },
+  ToggledSettingsHistoryEnabled: { isEnabled: Schema.Boolean },
+  CompletedSaveHistoryEnabledPreference: {},
   ClickedTestLlm: { mode: LlmTestMode },
   UpdatedTestLlmStream: {
     content: Schema.String,
@@ -534,6 +555,7 @@ export const Message = defineMessageUnion({
     llmModel: Schema.String,
     llmThinkingLevel: Schema.String,
     editorSplitPercent: Schema.Number,
+    historyEnabled: Schema.optionalKey(Schema.Boolean),
   },
   CompletedSaveEditorPreferences: {},
   SucceededLoadEditorLlmModels: {
@@ -734,6 +756,38 @@ const activateTauriStorageBackend = async (
   }
 }
 
+export const SaveHistoryEnabledPreference = Command.define("SaveHistoryEnabledPreference", {
+  args: { isEnabled: Schema.Boolean },
+  messages: [Message.CompletedSaveHistoryEnabledPreference],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () => storeHistoryEnabled(args.isEnabled),
+      catch: () => undefined,
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveHistoryEnabledPreference()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveHistoryEnabledPreference())),
+    ),
+})
+
+export const ClearAllHistory = Command.define("ClearAllHistory", {
+  messages: [Message.SucceededClearAllHistory, Message.FailedClearAllHistory],
+  execute: Effect.tryPromise({
+    try: async () => {
+      await clearAllFileHistory()
+      return Message.SucceededClearAllHistory()
+    },
+    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(
+        Message.FailedClearAllHistory({
+          message: `Alle Versionen konnten nicht gelöscht werden: ${error.message}`,
+        }),
+      ),
+    ),
+  ),
+})
+
 export const LoadFileInfoPreference = Command.define("LoadFileInfoPreference", {
   messages: [Message.CompletedLoadFileInfoPreference],
   execute: Effect.tryPromise({
@@ -818,14 +872,17 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
 
 export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
   messages: [Message.CompletedLoadEditorPreferences],
-  execute: Effect.promise(() => getStoredEditorPreferences()).pipe(
-    Effect.map((prefs) =>
+  execute: Effect.promise(() =>
+    Promise.all([getStoredEditorPreferences(), getStoredHistoryEnabled()]),
+  ).pipe(
+    Effect.map(([prefs, historyEnabled]) =>
       Message.CompletedLoadEditorPreferences({
         isMaximized: prefs.isMaximized,
         llmBarMode: prefs.llmBarMode,
         llmModel: prefs.llmModel,
         llmThinkingLevel: prefs.llmThinkingLevel,
         editorSplitPercent: prefs.editorSplitPercent,
+        historyEnabled,
       }),
     ),
   ),
@@ -1772,6 +1829,8 @@ export const init = (
         llmDraftModel: "",
         llmDraftThinkingLevel: "",
         llmTestState: LlmTestState.Idle(),
+        historyEnabled: true,
+        clearAllHistoryState: ClearAllHistoryState.Idle(),
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.getOrElse(maybeInitialModal, Modal.close),
         maybeAlertBanner: Option.some({
@@ -1831,6 +1890,8 @@ export const init = (
       llmDraftModel: "",
       llmDraftThinkingLevel: "",
       llmTestState: LlmTestState.Idle(),
+      historyEnabled: true,
+      clearAllHistoryState: ClearAllHistoryState.Idle(),
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
       maybeAlertBanner: Option.none(),
@@ -2644,6 +2705,7 @@ export const update = (
         llmDraftModel: () => model.llmModel,
         llmDraftThinkingLevel: () => model.llmThinkingLevel,
         llmTestState: () => LlmTestState.Idle(),
+        clearAllHistoryState: () => ClearAllHistoryState.Idle(),
       }),
     }),
 
@@ -2651,7 +2713,50 @@ export const update = (
       model: modifyFields(model, {
         isSettingsDialogOpen: () => false,
         llmTestState: () => LlmTestState.Idle(),
+        clearAllHistoryState: () => ClearAllHistoryState.Idle(),
       }),
+    }),
+
+    ClickedRequestClearAllHistory: () => ({
+      model: modifyFields(model, {
+        clearAllHistoryState: () => ClearAllHistoryState.Confirming(),
+      }),
+    }),
+
+    ClickedCancelClearAllHistory: () => ({
+      model: modifyFields(model, {
+        clearAllHistoryState: () => ClearAllHistoryState.Idle(),
+      }),
+    }),
+
+    ClickedConfirmClearAllHistory: () => ({
+      model: modifyFields(model, {
+        clearAllHistoryState: () => ClearAllHistoryState.Clearing(),
+      }),
+      commands: [ClearAllHistory()],
+    }),
+
+    SucceededClearAllHistory: () => ({
+      model: modifyFields(model, {
+        clearAllHistoryState: () => ClearAllHistoryState.Done(),
+      }),
+    }),
+
+    FailedClearAllHistory: ({ message: errorMessage }) => ({
+      model: modifyFields(model, {
+        clearAllHistoryState: () => ClearAllHistoryState.Error({ message: errorMessage }),
+      }),
+    }),
+
+    ToggledSettingsHistoryEnabled: ({ isEnabled }) => ({
+      model: modifyFields(model, {
+        historyEnabled: () => isEnabled,
+      }),
+      commands: [SaveHistoryEnabledPreference({ isEnabled })],
+    }),
+
+    CompletedSaveHistoryEnabledPreference: () => ({
+      model,
     }),
 
     ClickedSaveSettingsDialog: () => ({
@@ -2910,11 +3015,13 @@ export const update = (
       llmModel,
       llmThinkingLevel,
       editorSplitPercent,
+      historyEnabled,
     }) => ({
       model: modifyFields(model, {
         editorIsMaximized: () => isMaximized,
         editorLlmBarMode: () => llmBarMode,
         editorSplitPercent: () => editorSplitPercent,
+        historyEnabled: () => historyEnabled ?? model.historyEnabled,
         llmModel: (current) => (current === "" ? llmModel : current),
         llmDraftModel: (current) => (current === "" ? llmModel : current),
         llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
@@ -3354,11 +3461,21 @@ export const update = (
           )
         : []
 
+      const nextHistoryEnabled =
+        modalMessage._tag === "GotEditorMessage" &&
+        modalMessage.message._tag === "ToggledHistoryEnabled"
+          ? modalMessage.message.isEnabled
+          : modalMessage._tag === "GotEditorMessage" &&
+              modalMessage.message._tag === "SucceededLoadFullHistory"
+            ? modalMessage.message.isHistoryEnabled
+            : model.historyEnabled
+
       return Modal.OutMessage.match(modalResult.outMessage, {
         None: () =>
           syncOpenEditor(
             modifyFields(model, {
               modalState: () => modalResult.model,
+              historyEnabled: () => nextHistoryEnabled,
             }),
             mappedCommands,
           ),
@@ -4443,6 +4560,119 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         : h.empty,
                     ],
                   ),
+                ],
+              ),
+              h.section(
+                [h.Class("settings-group"), h.Id("settings-group-history")],
+                [
+                  h.h4([h.Class("settings-group-title")], ["Versionsverlauf"]),
+                  h.div(
+                    [h.Class("form-group")],
+                    [
+                      h.label(
+                        [h.Class("form-check")],
+                        [
+                          h.input([
+                            h.Type("checkbox"),
+                            h.Id("settings-history-enabled"),
+                            h.Checked(model.historyEnabled),
+                            h.OnChange(() =>
+                              Message.ToggledSettingsHistoryEnabled({
+                                isEnabled: !model.historyEnabled,
+                              }),
+                            ),
+                          ]),
+                          h.span([], ["Versionen automatisch speichern"]),
+                        ],
+                      ),
+                    ],
+                  ),
+                  ClearAllHistoryState.match(model.clearAllHistoryState, {
+                    Idle: () =>
+                      h.div(
+                        [h.Class("settings-group-actions")],
+                        [
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-clear-all-history"),
+                              h.Class("btn btn-danger"),
+                              h.OnClick(Message.ClickedRequestClearAllHistory()),
+                            ],
+                            [viewIcon("trash", h), " Alle Versionen löschen"],
+                          ),
+                        ],
+                      ),
+                    Confirming: () =>
+                      h.div(
+                        [h.Id("clear-all-history-confirm"), h.Class("template-save-row")],
+                        [
+                          h.span(
+                            [h.Class("template-delete-prompt")],
+                            ["Alle gespeicherten Versionen aller Dateien löschen?"],
+                          ),
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-clear-all-history-cancel"),
+                              h.Class("btn btn-secondary"),
+                              h.OnClick(Message.ClickedCancelClearAllHistory()),
+                            ],
+                            ["Abbrechen"],
+                          ),
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-clear-all-history-confirm"),
+                              h.Class("btn btn-danger"),
+                              h.OnClick(Message.ClickedConfirmClearAllHistory()),
+                            ],
+                            ["Endgültig löschen"],
+                          ),
+                        ],
+                      ),
+                    Clearing: () =>
+                      h.div(
+                        [h.Class("settings-group-actions")],
+                        [
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-clear-all-history"),
+                              h.Class("btn btn-danger"),
+                              h.Disabled(true),
+                            ],
+                            ["Lösche…"],
+                          ),
+                        ],
+                      ),
+                    Done: () =>
+                      h.div(
+                        [h.Class("settings-group-actions")],
+                        [
+                          h.span(
+                            [h.Id("clear-all-history-done"), h.Class("form-hint")],
+                            ["Alle Versionen wurden gelöscht."],
+                          ),
+                        ],
+                      ),
+                    Error: ({ message: errorMessage }) =>
+                      h.div(
+                        [h.Class("settings-group-actions")],
+                        [
+                          h.div([h.Class("alert alert-danger"), h.Role("alert")], [errorMessage]),
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-clear-all-history"),
+                              h.Class("btn btn-danger"),
+                              h.OnClick(Message.ClickedRequestClearAllHistory()),
+                            ],
+                            [viewIcon("trash", h), " Alle Versionen löschen"],
+                          ),
+                        ],
+                      ),
+                  }),
                 ],
               ),
               h.section(

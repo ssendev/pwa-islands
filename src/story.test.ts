@@ -15,6 +15,7 @@ import {
 import {
   ActivateFsaBackend,
   ActivateOpfsBackend,
+  ClearAllHistoryState,
   CloseWindow,
   DisconnectStorage,
   EntriesState,
@@ -135,6 +136,8 @@ const readyModel: Model = {
   llmDraftModel: "",
   llmDraftThinkingLevel: "",
   llmTestState: LlmTestState.Idle(),
+  historyEnabled: true,
+  clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),

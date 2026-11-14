@@ -434,3 +434,25 @@ export const clearFileHistory = async (
   }
   await maybeStore.value.clear()
 }
+
+/**
+ * Löscht den gesamten gespeicherten Versionsverlauf aller Dateien.
+ */
+export const clearAllFileHistory = async (): Promise<void> => {
+  if (supportsTauri()) {
+    await invoke("tauri_history_clear_all")
+    return
+  }
+  if (typeof navigator === "undefined" || typeof navigator.storage?.getDirectory !== "function") {
+    return
+  }
+  const root = await navigator.storage.getDirectory()
+  try {
+    await root.removeEntry(OPFS_HISTORY_FOLDER, { recursive: true })
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") {
+      return
+    }
+    throw error
+  }
+}

@@ -2525,6 +2525,19 @@ code {
   border-color: var(--accent-border);
 }
 
+#clear-all-history-confirm,
+#editor-history-clear-confirm {
+  flex-wrap: wrap;
+}
+
+#clear-all-history-confirm .template-delete-prompt,
+#editor-history-clear-confirm .template-delete-prompt {
+  flex: 1 0 100%;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .editor-history-meta {
   display: flex;
   flex-direction: row;

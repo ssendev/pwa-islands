@@ -17,6 +17,8 @@ import { describe, it } from "vitest"
 import { hashLine } from "./hashline"
 import {
   ActivateOpfsBackend,
+  ClearAllHistory,
+  ClearAllHistoryState,
   EntriesState,
   InstallPrompt,
   Message,
@@ -27,6 +29,7 @@ import {
   ReplaceUrl,
   SavedBackend,
   SaveEditorPreferences,
+  SaveHistoryEnabledPreference,
   StorageState,
   TestLlm,
   ToggleFullscreenWindow,
@@ -109,6 +112,8 @@ const readyModel: Model = {
   llmDraftModel: "",
   llmDraftThinkingLevel: "",
   llmTestState: LlmTestState.Idle(),
+  historyEnabled: true,
+  clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
@@ -1514,6 +1519,30 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector(".modal-overlay")).toExist(),
       sceneExpect(selector("#modal-file-content")).toHaveValue("<p>Original</p>"),
       sceneExpect(selector(".modal-body .alert-info")).toContainText("Gespeichert."),
+    )
+  })
+
+  it("erlaubt in den Einstellungen alle Versionen zu löschen", () => {
+    scene(
+      { update, view },
+      given(readyModel),
+      click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
+      sceneExpect(selector("#settings-history-enabled")).toBeChecked(),
+      change(selector("#settings-history-enabled"), "false"),
+      Command.resolve(
+        SaveHistoryEnabledPreference,
+        Message.CompletedSaveHistoryEnabledPreference(),
+      ),
+      sceneExpect(selector("#settings-history-enabled")).not.toBeChecked(),
+      sceneExpect(selector("#btn-clear-all-history")).toExist(),
+      click(selector("#btn-clear-all-history")),
+      sceneExpect(selector("#clear-all-history-confirm")).toExist(),
+      click(selector("#btn-clear-all-history-confirm")),
+      Command.resolve(ClearAllHistory, Message.SucceededClearAllHistory()),
+      sceneExpect(selector("#clear-all-history-done")).toContainText(
+        "Alle Versionen wurden gelöscht.",
+      ),
     )
   })
 })
