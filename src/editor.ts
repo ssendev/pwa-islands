@@ -3608,6 +3608,7 @@ const viewEditorFileBody = (
               monacoEditor.OnContentChanged((detail) =>
                 Message.UpdatedTextContent({ content: detail.value }),
               ),
+              monacoEditor.OnSaveRequested(() => Message.ClickedSave()),
               h.Id("modal-file-content"),
               h.Class("monaco-editor-host"),
               h.AriaLabel("Inhalt"),

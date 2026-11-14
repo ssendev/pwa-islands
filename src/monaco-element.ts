@@ -12,6 +12,7 @@ export const monacoEditorElement = CustomElement.define({
   },
   events: {
     "content-changed": Schema.Struct({ value: Schema.String }),
+    "save-requested": Schema.Struct({}),
   },
 })
 
@@ -286,6 +287,15 @@ export const registerMonacoEditorElement = (): void => {
         )
       })
       this.maybeContentDisposable = Option.some(disposable)
+
+      editor.addCommand(monacoApi.KeyMod.CtrlCmd | monacoApi.KeyCode.KeyS, () => {
+        this.dispatchEvent(
+          new CustomEvent("save-requested", {
+            detail: {},
+            bubbles: true,
+          }),
+        )
+      })
     }
   }
 

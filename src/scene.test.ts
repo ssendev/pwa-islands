@@ -1695,6 +1695,50 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
+  it("speichert die Datei bei save-requested aus dem Monaco-Editor (Strg+S)", () => {
+    const modelWithMaximizedEditFile: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<p>Original</p>" }),
+          maybeValidationError: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: true,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
+          undoStack: [],
+          redoStack: [],
+          maybeOpfsHistoryCursor: Option.none(),
+          historyState: Editor.HistoryState.Closed(),
+          isConfirmingDelete: false,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithMaximizedEditFile),
+      CustomElement.emit(
+        monacoEditorElement,
+        selector("#modal-file-content"),
+        "save-requested",
+        {},
+      ),
+      Command.resolve(Editor.SaveChanges, Editor.Message.SucceededSaveChanges({ entries: [] })),
+      sceneExpect(selector("#toast-container .toast.alert-info")).toContainText("Gespeichert."),
+      Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
+    )
+  })
+
   it("schließt einen Fehler-Toast beim Klick auf den Schließen-Button", () => {
     const modelWithDangerToast: Model = {
       ...readyModel,
