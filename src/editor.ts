@@ -2208,7 +2208,7 @@ const viewEditorModal = (
                           h.Title(isMaximized ? "Wiederherstellen" : "Maximieren"),
                           h.OnClick(Message.ClickedToggleMaximize()),
                         ],
-                        [isMaximized ? "❐" : "⛶"],
+                        [viewIcon(isMaximized ? "restore" : "maximize", h)],
                       )
                     : h.empty,
                   h.button(

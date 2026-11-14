@@ -25,9 +25,11 @@ import {
   ReplaceUrl,
   SavedBackend,
   StorageState,
+  TestLlm,
   ToggleFullscreenWindow,
   update,
   view,
+  LlmTestState,
 } from "./main"
 import * as Editor from "./editor"
 import * as Help from "./help"
@@ -72,6 +74,31 @@ const readyModel: Model = {
   }),
   showFileInfo: true,
   isSettingsOpen: false,
+  isSettingsDialogOpen: false,
+  llmEnabled: false,
+  llmBaseUrl: "",
+  llmApiKey: "",
+  llmModels: "",
+  llmStreaming: true,
+  llmToolCalls: true,
+  llmThinkingParam: "",
+  llmThinkingLevels: "",
+  llmExtraArgs: "",
+  llmModel: "",
+  llmThinkingLevel: "",
+  llmDiscoveredModels: [],
+  llmDraftEnabled: false,
+  llmDraftBaseUrl: "",
+  llmDraftApiKey: "",
+  llmDraftModels: "",
+  llmDraftStreaming: true,
+  llmDraftToolCalls: true,
+  llmDraftThinkingParam: "",
+  llmDraftThinkingLevels: "",
+  llmDraftExtraArgs: "",
+  llmDraftModel: "",
+  llmDraftThinkingLevel: "",
+  llmTestState: LlmTestState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
@@ -431,15 +458,15 @@ describe("PWA Islands Scene Tests", () => {
     scene(
       { update, view },
       given(modelWithCreateFile),
-      sceneExpect(selector("#modal-btn-maximize")).toHaveText("⛶"),
+      sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Maximieren"),
       sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
       sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
       click(selector("#modal-btn-maximize")),
-      sceneExpect(selector("#modal-btn-maximize")).toHaveText("❐"),
+      sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Wiederherstellen"),
       sceneExpect(selector(".modal-content.is-maximized")).toExist(),
       sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toExist(),
       click(selector("#modal-btn-maximize")),
-      sceneExpect(selector("#modal-btn-maximize")).toHaveText("⛶"),
+      sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Maximieren"),
       sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
       sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
     )
@@ -456,6 +483,7 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(readyModel),
       click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
       sceneExpect(selector("#btn-use-opfs")).toExist(),
       sceneExpect(selector("#btn-select-folder")).toBeAbsent(),
       click(selector("#btn-use-opfs")),
@@ -475,6 +503,7 @@ describe("PWA Islands Scene Tests", () => {
         [PushUrl, Message.CompletedPushUrl()],
       ),
       click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
       sceneExpect(selector("#btn-select-folder")).toExist(),
       sceneExpect(selector("#btn-use-opfs")).toBeAbsent(),
     )
@@ -494,6 +523,7 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(fsaNoFolderModel),
       click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
       sceneExpect(selector("#btn-change-folder")).toExist(),
       sceneExpect(selector("#btn-change-folder")).toContainText("Ordner wählen"),
       sceneExpect(selector("#btn-use-opfs")).toExist(),
@@ -651,6 +681,7 @@ describe("PWA Islands Scene Tests", () => {
       { update, view },
       given(tauriReadyModel),
       click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
       sceneExpect(selector("#btn-change-folder")).toExist(),
       sceneExpect(selector("#btn-change-folder")).toContainText("Ordner wechseln"),
       sceneExpect(selector("#btn-disconnect-folder")).toExist(),
@@ -705,6 +736,98 @@ describe("PWA Islands Scene Tests", () => {
         "data-supported",
         "no",
       ),
+    )
+  })
+
+  it("toggles streaming checkbox in settings dialog and runs LLM test", () => {
+    scene(
+      { update, view },
+      given(readyModel),
+      click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
+      sceneExpect(selector("#llm-enabled")).toExist(),
+      sceneExpect(selector("#llm-base-url")).toBeAbsent(),
+      change(selector("#llm-enabled"), "true"),
+      sceneExpect(selector("#llm-streaming")).toExist(),
+      sceneExpect(selector("#llm-tool-calls")).toExist(),
+      sceneExpect(selector("#llm-models")).toExist(),
+      sceneExpect(selector("#llm-thinking-preset")).toExist(),
+      sceneExpect(selector("#llm-thinking-param")).toExist(),
+      sceneExpect(selector("#llm-thinking-levels")).toExist(),
+      sceneExpect(selector("#llm-active-model")).toExist(),
+      sceneExpect(selector("#llm-thinking-level")).toExist(),
+      sceneExpect(selector("#llm-thinking-level")).toBeDisabled(),
+      sceneExpect(selector("#llm-extra-args")).toExist(),
+      type(selector("#llm-base-url"), "https://api.example.com/v1"),
+      type(selector("#llm-models"), "gpt-4o-mini"),
+      change(selector("#llm-streaming"), "false"),
+      change(selector("#llm-tool-calls"), "false"),
+      change(selector("#llm-thinking-preset"), "enable-thinking"),
+      sceneExpect(selector("#llm-thinking-level")).toBeEnabled(),
+      type(selector("#llm-extra-args"), '{"temperature": 0.2}'),
+      change(selector("#llm-active-model"), "gpt-4o-mini"),
+      change(selector("#llm-thinking-level"), "true"),
+      sceneExpect(selector("#btn-test-llm-models")).toExist(),
+      sceneExpect(selector("#btn-test-llm-chat")).toExist(),
+      sceneExpect(selector("#btn-test-llm-tools")).toExist(),
+      click(selector("#btn-test-llm-chat")),
+      Command.expectExact(
+        TestLlm({
+          mode: "chat",
+          enabled: true,
+          baseUrl: "https://api.example.com/v1",
+          apiKey: "",
+          models: "gpt-4o-mini",
+          streaming: false,
+          toolCalls: false,
+          thinkingParam: "enable_thinking",
+          thinkingLevels: "Aus=false, An=true",
+          extraArgs: '{"temperature": 0.2}',
+          model: "gpt-4o-mini",
+          thinkingLevel: "true",
+        }),
+      ),
+      Command.resolve(
+        TestLlm,
+        Message.SucceededTestLlm({ content: "ok", reasoning: "Kurzer Gedanke", models: [] }),
+      ),
+      sceneExpect(selector("#llm-test-status.is-ok")).toExist(),
+      sceneExpect(selector("#llm-test-result .llm-response-thinking")).toContainText(
+        "Kurzer Gedanke",
+      ),
+      sceneExpect(selector("#llm-test-result .llm-response-content")).toContainText("ok"),
+    )
+  })
+
+  it("zeigt Streaming-Chunks sofort während der laufenden Antwort an", () => {
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        isSettingsDialogOpen: true,
+        llmDraftEnabled: true,
+        llmDraftBaseUrl: "https://api.example.com/v1",
+        llmDraftModels: "gpt-4o-mini",
+        llmTestState: LlmTestState.Streaming({ mode: "chat", content: "Hal", reasoning: "Denke" }),
+      }),
+      sceneExpect(selector("#llm-test-result .llm-response-thinking")).toContainText("Denke"),
+      sceneExpect(selector("#llm-test-result .llm-response-content")).toContainText("Hal"),
+      sceneExpect(selector("#llm-test-result .llm-response-streaming")).toContainText("Schreibt …"),
+    )
+  })
+
+  it("zeigt Human-Names für Modelle im Dropdown an und übergibt die Modell-ID als Wert", () => {
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        isSettingsDialogOpen: true,
+        llmDraftEnabled: true,
+        llmDraftBaseUrl: "https://api.example.com/v1",
+        llmDraftModels: "Schnell=gpt-4o-mini, Lokal=qwen3",
+      }),
+      sceneExpect(selector('#llm-active-model option[value="gpt-4o-mini"]')).toHaveText("Schnell"),
+      sceneExpect(selector('#llm-active-model option[value="qwen3"]')).toHaveText("Lokal"),
     )
   })
 })

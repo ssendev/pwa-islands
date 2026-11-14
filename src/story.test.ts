@@ -36,15 +36,18 @@ import {
   ResolveIslandBackNavigation,
   SavedBackend,
   SaveFileInfoPreference,
+  SaveLlmSettings,
   SaveStorageTypePreference,
   ScheduleReturnArrowClick,
   StorageState,
+  TestLlm,
   ToggleMaximizeWindow,
   ToggleFullscreenWindow,
   ExitFullscreenWindow,
   init,
   parseIslandWindowMessage,
   update,
+  LlmTestState,
 } from "./main"
 import * as Modal from "./modal"
 import {
@@ -99,6 +102,31 @@ const readyModel: Model = {
   }),
   showFileInfo: true,
   isSettingsOpen: false,
+  isSettingsDialogOpen: false,
+  llmEnabled: false,
+  llmBaseUrl: "",
+  llmApiKey: "",
+  llmModels: "",
+  llmStreaming: true,
+  llmToolCalls: true,
+  llmThinkingParam: "",
+  llmThinkingLevels: "",
+  llmExtraArgs: "",
+  llmModel: "",
+  llmThinkingLevel: "",
+  llmDiscoveredModels: [],
+  llmDraftEnabled: false,
+  llmDraftBaseUrl: "",
+  llmDraftApiKey: "",
+  llmDraftModels: "",
+  llmDraftStreaming: true,
+  llmDraftToolCalls: true,
+  llmDraftThinkingParam: "",
+  llmDraftThinkingLevels: "",
+  llmDraftExtraArgs: "",
+  llmDraftModel: "",
+  llmDraftThinkingLevel: "",
+  llmTestState: LlmTestState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
   maybeAlertBanner: Option.none(),
@@ -164,7 +192,7 @@ describe("PWA Islands Story Tests", () => {
           },
         }),
       )
-      expect(result.commands).toHaveLength(2)
+      expect(result.commands).toHaveLength(3)
     })
   })
 
@@ -2013,6 +2041,188 @@ describe("PWA Islands Story Tests", () => {
           Command.resolve(CloseWindow, Message.CompletedCloseWindow()),
         )
       })
+    })
+  })
+
+  describe("LLM-Einstellungen", () => {
+    it("toggles streaming, tests LLM connection with streaming flag, and saves settings", () => {
+      story(
+        update,
+        given(readyModel),
+        message(Message.ClickedOpenSettingsDialog()),
+        Command.expectNone(),
+        message(Message.ToggledLlmEnabled({ isChecked: true })),
+        Command.expectNone(),
+        message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
+        Command.expectNone(),
+        message(Message.UpdatedLlmModels({ value: "gpt-4o-mini" })),
+        Command.expectNone(),
+        message(Message.SelectedLlmModel({ value: "gpt-4o-mini" })),
+        Command.expectNone(),
+        message(Message.ToggledLlmStreaming({ isChecked: false })),
+        Command.expectNone(),
+        message(Message.ToggledLlmToolCalls({ isChecked: false })),
+        Command.expectNone(),
+        message(Message.SelectedLlmThinkingPreset({ presetId: "qwen-template" })),
+        Command.expectNone(),
+        message(Message.UpdatedLlmThinkingLevel({ value: "false" })),
+        Command.expectNone(),
+        message(Message.UpdatedLlmExtraArgs({ value: '{"temperature": 0.2}' })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.llmDraftModels).toBe("gpt-4o-mini")
+          expect(m.llmDraftModel).toBe("gpt-4o-mini")
+          expect(m.llmDraftStreaming).toBe(false)
+          expect(m.llmDraftToolCalls).toBe(false)
+          expect(m.llmDraftThinkingParam).toBe("chat_template_kwargs.enable_thinking")
+          expect(m.llmDraftThinkingLevels).toBe("Aus=false, An=true")
+          expect(m.llmDraftThinkingLevel).toBe("false")
+          expect(m.llmDraftExtraArgs).toBe('{"temperature": 0.2}')
+          expect(m.llmTestState).toEqual(LlmTestState.Idle())
+        }),
+        message(Message.ClickedTestLlm({ mode: "chat" })),
+        Command.expectExact(
+          TestLlm({
+            mode: "chat",
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "gpt-4o-mini",
+            streaming: false,
+            toolCalls: false,
+            thinkingParam: "chat_template_kwargs.enable_thinking",
+            thinkingLevels: "Aus=false, An=true",
+            extraArgs: '{"temperature": 0.2}',
+            model: "gpt-4o-mini",
+            thinkingLevel: "false",
+          }),
+        ),
+        Command.resolve(
+          TestLlm,
+          Message.SucceededTestLlm({ content: "ok", reasoning: "Denke...", models: [] }),
+        ),
+        model((m) => {
+          expect(m.llmTestState).toEqual(
+            LlmTestState.Succeeded({ content: "ok", reasoning: "Denke...", models: [] }),
+          )
+        }),
+        message(Message.ClickedSaveSettingsDialog()),
+        Command.expectExact(
+          SaveLlmSettings({
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "gpt-4o-mini",
+            streaming: false,
+            toolCalls: false,
+            thinkingParam: "chat_template_kwargs.enable_thinking",
+            thinkingLevels: "Aus=false, An=true",
+            extraArgs: '{"temperature": 0.2}',
+          }),
+        ),
+        Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
+        model((m) => {
+          expect(m.llmStreaming).toBe(false)
+          expect(m.llmToolCalls).toBe(false)
+          expect(m.llmModels).toBe("gpt-4o-mini")
+          expect(m.llmModel).toBe("gpt-4o-mini")
+          expect(m.llmThinkingParam).toBe("chat_template_kwargs.enable_thinking")
+          expect(m.llmThinkingLevels).toBe("Aus=false, An=true")
+          expect(m.llmThinkingLevel).toBe("false")
+          expect(m.llmExtraArgs).toBe('{"temperature": 0.2}')
+          expect(m.isSettingsDialogOpen).toBe(false)
+        }),
+      )
+    })
+
+    it("aktualisiert LlmTestState.Streaming schrittweise bei aktiviertem Streaming", () => {
+      story(
+        update,
+        given(readyModel),
+        message(Message.ClickedOpenSettingsDialog()),
+        Command.expectNone(),
+        message(Message.ToggledLlmEnabled({ isChecked: true })),
+        Command.expectNone(),
+        message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
+        Command.expectNone(),
+        message(Message.UpdatedLlmModels({ value: "gpt-4o-mini" })),
+        Command.expectNone(),
+        message(Message.ClickedTestLlm({ mode: "chat" })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.llmTestState).toEqual(
+            LlmTestState.Streaming({ mode: "chat", content: "", reasoning: "" }),
+          )
+        }),
+        message(Message.UpdatedTestLlmStream({ content: "", reasoning: "Denke " })),
+        Command.expectNone(),
+        message(Message.UpdatedTestLlmStream({ content: "ok", reasoning: "Denke " })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.llmTestState).toEqual(
+            LlmTestState.Streaming({ mode: "chat", content: "ok", reasoning: "Denke " }),
+          )
+        }),
+        message(Message.SucceededTestLlm({ content: "ok", reasoning: "Denke", models: [] })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.llmTestState).toEqual(
+            LlmTestState.Succeeded({ content: "ok", reasoning: "Denke", models: [] }),
+          )
+        }),
+      )
+    })
+
+    it("übernimmt nach Liste testen automatisch das erste gefundene Modell für Chat und Tools", () => {
+      story(
+        update,
+        given(readyModel),
+        message(Message.ClickedOpenSettingsDialog()),
+        Command.expectNone(),
+        message(Message.ToggledLlmEnabled({ isChecked: true })),
+        Command.expectNone(),
+        message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
+        Command.expectNone(),
+        message(Message.ClickedTestLlm({ mode: "models" })),
+        Command.expectExact(
+          TestLlm({
+            mode: "models",
+            enabled: true,
+            baseUrl: "https://api.example.com/v1",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+            model: "",
+            thinkingLevel: "",
+          }),
+        ),
+        Command.resolve(
+          TestLlm,
+          Message.SucceededTestLlm({ content: "", reasoning: "", models: ["qwen3", "gpt-4o"] }),
+        ),
+        model((m) => {
+          expect(m.llmDiscoveredModels).toEqual(["qwen3", "gpt-4o"])
+          expect(m.llmDraftModel).toBe("qwen3")
+        }),
+        message(Message.ClickedTestLlm({ mode: "chat" })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.llmTestState).toEqual(
+            LlmTestState.Streaming({ mode: "chat", content: "", reasoning: "" }),
+          )
+        }),
+        message(Message.ClickedTestLlm({ mode: "tools" })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.llmTestState).toEqual(
+            LlmTestState.Streaming({ mode: "tools", content: "", reasoning: "" }),
+          )
+        }),
+      )
     })
   })
 })

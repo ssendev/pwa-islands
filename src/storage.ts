@@ -165,6 +165,71 @@ export async function storeFileInfoVisible(visible: boolean): Promise<void> {
   })
 }
 
+import { emptyLlmSettings, type LlmSettings } from "./agent"
+
+const LLM_SETTINGS_KEY = "llm_settings"
+
+export async function getStoredLlmSettings(): Promise<LlmSettings> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(LLM_SETTINGS_KEY)
+      req.onsuccess = () => {
+        const value: unknown = req.result
+        const record = typeof value === "object" && value !== null ? value : {}
+        const baseUrl =
+          "baseUrl" in record && typeof record.baseUrl === "string" ? record.baseUrl : ""
+        const enabled =
+          "enabled" in record && typeof record.enabled === "boolean"
+            ? record.enabled
+            : baseUrl.trim() !== ""
+        const apiKey = "apiKey" in record && typeof record.apiKey === "string" ? record.apiKey : ""
+        const models = "models" in record && typeof record.models === "string" ? record.models : ""
+        const streaming =
+          "streaming" in record && typeof record.streaming === "boolean" ? record.streaming : true
+        const toolCalls =
+          "toolCalls" in record && typeof record.toolCalls === "boolean" ? record.toolCalls : true
+        const thinkingParam =
+          "thinkingParam" in record && typeof record.thinkingParam === "string"
+            ? record.thinkingParam
+            : emptyLlmSettings.thinkingParam
+        const thinkingLevels =
+          "thinkingLevels" in record && typeof record.thinkingLevels === "string"
+            ? record.thinkingLevels
+            : emptyLlmSettings.thinkingLevels
+        const extraArgs =
+          "extraArgs" in record && typeof record.extraArgs === "string" ? record.extraArgs : ""
+        resolve({
+          enabled,
+          baseUrl,
+          apiKey,
+          models,
+          streaming,
+          toolCalls,
+          thinkingParam,
+          thinkingLevels,
+          extraArgs,
+        })
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der LLM-Einstellungen:", error)
+    return emptyLlmSettings
+  }
+}
+
+export async function storeLlmSettings(settings: LlmSettings): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put({ ...settings }, LLM_SETTINGS_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
 export async function clearStoredStorageType(): Promise<void> {
   invalidateRootCache()
   const db = await openDB()

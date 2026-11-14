@@ -886,6 +886,12 @@ code {
   gap: 6px;
 }
 
+.form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
 /* `display: flex` ueberschreibt das hidden-Attribut -- daher explizit ausblenden. */
 .form-group[hidden],
 .file-preview[hidden] {
@@ -2093,4 +2099,109 @@ code {
 .island-iframe.has-top-border {
   top: 32px;
   height: calc(100dvh - 32px);
+}
+
+/* Einstellungen-Dialog */
+.settings-dialog {
+  max-width: 520px;
+}
+
+.settings-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-group-title {
+  margin: 0;
+  font-size: 15px;
+  color: var(--text-h);
+}
+
+.settings-group-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.settings-group-actions .is-danger {
+  color: var(--danger, #c0392b);
+}
+
+.form-hint.is-danger {
+  color: var(--danger, #c0392b);
+}
+
+.llm-test-actions {
+  flex-direction: row;
+  align-items: center;
+}
+
+.llm-test-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+}
+
+.llm-test-status.is-ok {
+  color: #16a34a;
+}
+
+.llm-test-status.is-error {
+  color: var(--danger, #c0392b);
+}
+
+.llm-response {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-response-thinking {
+  padding: 8px 10px;
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+  background: var(--code-bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.llm-response-label {
+  display: inline-block;
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.llm-response-content {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  color: var(--text-h);
+  font-size: 14px;
+}
+
+.llm-response-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.llm-response-streaming {
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.75;
 }

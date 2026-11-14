@@ -22,12 +22,14 @@ import iconImage from "./emoji/🖼️.svg"
 import iconInfo from "./emoji/ℹ️.svg"
 import iconInstall from "./emoji/📥.svg"
 import iconLock from "./emoji/🔒.svg"
+import iconMaximize from "./emoji/↗️.svg"
 import iconPackage from "./emoji/📦.svg"
 import iconPdf from "./emoji/📕.svg"
 import iconPlug from "./emoji/🔌.svg"
 import iconPlus from "./emoji/➕.svg"
 import iconPuzzle from "./emoji/🧩.svg"
 import iconQuickstart from "./emoji/⚡.svg"
+import iconRestore from "./emoji/↙️.svg"
 import iconSave from "./emoji/💾.svg"
 import iconScroll from "./emoji/📜.svg"
 import iconSettings from "./emoji/⚙️.svg"
@@ -72,6 +74,8 @@ export const ICONS = {
   puzzle: iconPuzzle,
   check: iconCheck,
   cross: iconCross,
+  maximize: iconMaximize,
+  restore: iconRestore,
   ai: iconAi,
   quickstart: iconQuickstart,
 } as const
