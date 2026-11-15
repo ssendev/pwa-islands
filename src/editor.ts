@@ -133,6 +133,8 @@ export const LlmChatState = defineTaggedUnion({
     streamTurns: Schema.Array(LlmChatTurnBlock),
     streamContent: Schema.String,
     streamReasoning: Schema.String,
+    streamAssistantContent: Schema.String,
+    streamToolDetails: Schema.Array(LlmChatToolDetailSchema),
   },
 })
 export type LlmChatState = typeof LlmChatState.Type
@@ -213,6 +215,7 @@ export const Model = defineTaggedUnion({
     llmChatState: LlmChatState,
     isLlmThinkingMarkdown: Schema.optionalKey(Schema.Boolean),
     isLlmContentMarkdown: Schema.optionalKey(Schema.Boolean),
+    llmToolRawKeys: Schema.optionalKey(Schema.Array(Schema.String)),
     isLlmUserMarkdown: Schema.optionalKey(Schema.Boolean),
     isMaximized: Schema.Boolean,
     isPreviewOpen: Schema.Boolean,
@@ -243,6 +246,7 @@ export const Model = defineTaggedUnion({
     llmChatState: LlmChatState,
     isLlmThinkingMarkdown: Schema.optionalKey(Schema.Boolean),
     isLlmContentMarkdown: Schema.optionalKey(Schema.Boolean),
+    llmToolRawKeys: Schema.optionalKey(Schema.Array(Schema.String)),
     isLlmUserMarkdown: Schema.optionalKey(Schema.Boolean),
     isMaximized: Schema.Boolean,
     isEditingName: Schema.Boolean,
@@ -295,6 +299,7 @@ export const makeCreateFile = (
   llmChatState: LlmChatState.Idle(),
   isLlmThinkingMarkdown: true,
   isLlmContentMarkdown: true,
+  llmToolRawKeys: [],
   isLlmUserMarkdown: true,
   isMaximized: defaults?.isMaximized ?? false,
   isPreviewOpen: false,
@@ -361,7 +366,12 @@ export const applyLlmChatStream = (
     activeTurn,
   }: {
     readonly completedTurns: ReadonlyArray<LlmChatTurnBlock>
-    readonly activeTurn: { readonly content: string; readonly reasoning: string }
+    readonly activeTurn: {
+      readonly content: string
+      readonly reasoning: string
+      readonly assistantContent?: string
+      readonly toolDetails?: ReadonlyArray<LlmChatToolDetail>
+    }
   },
 ): Model =>
   Model.match(model, {
@@ -375,6 +385,8 @@ export const applyLlmChatStream = (
                 streamTurns: () => completedTurns,
                 streamContent: () => activeTurn.content,
                 streamReasoning: () => activeTurn.reasoning,
+                streamAssistantContent: () => activeTurn.assistantContent ?? "",
+                streamToolDetails: () => activeTurn.toolDetails ?? [],
               }),
           }),
       }),
@@ -388,6 +400,8 @@ export const applyLlmChatStream = (
                 streamTurns: () => completedTurns,
                 streamContent: () => activeTurn.content,
                 streamReasoning: () => activeTurn.reasoning,
+                streamAssistantContent: () => activeTurn.assistantContent ?? "",
+                streamToolDetails: () => activeTurn.toolDetails ?? [],
               }),
           }),
       }),
@@ -401,7 +415,6 @@ export const applyLlmChatSuccess = (
   {
     messages,
     maybeUpdatedContent,
-    appliedCount,
     turns,
   }: {
     readonly messages: ReadonlyArray<LlmChatMessage>
@@ -410,7 +423,7 @@ export const applyLlmChatSuccess = (
     readonly turns: ReadonlyArray<LlmChatTurnBlock>
   },
 ): Model => {
-  const turnEntries = Array.map(turns, (turn) =>
+  const newDisplayEntries = Array.map(turns, (turn) =>
     LlmChatDisplayEntry.Answer({
       content: turn.content,
       reasoning: turn.reasoning,
@@ -419,17 +432,6 @@ export const applyLlmChatSuccess = (
       ...(turn.toolDetails !== undefined ? { toolDetails: turn.toolDetails } : {}),
     }),
   )
-  const appliedEntries: ReadonlyArray<LlmChatDisplayEntry> = Option.match(maybeUpdatedContent, {
-    onSome: () => [
-      LlmChatDisplayEntry.Answer({
-        content: `${appliedCount} Bearbeitung(en) angewendet`,
-        reasoning: "",
-        isError: false,
-      }),
-    ],
-    onNone: () => [],
-  })
-  const newDisplayEntries = [...turnEntries, ...appliedEntries]
 
   return Model.match(model, {
     CreateFile: (state) =>
@@ -868,6 +870,9 @@ export const Message = defineMessageUnion({
   CompletedCopyPasteErrorToClipboard: {},
   ToggledLlmThinkingMarkdown: {},
   ToggledLlmContentMarkdown: {},
+  ToggledLlmToolMarkdown: {
+    toolKey: Schema.String,
+  },
   ToggledLlmUserMarkdown: {},
   ClickedCopyLlmCode: {
     code: Schema.String,
@@ -2479,6 +2484,8 @@ export const update = (
                   streamTurns: [],
                   streamContent: "",
                   streamReasoning: "",
+                  streamAssistantContent: "",
+                  streamToolDetails: [],
                 }),
               llmChatDisplay: (current) => [
                 ...current,
@@ -2507,6 +2514,8 @@ export const update = (
                     streamTurns: [],
                     streamContent: "",
                     streamReasoning: "",
+                    streamAssistantContent: "",
+                    streamToolDetails: [],
                   }),
                 llmChatDisplay: (current) => [
                   ...current,
@@ -2980,6 +2989,35 @@ export const update = (
       }),
       outMessage: OutMessage.None(),
     }),
+
+    ToggledLlmToolMarkdown: ({ toolKey }) => {
+      const toggleKey = (keys: ReadonlyArray<string> | undefined) => {
+        const current = keys ?? []
+        return current.includes(toolKey)
+          ? Array.filter(current, (k) => k !== toolKey)
+          : [...current, toolKey]
+      }
+      return {
+        model: Model.match(model, {
+          CreateFile: (state) =>
+            state.llmToolRawKeys !== undefined
+              ? modifyFields(state, {
+                  llmToolRawKeys: toggleKey,
+                })
+              : Model.CreateFile({ ...state, llmToolRawKeys: [toolKey] }),
+          EditFile: (state) =>
+            state.llmToolRawKeys !== undefined
+              ? modifyFields(state, {
+                  llmToolRawKeys: toggleKey,
+                })
+              : Model.EditFile({ ...state, llmToolRawKeys: [toolKey] }),
+          CreateFolder: () => model,
+          EditFolder: () => model,
+          ConfirmOverwrite: () => model,
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
 
     ToggledLlmContentMarkdown: () => ({
       model: Model.match(model, {
@@ -4198,6 +4236,7 @@ const viewLlmChatHistory = (
   llmChatState: LlmChatState,
   isThinkingMarkdown: boolean,
   isContentMarkdown: boolean,
+  llmToolRawKeys: ReadonlyArray<string>,
   isUserMarkdown: boolean,
   aiName: string,
   userName: string,
@@ -4282,6 +4321,7 @@ const viewLlmChatHistory = (
       isStreaming,
       assistantContent,
       toolDetails,
+      toolKeyPrefix,
     }: {
       readonly content: string
       readonly reasoning: string
@@ -4289,6 +4329,7 @@ const viewLlmChatHistory = (
       readonly isStreaming: boolean
       readonly assistantContent?: string
       readonly toolDetails?: ReadonlyArray<LlmChatToolDetail>
+      readonly toolKeyPrefix: string
     },
     hBuilder: Html.HtmlBuilder<Message>,
   ): Html.Html =>
@@ -4311,8 +4352,11 @@ const viewLlmChatHistory = (
             isStreaming,
             isThinkingMarkdown,
             isContentMarkdown,
+            rawToolKeys: llmToolRawKeys,
+            toolKeyPrefix,
             onToggleThinkingMarkdown: Message.ToggledLlmThinkingMarkdown(),
             onToggleContentMarkdown: Message.ToggledLlmContentMarkdown(),
+            onToggleToolMarkdown: (toolKey) => Message.ToggledLlmToolMarkdown({ toolKey }),
             onCopyCode: (code) => Message.ClickedCopyLlmCode({ code }),
             ...(assistantContent !== undefined ? { assistantContent } : {}),
             ...(toolDetails !== undefined ? { toolDetails } : {}),
@@ -4322,7 +4366,7 @@ const viewLlmChatHistory = (
       ],
     )
 
-  const historyNodes = Array.map(llmChatDisplay, (entry) =>
+  const historyNodes = Array.map(llmChatDisplay, (entry, entryIndex) =>
     LlmChatDisplayEntry.match(entry, {
       Question: ({ content }) =>
         h.div(
@@ -4376,6 +4420,7 @@ const viewLlmChatHistory = (
             reasoning,
             isError,
             isStreaming: false,
+            toolKeyPrefix: `entry-${entryIndex}`,
             ...(assistantContent !== undefined ? { assistantContent } : {}),
             ...(toolDetails !== undefined ? { toolDetails } : {}),
           },
@@ -4386,13 +4431,14 @@ const viewLlmChatHistory = (
 
   const completedStreamNodes =
     llmChatState._tag === "Sending"
-      ? Array.map(llmChatState.streamTurns, (turn) =>
+      ? Array.map(llmChatState.streamTurns, (turn, turnIndex) =>
           renderAnswerNode(
             {
               content: turn.content,
               reasoning: turn.reasoning,
               isError: turn.isError,
               isStreaming: false,
+              toolKeyPrefix: `entry-${llmChatDisplay.length + turnIndex}`,
               ...(turn.assistantContent !== undefined
                 ? { assistantContent: turn.assistantContent }
                 : {}),
@@ -4411,6 +4457,13 @@ const viewLlmChatHistory = (
             reasoning: llmChatState.streamReasoning,
             isError: false,
             isStreaming: true,
+            toolKeyPrefix: `entry-${llmChatDisplay.length + llmChatState.streamTurns.length}`,
+            ...(llmChatState.streamAssistantContent !== undefined
+              ? { assistantContent: llmChatState.streamAssistantContent }
+              : {}),
+            ...(llmChatState.streamToolDetails !== undefined
+              ? { toolDetails: llmChatState.streamToolDetails }
+              : {}),
           },
           h,
         )
@@ -4526,6 +4579,7 @@ const viewLlmChatBar = (
   llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>,
   isThinkingMarkdown: boolean,
   isContentMarkdown: boolean,
+  llmToolRawKeys: ReadonlyArray<string>,
   isUserMarkdown: boolean,
   aiName: string,
   userName: string,
@@ -4543,6 +4597,7 @@ const viewLlmChatBar = (
         llmChatState,
         isThinkingMarkdown,
         isContentMarkdown,
+        llmToolRawKeys,
         isUserMarkdown,
         aiName,
         userName,
@@ -4648,6 +4703,7 @@ const viewEditorModal = (
     llmChatDisplay,
     isLlmThinkingMarkdown = true,
     isLlmContentMarkdown = true,
+    llmToolRawKeys = [],
     isLlmUserMarkdown = true,
     llmViewInputs,
     isMaximized,
@@ -4674,6 +4730,7 @@ const viewEditorModal = (
     readonly llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>
     readonly isLlmThinkingMarkdown?: boolean
     readonly isLlmContentMarkdown?: boolean
+    readonly llmToolRawKeys?: ReadonlyArray<string>
     readonly isLlmUserMarkdown?: boolean
     readonly llmViewInputs: ViewInputs
     readonly isMaximized: boolean
@@ -4883,6 +4940,7 @@ const viewEditorModal = (
                     llmChatDisplay,
                     isLlmThinkingMarkdown,
                     isLlmContentMarkdown,
+                    llmToolRawKeys,
                     isLlmUserMarkdown,
                     llmViewInputs.llmChatAiName?.trim() || "KI",
                     llmViewInputs.llmChatUserName?.trim() || "Du",
@@ -5563,6 +5621,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmChatDisplay: state.llmChatDisplay,
                 isLlmThinkingMarkdown: state.isLlmThinkingMarkdown ?? true,
                 isLlmContentMarkdown: state.isLlmContentMarkdown ?? true,
+                llmToolRawKeys: state.llmToolRawKeys ?? [],
                 isLlmUserMarkdown: state.isLlmUserMarkdown ?? true,
                 llmViewInputs: context,
                 isMaximized: state.isMaximized,
@@ -5695,6 +5754,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         llmChatDisplay,
         isLlmThinkingMarkdown,
         isLlmContentMarkdown,
+        llmToolRawKeys,
         isLlmUserMarkdown,
         isMaximized,
         isEditingName,
@@ -5744,6 +5804,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmChatDisplay,
                 isLlmThinkingMarkdown: isLlmThinkingMarkdown ?? true,
                 isLlmContentMarkdown: isLlmContentMarkdown ?? true,
+                llmToolRawKeys: llmToolRawKeys ?? [],
                 isLlmUserMarkdown: isLlmUserMarkdown ?? true,
                 llmViewInputs: context,
                 isMaximized,

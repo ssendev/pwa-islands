@@ -286,7 +286,12 @@ export const applyEditorLlmChatStream = (
   modalState: ModalState,
   payload: {
     readonly completedTurns: ReadonlyArray<Editor.LlmChatTurnBlock>
-    readonly activeTurn: { readonly content: string; readonly reasoning: string }
+    readonly activeTurn: {
+      readonly content: string
+      readonly reasoning: string
+      readonly assistantContent?: string
+      readonly toolDetails?: ReadonlyArray<Editor.LlmChatToolDetail>
+    }
   },
 ): ModalState =>
   Match.value(modalState).pipe(
@@ -351,6 +356,7 @@ export const openDeletedEntryHistory = (
       llmChatState: Editor.LlmChatState.Idle(),
       isLlmThinkingMarkdown: true,
       isLlmContentMarkdown: true,
+      llmToolRawKeys: [],
       isLlmUserMarkdown: true,
       isMaximized: false,
       isEditingName: false,
@@ -521,6 +527,7 @@ export const resolveModalForRoute = async (
               llmChatState: Editor.LlmChatState.Idle(),
               isLlmThinkingMarkdown: true,
               isLlmContentMarkdown: true,
+              llmToolRawKeys: [],
               isLlmUserMarkdown: true,
               isMaximized: false,
               isEditingName: false,
@@ -596,6 +603,7 @@ export const resolveModalForRoute = async (
                   llmChatState: Editor.LlmChatState.Idle(),
                   isLlmThinkingMarkdown: true,
                   isLlmContentMarkdown: true,
+                  llmToolRawKeys: [],
                   isLlmUserMarkdown: true,
                   isMaximized: false,
                   isEditingName: false,
@@ -1057,6 +1065,7 @@ export const update = (
           llmChatState: Editor.LlmChatState.Idle(),
           isLlmThinkingMarkdown: true,
           isLlmContentMarkdown: true,
+          llmToolRawKeys: [],
           isLlmUserMarkdown: true,
           isMaximized: context.editorDefaults?.isMaximized ?? false,
           isEditingName: false,

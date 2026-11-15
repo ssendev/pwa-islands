@@ -742,14 +742,14 @@ describe("runEditorChatTurn", () => {
       result.turns.map((turn) => ({
         isError: turn.isError,
         hasEdit: turn.content.includes("Tool-Aufruf: edit"),
-        hasErr: turn.content.includes("Fehler beim Anwenden der Änderungen"),
+        hasToolErr:
+          turn.toolDetails?.[0]?.result.includes("Fehler beim Anwenden der Änderungen") ?? false,
       })),
     ).toEqual([
-      { isError: false, hasEdit: true, hasErr: false },
-      { isError: true, hasEdit: false, hasErr: true },
-      { isError: false, hasEdit: true, hasErr: false },
+      { isError: false, hasEdit: true, hasToolErr: true },
+      { isError: false, hasEdit: true, hasToolErr: false },
     ])
-    expect(updates.at(-1)?.completedTurns).toHaveLength(2)
+    expect(updates.at(-1)?.completedTurns).toHaveLength(1)
     expect(result.messages[2]).toEqual({
       _tag: "Tool",
       toolCallId: "call_bad",

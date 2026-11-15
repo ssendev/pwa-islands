@@ -3224,6 +3224,20 @@ code {
   color: var(--text-h);
 }
 
+.llm-tool-details.is-streaming .llm-tool-pre,
+.llm-tool-details.is-streaming .llm-tool-section .llm-markdown {
+  max-height: none;
+}
+
+.llm-tool-section .llm-markdown {
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
 .llm-response-streaming {
   font-size: 12px;
   color: var(--text);

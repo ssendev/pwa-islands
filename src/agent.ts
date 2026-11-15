@@ -15,6 +15,7 @@ import {
   formatToolResultForFormat,
   getEditorToolsForFormat,
 } from "./edit-format"
+import { formatToolArguments } from "./tool-format"
 
 export const LlmProvider = Schema.Literals(["openai", "language-model"])
 export type LlmProvider = typeof LlmProvider.Type
@@ -82,6 +83,8 @@ export type LlmRequestConfig = LlmSettings &
 export type LlmReplyParts = {
   content: string
   reasoning: string
+  assistantContent?: string
+  toolDetails?: ReadonlyArray<EditorChatToolDetail>
 }
 
 export type LlmTestResult = {
@@ -1495,9 +1498,23 @@ export const requestEditorChatCompletion = async (
       const streamingCalls = state.calls.filter((call) => call.name.trim() !== "")
       const toolSummary = formatToolCallsSummary(streamingCalls)
       const streamContent = joinNonEmptyParts([state.content, toolSummary])
+      const toolDetails: ReadonlyArray<EditorChatToolDetail> = streamingCalls.map((call) => {
+        const name = call.name.trim()
+        const summary =
+          name === "edit"
+            ? formatEditToolSummary(call.arguments)
+            : formatSingleToolCallSummary(call)
+        return {
+          summary: summary !== "" ? summary : "Tool-Aufruf",
+          name,
+          arguments: call.arguments,
+          result: "",
+        }
+      })
       onUpdate({
         content: streamContent,
         reasoning: state.reasoning,
+        ...(toolDetails.length > 0 ? { assistantContent: state.content.trim(), toolDetails } : {}),
       })
     },
   )
@@ -1529,6 +1546,8 @@ export type EditorChatStreamUpdate = {
   readonly activeTurn: {
     readonly content: string
     readonly reasoning: string
+    readonly assistantContent?: string
+    readonly toolDetails?: ReadonlyArray<EditorChatToolDetail>
   }
 }
 
@@ -1555,6 +1574,32 @@ const parseToolArgsRecord = (rawArguments: string): Record<string, unknown> | un
   } catch {
     return undefined
   }
+}
+
+const formatEditToolSummary = (rawArguments: string): string => {
+  const formatted = formatToolArguments(rawArguments, "edit").trim()
+  if (formatted === "" || formatted.startsWith("{")) {
+    return "Tool-Aufruf: edit"
+  }
+  const lines = formatted.split("\n")
+  const hunkCount = lines.filter((line) => line.startsWith("@@")).length
+  const searchBlockCount = lines.filter((line) => line.startsWith("<<<<<<< SEARCH")).length
+  const blockCount = Math.max(hunkCount, searchBlockCount)
+  const addedCount = lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length
+  const removedCount = lines.filter(
+    (line) => line.startsWith("-") && !line.startsWith("---"),
+  ).length
+  const parts: Array<string> = []
+  if (blockCount > 0) {
+    parts.push(`${blockCount} ${blockCount === 1 ? "Block" : "Blöcke"}`)
+  }
+  if (addedCount > 0 || removedCount > 0) {
+    parts.push(`+${addedCount}/-${removedCount} Zeilen`)
+  }
+  if (parts.length === 0) {
+    parts.push(`${lines.length} ${lines.length === 1 ? "Zeile" : "Zeilen"}`)
+  }
+  return `Tool-Aufruf: edit (${parts.join(", ")})`
 }
 
 const formatSingleToolCallSummary = (call: EditorChatToolCall): string => {
@@ -1888,7 +1933,8 @@ export const runEditorChatTurn = async ({
         (msg) => msg._tag === "Tool" && msg.toolCallId === call.id,
       )
       const name = call.name.trim()
-      const summary = name === "edit" ? "Tool-Aufruf: edit" : formatSingleToolCallSummary(call)
+      const summary =
+        name === "edit" ? formatEditToolSummary(call.arguments) : formatSingleToolCallSummary(call)
       return {
         summary: summary !== "" ? summary : "Tool-Aufruf",
         name,
@@ -1904,15 +1950,9 @@ export const runEditorChatTurn = async ({
 
     if (EffectArray.isReadonlyArrayNonEmpty(batch.errorMessages)) {
       const combinedError = batch.errorMessages.join("\n")
-      const errorTurn: EditorChatTurnBlock = {
-        content: combinedError,
-        reasoning: "",
-        isError: true,
-      }
       const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
         ...completedTurns,
         ...enrichedReplyTurns,
-        errorTurn,
       ]
       if (errorRetriesLeft <= 0) {
         onUpdate?.({

@@ -668,6 +668,8 @@ export const Message = defineMessageUnion({
     activeTurn: Schema.Struct({
       content: Schema.String,
       reasoning: Schema.String,
+      assistantContent: Schema.optionalKey(Schema.String),
+      toolDetails: Schema.optionalKey(Schema.Array(Editor.LlmChatToolDetailSchema)),
     }),
   },
   SucceededEditorLlmChat: {

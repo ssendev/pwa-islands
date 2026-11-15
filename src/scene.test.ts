@@ -547,9 +547,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(
         selector("#modal-llm-chat-history .modal-llm-chat-details.is-system"),
       ).toContainText("file"),
-      sceneExpect(selector("#modal-llm-chat-history")).toContainText(
-        "1 Bearbeitung(en) angewendet",
-      ),
+      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Ich füge den Titel hinzu."),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Senden"),
     )
   })

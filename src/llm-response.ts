@@ -2,6 +2,9 @@ import { Array } from "effect"
 import type { HtmlBuilder } from "foldkit/html"
 import { viewIcon } from "./icons"
 import { viewMarkdown } from "./markdown"
+import { formatToolArguments } from "./tool-format"
+
+export { formatToolArguments }
 
 export type LlmToolDetail = {
   readonly summary: string
@@ -16,24 +19,55 @@ export type LlmResponseProps<Message = never> = {
   readonly isStreaming: boolean
   readonly assistantContent?: string
   readonly toolDetails?: ReadonlyArray<LlmToolDetail>
+  readonly toolKeyPrefix?: string
   readonly isThinkingMarkdown?: boolean
   readonly isContentMarkdown?: boolean
+  readonly rawToolKeys?: ReadonlyArray<string>
   readonly onToggleThinkingMarkdown?: Message
   readonly onToggleContentMarkdown?: Message
+  readonly onToggleToolMarkdown?: (toolKey: string) => Message
   readonly onCopyCode?: (code: string) => Message
 }
 
-const formatToolArguments = (raw: string): string => {
-  const trimmed = raw.trim()
-  if (trimmed === "") {
-    return ""
-  }
-  try {
-    return JSON.stringify(JSON.parse(trimmed), null, 2)
-  } catch {
-    return trimmed
-  }
-}
+const viewToolSection = <Message>(
+  label: string,
+  text: string,
+  copyLabel: string,
+  toggleKey: string,
+  isPrettyOrMarkdown: boolean,
+  renderAsMarkdown: boolean,
+  toggleLabel: string,
+  props: LlmResponseProps<Message>,
+  h: HtmlBuilder<Message>,
+) =>
+  h.div(
+    [h.Class("llm-tool-section")],
+    [
+      h.div(
+        [h.Class("llm-response-section-header")],
+        [
+          h.span([h.Class("llm-tool-section-label")], [label]),
+          h.div(
+            [h.Class("llm-response-section-actions")],
+            [
+              viewHeaderCopyButton(text, props.onCopyCode, copyLabel, h),
+              viewMarkdownToggleButton(
+                isPrettyOrMarkdown,
+                props.onToggleToolMarkdown !== undefined
+                  ? props.onToggleToolMarkdown(toggleKey)
+                  : undefined,
+                toggleLabel,
+                h,
+              ),
+            ],
+          ),
+        ],
+      ),
+      renderAsMarkdown
+        ? viewMarkdown(text, { heal: props.isStreaming, onCopyCode: props.onCopyCode }, h)
+        : h.pre([h.Class("llm-tool-pre")], [h.code([], [text])]),
+    ],
+  )
 
 const viewMarkdownToggleButton = <Message>(
   isMarkdown: boolean,
@@ -81,6 +115,8 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
   const hasContent = displayContent.trim() !== ""
   const isThinkingMarkdown = props.isThinkingMarkdown ?? true
   const isContentMarkdown = props.isContentMarkdown ?? true
+  const rawToolKeys = props.rawToolKeys ?? []
+  const toolKeyPrefix = props.toolKeyPrefix ?? "tool"
 
   if (!hasReasoning && !hasContent && !hasToolDetails && !props.isStreaming) {
     return h.empty
@@ -170,33 +206,55 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
         : h.empty,
       hasToolDetails
         ? h.div(
-            [h.Class("llm-response-tools")],
-            Array.map(toolDetails, (detail) => {
-              const formattedArgs = formatToolArguments(detail.arguments)
-              const trimmedResult = detail.result.trim()
+            [
+              h.Key(props.isStreaming ? "tools-streaming" : "tools-done"),
+              h.Class("llm-response-tools"),
+            ],
+            Array.map(toolDetails, (detail, index) => {
+              const toolKey = `${toolKeyPrefix}:${index}`
+              const argsKey = `${toolKey}:args`
+              const resultKey = `${toolKey}:result`
+              const isArgsPretty = !rawToolKeys.includes(argsKey)
+              const isResultMarkdown = !rawToolKeys.includes(resultKey)
+              const argsText = isArgsPretty
+                ? formatToolArguments(detail.arguments, detail.name)
+                : detail.arguments
+              const resultText = isResultMarkdown ? detail.result.trim() : detail.result
               return h.details(
-                [h.Class("llm-tool-details")],
+                [
+                  h.Class(props.isStreaming ? "llm-tool-details is-streaming" : "llm-tool-details"),
+                  h.DataAttribute("tool-key", toolKey),
+                  ...(props.isStreaming ? [h.Open(true)] : []),
+                ],
                 [
                   h.summary([h.Class("llm-tool-summary")], [detail.summary]),
                   h.div(
                     [h.Class("llm-tool-body")],
                     [
-                      formattedArgs !== ""
-                        ? h.div(
-                            [h.Class("llm-tool-section")],
-                            [
-                              h.span([h.Class("llm-tool-section-label")], ["Argumente"]),
-                              h.pre([h.Class("llm-tool-pre")], [h.code([], [formattedArgs])]),
-                            ],
+                      argsText !== ""
+                        ? viewToolSection(
+                            "Argumente",
+                            argsText,
+                            "Argumente kopieren",
+                            argsKey,
+                            isArgsPretty,
+                            false,
+                            "Tool-Ansicht umschalten",
+                            props,
+                            h,
                           )
                         : h.empty,
-                      trimmedResult !== ""
-                        ? h.div(
-                            [h.Class("llm-tool-section")],
-                            [
-                              h.span([h.Class("llm-tool-section-label")], ["Ergebnis"]),
-                              h.pre([h.Class("llm-tool-pre")], [h.code([], [trimmedResult])]),
-                            ],
+                      resultText !== ""
+                        ? viewToolSection(
+                            "Ergebnis",
+                            resultText,
+                            "Ergebnis kopieren",
+                            resultKey,
+                            isResultMarkdown,
+                            isResultMarkdown,
+                            "Ergebnis-Markdown umschalten",
+                            props,
+                            h,
                           )
                         : h.empty,
                     ],

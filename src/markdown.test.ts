@@ -7,6 +7,7 @@ import { formatUserMessageMarkdown, initMarkdown, viewUserMarkdown } from "./mar
 type TestMessage =
   | { readonly _tag: "ToggleThinking" }
   | { readonly _tag: "ToggleContent" }
+  | { readonly _tag: "ToggleTool"; readonly toolKey: string }
   | { readonly _tag: "CopyCode"; readonly code: string }
 
 type TestModel = {
@@ -15,6 +16,7 @@ type TestModel = {
   readonly isStreaming: boolean
   readonly isThinkingMarkdown?: boolean
   readonly isContentMarkdown?: boolean
+  readonly rawToolKeys?: ReadonlyArray<string>
   readonly copiedCode?: string
   readonly assistantContent?: string
   readonly toolDetails?: ReadonlyArray<LlmResponse.LlmToolDetail>
@@ -26,6 +28,13 @@ const testUpdate = (model: TestModel, message: TestMessage) => {
   }
   if (message._tag === "ToggleContent") {
     return { model: { ...model, isContentMarkdown: !(model.isContentMarkdown ?? true) } }
+  }
+  if (message._tag === "ToggleTool") {
+    const current = model.rawToolKeys ?? []
+    const next = current.includes(message.toolKey)
+      ? current.filter((key) => key !== message.toolKey)
+      : [...current, message.toolKey]
+    return { model: { ...model, rawToolKeys: next } }
   }
   return { model: { ...model, copiedCode: message.code } }
 }
@@ -39,6 +48,7 @@ const testView = (model: TestModel, h: HtmlBuilder<TestMessage>) =>
           ...model,
           onToggleThinkingMarkdown: { _tag: "ToggleThinking" },
           onToggleContentMarkdown: { _tag: "ToggleContent" },
+          onToggleToolMarkdown: (toolKey): TestMessage => ({ _tag: "ToggleTool", toolKey }),
           onCopyCode: (code): TestMessage => ({ _tag: "CopyCode", code }),
         },
         h,
@@ -140,7 +150,7 @@ describe("llm-response markdown", () => {
       sceneExpect(selector(".llm-tool-details .llm-tool-summary")).toContainText(
         'Tool-Aufruf: search ("Titel")',
       ),
-      sceneExpect(selector(".llm-tool-details")).toContainText('"query": "Titel"'),
+      sceneExpect(selector(".llm-tool-details")).toContainText("query: Titel"),
       sceneExpect(selector(".llm-tool-details")).toContainText("1:ab|<h1>Titel</h1>"),
     )
   })
@@ -173,5 +183,115 @@ describe("llm-response markdown", () => {
     const htmlFile = "<!DOCTYPE html>\n<html>\n  <body>Hallo</body>\n</html>"
     expect(formatUserMessageMarkdown(htmlFile)).toBe(`\`\`\`html\n${htmlFile}\n\`\`\``)
     expect(formatUserMessageMarkdown("Bitte **fett**")).toBe("Bitte **fett**")
+  })
+
+  it("formatiert beliebige Tool-Argumente generisch und schaltet Tools einzeln um", () => {
+    expect(
+      LlmResponse.formatToolArguments(
+        '{"edits":"@@\\n-    <title>Alt</title>\\n+    <title>Neu</title>"}',
+        "edit",
+      ),
+    ).toBe("@@\n-    <title>Alt</title>\n+    <title>Neu</title>")
+    expect(
+      LlmResponse.formatToolArguments(
+        '{"edits":"@@\\n-    <title>Alt</title>\\n+    <title>N',
+        "edit",
+      ),
+    ).toBe("@@\n-    <title>Alt</title>\n+    <title>N")
+    expect(
+      LlmResponse.formatToolArguments(
+        '{"path":"index.html","content":"<!DOCTYPE html>\\n<html>\\n</html>"}',
+      ),
+    ).toBe("path: index.html\n\ncontent:\n<!DOCTYPE html>\n<html>\n</html>")
+    expect(
+      LlmResponse.formatToolArguments('{"path":"index.html","content":"<!DOCTYPE html>\\n<ht'),
+    ).toBe("path: index.html\n\ncontent:\n<!DOCTYPE html>\n<ht")
+    expect(LlmResponse.formatToolArguments('{"startLine":1,"endLine":50}')).toBe(
+      "startLine: 1\nendLine: 50",
+    )
+
+    scene(
+      { update: testUpdate, view: testView },
+      given({
+        content: "Tool-Aufruf: edit",
+        reasoning: "",
+        isStreaming: true,
+        assistantContent: "",
+        toolDetails: [
+          {
+            summary: "Tool-Aufruf: edit",
+            name: "edit",
+            arguments: '{"edits":"@@\\n-    <title>Alt</title>\\n+    <title>Neu</title>"}',
+            result: "Datei `index.html` aktualisiert:\n\n```\n1:ab|<title>Neu</title>\n```",
+          },
+          {
+            summary: "Tool-Aufruf: search",
+            name: "search",
+            arguments: '{"query":"Titel"}',
+            result: "Treffer:\n\n```\n1:ab|<h1>Titel</h1>\n```",
+          },
+        ],
+      }),
+      sceneExpect(selector(".llm-tool-details.is-streaming[open]")).toExist(),
+      sceneExpect(selector('.llm-tool-details button[aria-label="Argumente kopieren"]')).toExist(),
+      sceneExpect(selector('.llm-tool-details button[aria-label="Ergebnis kopieren"]')).toExist(),
+      sceneExpect(
+        selector('.llm-tool-details button[aria-label="Ergebnis-Markdown umschalten"]'),
+      ).toExist(),
+      sceneExpect(
+        selector('.llm-tool-details[data-tool-key="tool:0"] .llm-tool-pre code'),
+      ).toContainText("-    <title>Alt</title>"),
+      sceneExpect(
+        selector('.llm-tool-details[data-tool-key="tool:0"] .llm-markdown pre code'),
+      ).toContainText("1:ab|<title>Neu</title>"),
+      sceneExpect(
+        selector('.llm-tool-details[data-tool-key="tool:1"] .llm-tool-pre code'),
+      ).toContainText("query: Titel"),
+      click(
+        selector(
+          '.llm-tool-details[data-tool-key="tool:0"] button[aria-label="Tool-Ansicht umschalten"]',
+        ),
+      ),
+      sceneExpect(
+        selector('.llm-tool-details[data-tool-key="tool:0"] .llm-tool-pre code'),
+      ).toContainText('{"edits":"@@\\n-    <title>Alt</title>\\n+    <title>Neu</title>"}'),
+      sceneExpect(
+        selector('.llm-tool-details[data-tool-key="tool:0"] .llm-markdown pre code'),
+      ).toContainText("1:ab|<title>Neu</title>"),
+      click(
+        selector(
+          '.llm-tool-details[data-tool-key="tool:0"] button[aria-label="Ergebnis-Markdown umschalten"]',
+        ),
+      ),
+      sceneExpect(selector('.llm-tool-details[data-tool-key="tool:0"] .llm-markdown')).toBeAbsent(),
+      sceneExpect(
+        selector('.llm-tool-details[data-tool-key="tool:1"] .llm-tool-pre code'),
+      ).toContainText("query: Titel"),
+    )
+
+    scene(
+      { update: testUpdate, view: testView },
+      given({
+        content: "Tool-Aufruf: edit",
+        reasoning: "",
+        isStreaming: false,
+        assistantContent: "",
+        toolDetails: [
+          {
+            summary: "Tool-Aufruf: edit",
+            name: "edit",
+            arguments: '{"edits":"@@\\n-    <title>Alt</title>\\n+    <title>Neu</title>"}',
+            result: "  Gespeichert  ",
+          },
+        ],
+      }),
+      sceneExpect(selector(".llm-tool-details")).toExist(),
+      sceneExpect(selector(".llm-tool-details[open]")).toBeAbsent(),
+      click(selector('.llm-tool-details button[aria-label="Tool-Ansicht umschalten"]')),
+      sceneExpect(selector(".llm-tool-details[open]")).toBeAbsent(),
+      sceneExpect(selector(".llm-tool-details .llm-tool-pre code")).toContainText(
+        '{"edits":"@@\\n-    <title>Alt</title>\\n+    <title>Neu</title>"}',
+      ),
+    )
   })
 })
