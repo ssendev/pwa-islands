@@ -444,6 +444,7 @@ export const resolveAllProviderModelOptions = (
       ...liveDiscovered.map((id) => ({ label: id, value: id })),
     ]
     const seenInProvider = new Set<string>()
+    const currentProviderOptions: Array<ModelOption> = []
     for (const item of combined) {
       if (seenInProvider.has(item.value)) {
         continue
@@ -455,7 +456,7 @@ export const resolveAllProviderModelOptions = (
       const encodedValue = encodeProviderModelValue(provider.id, item.value)
       if (!seen.has(encodedValue)) {
         seen.add(encodedValue)
-        providerOptions.push({
+        currentProviderOptions.push({
           label: item.label,
           value: encodedValue,
           providerId: provider.id,
@@ -463,8 +464,11 @@ export const resolveAllProviderModelOptions = (
         })
       }
     }
+    currentProviderOptions.sort((a, b) =>
+      a.label.localeCompare(b.label, "de", { sensitivity: "base" }),
+    )
+    providerOptions.push(...currentProviderOptions)
   }
-  providerOptions.sort((a, b) => a.label.localeCompare(b.label, "de", { sensitivity: "base" }))
   const nativeOptions: ReadonlyArray<ModelOption> = includeLanguageModel
     ? [{ label: LANGUAGE_MODEL_OPTION_LABEL, value: LANGUAGE_MODEL_OPTION_VALUE }]
     : []

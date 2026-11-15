@@ -1206,10 +1206,31 @@ describe("Modellfilter und Sortierung", () => {
           thinkingLevels: "",
           extraArgs: "",
         },
+        {
+          id: "p2",
+          name: "P2",
+          enabled: true,
+          baseUrl: "https://two.example.com/v1",
+          apiKey: "",
+          models: "beta, aardvark",
+          modelFilter: "",
+          discoveredModels: [],
+          editFormat: "",
+          streaming: true,
+          toolCalls: true,
+          thinkingParam: "",
+          thinkingLevels: "",
+          extraArgs: "",
+        },
       ],
       {},
       "",
     )
-    expect(providerOptions.map((o) => o.label)).toEqual(["alpha", "gpt-4o-mini"])
+    expect(providerOptions.map((o) => o.label)).toEqual([
+      "alpha",
+      "gpt-4o-mini",
+      "aardvark",
+      "beta",
+    ])
   })
 })
