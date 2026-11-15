@@ -812,7 +812,7 @@ code {
 /* Global Floating Toasts */
 .toast-container {
   position: fixed;
-  bottom: 20px;
+  bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
@@ -821,7 +821,7 @@ code {
   align-items: center;
   gap: 10px;
   width: min(720px, calc(100vw - 32px));
-  max-height: calc(100dvh - 40px);
+  max-height: calc(100dvh - 104px - env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   overscroll-behavior: contain;
   pointer-events: none;
@@ -830,7 +830,7 @@ code {
 .toast {
   pointer-events: auto;
   max-width: 100%;
-  max-height: calc(100dvh - 64px);
+  max-height: calc(100dvh - 120px - env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
   overscroll-behavior: contain;
   box-sizing: border-box;
