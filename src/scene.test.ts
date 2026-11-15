@@ -1586,6 +1586,9 @@ describe("PWA Islands Scene Tests", () => {
         }),
       ),
       click(selector("#editor-history-delete-latest-btn")),
+      Command.expectNone(),
+      sceneExpect(selector("#editor-history-delete-latest-confirm")).toExist(),
+      click(selector("#editor-history-delete-latest-confirm-btn")),
       Command.resolve(
         Editor.DeleteLatestFileHistoryEntry,
         Editor.Message.SucceededDeleteLatestHistoryEntry(),

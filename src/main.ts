@@ -3651,6 +3651,13 @@ export const update = (
         }
       }
       if (model.isSettingsDialogOpen) {
+        if (model.clearAllHistoryState._tag === "Confirming") {
+          return {
+            model: modifyFields(model, {
+              clearAllHistoryState: () => ClearAllHistoryState.Idle(),
+            }),
+          }
+        }
         const subPath = currentSubPathFromStorageState(model.storageState)
         return {
           model: modifyFields(model, {
@@ -4823,715 +4830,725 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
   )
 
   return h.div(
-    [
-      h.Id("settings-dialog"),
-      h.Class("modal-overlay"),
-      h.Role("dialog"),
-      h.AriaModal(true),
-      h.AriaLabelledBy("settings-dialog-title"),
-    ],
+    [h.Class("settings-dialog-host")],
     [
       h.div(
-        [h.Class("modal-content settings-dialog")],
         [
-          h.header(
-            [h.Class("modal-header")],
-            [
-              h.h3([h.Id("settings-dialog-title"), h.Class("modal-title")], ["Einstellungen"]),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Id("btn-close-settings"),
-                  h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
-                  h.OnClick(Message.ClickedCloseSettingsDialog()),
-                ],
-                [viewIcon("close", h)],
-              ),
-            ],
-          ),
+          h.Id("settings-dialog"),
+          h.Class("modal-overlay"),
+          h.Role("dialog"),
+          h.AriaModal(true),
+          h.AriaLabelledBy("settings-dialog-title"),
+        ],
+        [
           h.div(
-            [h.Class("modal-body settings-groups")],
+            [h.Class("modal-content settings-dialog")],
             [
-              h.section(
-                [h.Class("settings-group"), h.Id("settings-group-fs")],
+              h.header(
+                [h.Class("modal-header")],
                 [
-                  h.h4(
-                    [h.Id("current-storage"), h.Class("settings-group-title")],
+                  h.h3([h.Id("settings-dialog-title"), h.Class("modal-title")], ["Einstellungen"]),
+                  h.button(
                     [
-                      Option.match(currentStorageLabel, {
-                        onNone: () => "Dateisystem",
-                        onSome: (label) =>
-                          model.hasTauri ? "Dateisystem" : `Dateisystem: ${label}`,
+                      h.Type("button"),
+                      h.Id("btn-close-settings"),
+                      h.Class("modal-close-btn"),
+                      h.AriaLabel("Schließen"),
+                      h.OnClick(Message.ClickedCloseSettingsDialog()),
+                    ],
+                    [viewIcon("close", h)],
+                  ),
+                ],
+              ),
+              h.div(
+                [h.Class("modal-body settings-groups")],
+                [
+                  h.section(
+                    [h.Class("settings-group"), h.Id("settings-group-fs")],
+                    [
+                      h.h4(
+                        [h.Id("current-storage"), h.Class("settings-group-title")],
+                        [
+                          Option.match(currentStorageLabel, {
+                            onNone: () => "Dateisystem",
+                            onSome: (label) =>
+                              model.hasTauri ? "Dateisystem" : `Dateisystem: ${label}`,
+                          }),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("settings-group-actions")],
+                        [
+                          canSwitchToOpfs
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-use-opfs"),
+                                  h.Class("btn btn-secondary"),
+                                  h.Role("menuitem"),
+                                  h.Title("Internen Browser-Speicher (OPFS) verwenden"),
+                                  h.OnClick(Message.ClickedUseOpfs()),
+                                ],
+                                [viewIcon("package", h), " Zu App-Speicher wechseln"],
+                              )
+                            : h.empty,
+                          canSwitchToFsa
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-select-folder"),
+                                  h.Class("btn btn-secondary"),
+                                  h.Role("menuitem"),
+                                  h.OnClick(Message.ClickedUseFsa()),
+                                ],
+                                [viewIcon("folder", h), " Zu lokalem Ordner wechseln"],
+                              )
+                            : h.empty,
+                          isFsaNoFolder
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-change-folder"),
+                                  h.Class("btn btn-secondary"),
+                                  h.Role("menuitem"),
+                                  h.Title("Ordner wählen"),
+                                  h.OnClick(Message.ClickedSelectFolder()),
+                                ],
+                                [viewIcon("folder-open", h), " Ordner wählen"],
+                              )
+                            : h.empty,
+                          isFsaReady || isFsaPermissionRequired
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-change-folder"),
+                                  h.Class("btn btn-secondary"),
+                                  h.Role("menuitem"),
+                                  h.Title("Anderen Ordner wählen"),
+                                  h.OnClick(Message.ClickedChangeFolder()),
+                                ],
+                                [viewIcon("folder-open", h), " Ordner wechseln"],
+                              )
+                            : h.empty,
+                          isFsaReady
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-disconnect-folder"),
+                                  h.Class("btn btn-secondary is-danger"),
+                                  h.Role("menuitem"),
+                                  h.Title("Ordner trennen"),
+                                  h.OnClick(Message.ClickedDisconnectFolder()),
+                                ],
+                                [viewIcon("plug", h), " Trennen"],
+                              )
+                            : h.empty,
+                        ],
+                      ),
+                    ],
+                  ),
+                  h.section(
+                    [h.Class("settings-group"), h.Id("settings-group-history")],
+                    [
+                      h.h4([h.Class("settings-group-title")], ["Versionsverlauf"]),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-history-enabled"),
+                                h.Checked(model.historyEnabled),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsHistoryEnabled({
+                                    isEnabled: !model.historyEnabled,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Versionen automatisch speichern"]),
+                            ],
+                          ),
+                          h.p(
+                            [h.Class("form-hint")],
+                            [
+                              "Sichert vor jedem Speichern, Überschreiben oder Löschen im Editor bzw. Dateimanager eine Kopie der vorherigen Datei.",
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-api-history-enabled"),
+                                h.Checked(model.apiHistoryEnabled),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsApiHistoryEnabled({
+                                    isEnabled: !model.apiHistoryEnabled,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["api.js Versionen speichern"]),
+                            ],
+                          ),
+                          h.p(
+                            [h.Class("form-hint")],
+                            [
+                              "Sichert vor jedem Überschreiben, Umbenennen, Kopieren oder Löschen über api.js eine Kopie der bisherigen Daten (auch Binärdateien).",
+                            ],
+                          ),
+                        ],
+                      ),
+                      ClearAllHistoryState.match(model.clearAllHistoryState, {
+                        Idle: () =>
+                          h.div(
+                            [h.Class("settings-group-actions")],
+                            [
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-clear-all-history"),
+                                  h.Class("btn btn-danger"),
+                                  h.OnClick(Message.ClickedRequestClearAllHistory()),
+                                ],
+                                [viewIcon("trash", h), " Alle Versionen löschen"],
+                              ),
+                            ],
+                          ),
+                        Confirming: () =>
+                          h.div(
+                            [h.Class("settings-group-actions")],
+                            [
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-clear-all-history"),
+                                  h.Class("btn btn-danger"),
+                                  h.OnClick(Message.ClickedRequestClearAllHistory()),
+                                ],
+                                [viewIcon("trash", h), " Alle Versionen löschen"],
+                              ),
+                            ],
+                          ),
+                        Clearing: () =>
+                          h.div(
+                            [h.Class("settings-group-actions")],
+                            [
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-clear-all-history"),
+                                  h.Class("btn btn-danger"),
+                                  h.Disabled(true),
+                                ],
+                                ["Lösche…"],
+                              ),
+                            ],
+                          ),
+                        Done: () =>
+                          h.div(
+                            [h.Class("settings-group-actions")],
+                            [
+                              h.span(
+                                [h.Id("clear-all-history-done"), h.Class("form-hint")],
+                                ["Alle Versionen wurden gelöscht."],
+                              ),
+                            ],
+                          ),
                       }),
                     ],
                   ),
-                  h.div(
-                    [h.Class("settings-group-actions")],
+                  h.section(
+                    [h.Class("settings-group"), h.Id("settings-group-llm")],
                     [
-                      canSwitchToOpfs
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-use-opfs"),
-                              h.Class("btn btn-secondary"),
-                              h.Role("menuitem"),
-                              h.Title("Internen Browser-Speicher (OPFS) verwenden"),
-                              h.OnClick(Message.ClickedUseOpfs()),
-                            ],
-                            [viewIcon("package", h), " Zu App-Speicher wechseln"],
-                          )
-                        : h.empty,
-                      canSwitchToFsa
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-select-folder"),
-                              h.Class("btn btn-secondary"),
-                              h.Role("menuitem"),
-                              h.OnClick(Message.ClickedUseFsa()),
-                            ],
-                            [viewIcon("folder", h), " Zu lokalem Ordner wechseln"],
-                          )
-                        : h.empty,
-                      isFsaNoFolder
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-change-folder"),
-                              h.Class("btn btn-secondary"),
-                              h.Role("menuitem"),
-                              h.Title("Ordner wählen"),
-                              h.OnClick(Message.ClickedSelectFolder()),
-                            ],
-                            [viewIcon("folder-open", h), " Ordner wählen"],
-                          )
-                        : h.empty,
-                      isFsaReady || isFsaPermissionRequired
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-change-folder"),
-                              h.Class("btn btn-secondary"),
-                              h.Role("menuitem"),
-                              h.Title("Anderen Ordner wählen"),
-                              h.OnClick(Message.ClickedChangeFolder()),
-                            ],
-                            [viewIcon("folder-open", h), " Ordner wechseln"],
-                          )
-                        : h.empty,
-                      isFsaReady
-                        ? h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-disconnect-folder"),
-                              h.Class("btn btn-secondary is-danger"),
-                              h.Role("menuitem"),
-                              h.Title("Ordner trennen"),
-                              h.OnClick(Message.ClickedDisconnectFolder()),
-                            ],
-                            [viewIcon("plug", h), " Trennen"],
-                          )
-                        : h.empty,
-                    ],
-                  ),
-                ],
-              ),
-              h.section(
-                [h.Class("settings-group"), h.Id("settings-group-history")],
-                [
-                  h.h4([h.Class("settings-group-title")], ["Versionsverlauf"]),
-                  h.div(
-                    [h.Class("form-group")],
-                    [
-                      h.label(
-                        [h.Class("form-check")],
-                        [
-                          h.input([
-                            h.Type("checkbox"),
-                            h.Id("settings-history-enabled"),
-                            h.Checked(model.historyEnabled),
-                            h.OnChange(() =>
-                              Message.ToggledSettingsHistoryEnabled({
-                                isEnabled: !model.historyEnabled,
-                              }),
-                            ),
-                          ]),
-                          h.span([], ["Versionen automatisch speichern"]),
-                        ],
-                      ),
-                      h.p(
-                        [h.Class("form-hint")],
-                        [
-                          "Sichert vor jedem Speichern, Überschreiben oder Löschen im Editor bzw. Dateimanager eine Kopie der vorherigen Datei.",
-                        ],
-                      ),
-                    ],
-                  ),
-                  h.div(
-                    [h.Class("form-group")],
-                    [
-                      h.label(
-                        [h.Class("form-check")],
-                        [
-                          h.input([
-                            h.Type("checkbox"),
-                            h.Id("settings-api-history-enabled"),
-                            h.Checked(model.apiHistoryEnabled),
-                            h.OnChange(() =>
-                              Message.ToggledSettingsApiHistoryEnabled({
-                                isEnabled: !model.apiHistoryEnabled,
-                              }),
-                            ),
-                          ]),
-                          h.span([], ["api.js Versionen speichern"]),
-                        ],
-                      ),
-                      h.p(
-                        [h.Class("form-hint")],
-                        [
-                          "Sichert vor jedem Überschreiben, Umbenennen, Kopieren oder Löschen über api.js eine Kopie der bisherigen Daten (auch Binärdateien).",
-                        ],
-                      ),
-                    ],
-                  ),
-                  ClearAllHistoryState.match(model.clearAllHistoryState, {
-                    Idle: () =>
+                      h.h4([h.Class("settings-group-title")], ["KI"]),
                       h.div(
-                        [h.Class("settings-group-actions")],
+                        [h.Class("form-group")],
                         [
-                          h.button(
+                          h.label([h.For("llm-edit-format")], ["Bearbeitungsformat"]),
+                          h.select(
                             [
-                              h.Type("button"),
-                              h.Id("btn-clear-all-history"),
-                              h.Class("btn btn-danger"),
-                              h.OnClick(Message.ClickedRequestClearAllHistory()),
-                            ],
-                            [viewIcon("trash", h), " Alle Versionen löschen"],
-                          ),
-                        ],
-                      ),
-                    Confirming: () =>
-                      h.div(
-                        [h.Id("clear-all-history-confirm"), h.Class("template-save-row")],
-                        [
-                          h.span(
-                            [h.Class("template-delete-prompt")],
-                            ["Alle gespeicherten Versionen aller Dateien löschen?"],
-                          ),
-                          h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-clear-all-history-cancel"),
-                              h.Class("btn btn-secondary"),
-                              h.OnClick(Message.ClickedCancelClearAllHistory()),
-                            ],
-                            ["Abbrechen"],
-                          ),
-                          h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-clear-all-history-confirm"),
-                              h.Class("btn btn-danger"),
-                              h.OnClick(Message.ClickedConfirmClearAllHistory()),
-                            ],
-                            ["Endgültig löschen"],
-                          ),
-                        ],
-                      ),
-                    Clearing: () =>
-                      h.div(
-                        [h.Class("settings-group-actions")],
-                        [
-                          h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-clear-all-history"),
-                              h.Class("btn btn-danger"),
-                              h.Disabled(true),
-                            ],
-                            ["Lösche…"],
-                          ),
-                        ],
-                      ),
-                    Done: () =>
-                      h.div(
-                        [h.Class("settings-group-actions")],
-                        [
-                          h.span(
-                            [h.Id("clear-all-history-done"), h.Class("form-hint")],
-                            ["Alle Versionen wurden gelöscht."],
-                          ),
-                        ],
-                      ),
-                  }),
-                ],
-              ),
-              h.section(
-                [h.Class("settings-group"), h.Id("settings-group-llm")],
-                [
-                  h.h4([h.Class("settings-group-title")], ["KI"]),
-                  h.div(
-                    [h.Class("form-group")],
-                    [
-                      h.label([h.For("llm-edit-format")], ["Bearbeitungsformat"]),
-                      h.select(
-                        [
-                          h.Id("llm-edit-format"),
-                          h.Class("form-input"),
-                          h.Value(model.llmDraftEditFormat),
-                          h.OnChange((value) => Message.UpdatedLlmEditFormat({ value })),
-                        ],
-                        EDIT_FORMAT_OPTIONS.map((item) =>
-                          h.option(
-                            [
-                              h.Value(item.value),
-                              h.Selected(model.llmDraftEditFormat === item.value),
-                            ],
-                            [item.label],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  h.div(
-                    [h.Class("form-group")],
-                    [
-                      h.label(
-                        [h.Class("form-check")],
-                        [
-                          h.input([
-                            h.Type("checkbox"),
-                            h.Id("llm-enabled"),
-                            h.Checked(model.llmDraftEnabled),
-                            h.OnChange(() =>
-                              Message.ToggledLlmEnabled({
-                                isChecked: !model.llmDraftEnabled,
-                              }),
-                            ),
-                          ]),
-                          h.span([], ["Chat-API aktivieren"]),
-                        ],
-                      ),
-                      model.hasLanguageModel
-                        ? h.p(
-                            [h.Id("llm-native-detected-hint"), h.Class("form-hint")],
-                            [
-                              "Browser-KI (LanguageModel-API) erkannt – Chat im Editor ist automatisch aktiv.",
-                            ],
-                          )
-                        : h.empty,
-                    ],
-                  ),
-                  ...(model.llmDraftEnabled
-                    ? [
-                        h.div(
-                          [h.Class("form-group")],
-                          [
-                            h.label([h.For("llm-base-url")], ["Base-URL (OpenAI-kompatibel)"]),
-                            h.input([
-                              h.Id("llm-base-url"),
+                              h.Id("llm-edit-format"),
                               h.Class("form-input"),
-                              h.Type("url"),
-                              h.Placeholder("https://api.openai.com/v1"),
-                              h.Autocomplete("off"),
-                              h.Value(model.llmDraftBaseUrl),
-                              h.OnInput((value) => Message.UpdatedLlmBaseUrl({ value })),
-                            ]),
-                          ],
-                        ),
-                        h.div(
-                          [h.Class("form-group")],
-                          [
-                            h.label([h.For("llm-api-key")], ["API-Key"]),
-                            h.input([
-                              h.Id("llm-api-key"),
-                              h.Class("form-input"),
-                              h.Type("password"),
-                              h.Placeholder("sk-..."),
-                              h.Autocomplete("off"),
-                              h.Value(model.llmDraftApiKey),
-                              h.OnInput((value) => Message.UpdatedLlmApiKey({ value })),
-                            ]),
-                          ],
-                        ),
-                        h.div(
-                          [h.Class("form-group")],
-                          [
-                            h.label(
-                              [h.For("llm-models")],
-                              ["Modellliste (optional, kommagetrennt)"],
-                            ),
-                            h.input([
-                              h.Id("llm-models"),
-                              h.Class("form-input"),
-                              h.Type("text"),
-                              h.Placeholder("z. B. gpt-4o, Schnell=gpt-4o-mini"),
-                              h.Autocomplete("off"),
-                              h.Value(model.llmDraftModels),
-                              h.OnInput((value) => Message.UpdatedLlmModels({ value })),
-                            ]),
-                            h.p(
-                              [h.Class("form-hint")],
-                              [
-                                "Wird genutzt, wenn die automatische Erkennung nicht funktioniert, um die Modellliste selbst festzulegen (optional Name=Modell-ID).",
-                              ],
-                            ),
-                          ],
-                        ),
-                        h.div(
-                          [h.Class("form-row")],
-                          [
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label(
-                                  [h.Class("form-check")],
-                                  [
-                                    h.input([
-                                      h.Type("checkbox"),
-                                      h.Id("llm-streaming"),
-                                      h.Checked(model.llmDraftStreaming),
-                                      h.OnChange(() =>
-                                        Message.ToggledLlmStreaming({
-                                          isChecked: !model.llmDraftStreaming,
-                                        }),
-                                      ),
-                                    ]),
-                                    h.span([], ["Streaming verwenden"]),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label(
-                                  [h.Class("form-check")],
-                                  [
-                                    h.input([
-                                      h.Type("checkbox"),
-                                      h.Id("llm-tool-calls"),
-                                      h.Checked(model.llmDraftToolCalls),
-                                      h.OnChange(() =>
-                                        Message.ToggledLlmToolCalls({
-                                          isChecked: !model.llmDraftToolCalls,
-                                        }),
-                                      ),
-                                    ]),
-                                    h.span([], ["Tool-Calls verwenden"]),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        h.div(
-                          [h.Class("form-group")],
-                          [
-                            h.label([h.For("llm-thinking-preset")], ["Thinking-Preset"]),
-                            (() => {
-                              const matchedPresetId =
-                                THINKING_PRESETS.find(
-                                  (preset) =>
-                                    preset.param === model.llmDraftThinkingParam.trim() &&
-                                    preset.levels === model.llmDraftThinkingLevels.trim(),
-                                )?.id ?? "custom"
-                              return h.select(
+                              h.Value(model.llmDraftEditFormat),
+                              h.OnChange((value) => Message.UpdatedLlmEditFormat({ value })),
+                            ],
+                            EDIT_FORMAT_OPTIONS.map((item) =>
+                              h.option(
                                 [
-                                  h.Id("llm-thinking-preset"),
-                                  h.Class("form-input"),
-                                  h.Value(matchedPresetId),
-                                  h.OnChange((presetId) =>
-                                    Message.SelectedLlmThinkingPreset({ presetId }),
-                                  ),
+                                  h.Value(item.value),
+                                  h.Selected(model.llmDraftEditFormat === item.value),
                                 ],
+                                [item.label],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("llm-enabled"),
+                                h.Checked(model.llmDraftEnabled),
+                                h.OnChange(() =>
+                                  Message.ToggledLlmEnabled({
+                                    isChecked: !model.llmDraftEnabled,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Chat-API aktivieren"]),
+                            ],
+                          ),
+                          model.hasLanguageModel
+                            ? h.p(
+                                [h.Id("llm-native-detected-hint"), h.Class("form-hint")],
                                 [
-                                  ...THINKING_PRESETS.map((preset) =>
-                                    h.option(
+                                  "Browser-KI (LanguageModel-API) erkannt – Chat im Editor ist automatisch aktiv.",
+                                ],
+                              )
+                            : h.empty,
+                        ],
+                      ),
+                      ...(model.llmDraftEnabled
+                        ? [
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label([h.For("llm-base-url")], ["Base-URL (OpenAI-kompatibel)"]),
+                                h.input([
+                                  h.Id("llm-base-url"),
+                                  h.Class("form-input"),
+                                  h.Type("url"),
+                                  h.Placeholder("https://api.openai.com/v1"),
+                                  h.Autocomplete("off"),
+                                  h.Value(model.llmDraftBaseUrl),
+                                  h.OnInput((value) => Message.UpdatedLlmBaseUrl({ value })),
+                                ]),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label([h.For("llm-api-key")], ["API-Key"]),
+                                h.input([
+                                  h.Id("llm-api-key"),
+                                  h.Class("form-input"),
+                                  h.Type("password"),
+                                  h.Placeholder("sk-..."),
+                                  h.Autocomplete("off"),
+                                  h.Value(model.llmDraftApiKey),
+                                  h.OnInput((value) => Message.UpdatedLlmApiKey({ value })),
+                                ]),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label(
+                                  [h.For("llm-models")],
+                                  ["Modellliste (optional, kommagetrennt)"],
+                                ),
+                                h.input([
+                                  h.Id("llm-models"),
+                                  h.Class("form-input"),
+                                  h.Type("text"),
+                                  h.Placeholder("z. B. gpt-4o, Schnell=gpt-4o-mini"),
+                                  h.Autocomplete("off"),
+                                  h.Value(model.llmDraftModels),
+                                  h.OnInput((value) => Message.UpdatedLlmModels({ value })),
+                                ]),
+                                h.p(
+                                  [h.Class("form-hint")],
+                                  [
+                                    "Wird genutzt, wenn die automatische Erkennung nicht funktioniert, um die Modellliste selbst festzulegen (optional Name=Modell-ID).",
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-row")],
+                              [
+                                h.div(
+                                  [h.Class("form-group")],
+                                  [
+                                    h.label(
+                                      [h.Class("form-check")],
                                       [
-                                        h.Value(preset.id),
-                                        h.Selected(matchedPresetId === preset.id),
+                                        h.input([
+                                          h.Type("checkbox"),
+                                          h.Id("llm-streaming"),
+                                          h.Checked(model.llmDraftStreaming),
+                                          h.OnChange(() =>
+                                            Message.ToggledLlmStreaming({
+                                              isChecked: !model.llmDraftStreaming,
+                                            }),
+                                          ),
+                                        ]),
+                                        h.span([], ["Streaming verwenden"]),
                                       ],
-                                      [preset.label],
                                     ),
+                                  ],
+                                ),
+                                h.div(
+                                  [h.Class("form-group")],
+                                  [
+                                    h.label(
+                                      [h.Class("form-check")],
+                                      [
+                                        h.input([
+                                          h.Type("checkbox"),
+                                          h.Id("llm-tool-calls"),
+                                          h.Checked(model.llmDraftToolCalls),
+                                          h.OnChange(() =>
+                                            Message.ToggledLlmToolCalls({
+                                              isChecked: !model.llmDraftToolCalls,
+                                            }),
+                                          ),
+                                        ]),
+                                        h.span([], ["Tool-Calls verwenden"]),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label([h.For("llm-thinking-preset")], ["Thinking-Preset"]),
+                                (() => {
+                                  const matchedPresetId =
+                                    THINKING_PRESETS.find(
+                                      (preset) =>
+                                        preset.param === model.llmDraftThinkingParam.trim() &&
+                                        preset.levels === model.llmDraftThinkingLevels.trim(),
+                                    )?.id ?? "custom"
+                                  return h.select(
+                                    [
+                                      h.Id("llm-thinking-preset"),
+                                      h.Class("form-input"),
+                                      h.Value(matchedPresetId),
+                                      h.OnChange((presetId) =>
+                                        Message.SelectedLlmThinkingPreset({ presetId }),
+                                      ),
+                                    ],
+                                    [
+                                      ...THINKING_PRESETS.map((preset) =>
+                                        h.option(
+                                          [
+                                            h.Value(preset.id),
+                                            h.Selected(matchedPresetId === preset.id),
+                                          ],
+                                          [preset.label],
+                                        ),
+                                      ),
+                                      h.option(
+                                        [
+                                          h.Value("custom"),
+                                          h.Selected(matchedPresetId === "custom"),
+                                        ],
+                                        ["Benutzerdefiniert"],
+                                      ),
+                                    ],
+                                  )
+                                })(),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label([h.For("llm-thinking-param")], ["Thinking-Parameter"]),
+                                h.input([
+                                  h.Id("llm-thinking-param"),
+                                  h.Class("form-input"),
+                                  h.Type("text"),
+                                  h.Placeholder(
+                                    "z. B. reasoning_effort oder chat_template_kwargs.enable_thinking",
                                   ),
-                                  h.option(
-                                    [h.Value("custom"), h.Selected(matchedPresetId === "custom")],
-                                    ["Benutzerdefiniert"],
+                                  h.Autocomplete("off"),
+                                  h.Value(model.llmDraftThinkingParam),
+                                  h.OnInput((value) => Message.UpdatedLlmThinkingParam({ value })),
+                                ]),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label(
+                                  [h.For("llm-thinking-levels")],
+                                  ["Verfügbare Thinking-Level (kommagetrennt)"],
+                                ),
+                                h.input([
+                                  h.Id("llm-thinking-levels"),
+                                  h.Class("form-input"),
+                                  h.Type("text"),
+                                  h.Placeholder(
+                                    "z. B. Aus=none, Niedrig=low, Hoch=high oder Aus=false, An=true",
+                                  ),
+                                  h.Autocomplete("off"),
+                                  h.Value(model.llmDraftThinkingLevels),
+                                  h.OnInput((value) => Message.UpdatedLlmThinkingLevels({ value })),
+                                ]),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label(
+                                  [h.For("llm-extra-args")],
+                                  ["Zusätzliche Parameter (JSON, optional)"],
+                                ),
+                                h.textarea([
+                                  h.Id("llm-extra-args"),
+                                  h.Class("form-input form-textarea-mono"),
+                                  h.Rows(2),
+                                  h.Placeholder('z. B. {"temperature": 0.2, "max_tokens": 64}'),
+                                  h.Spellcheck(false),
+                                  h.Value(model.llmDraftExtraArgs),
+                                  h.OnInput((value) => Message.UpdatedLlmExtraArgs({ value })),
+                                ]),
+                                h.p(
+                                  [h.Class("form-hint")],
+                                  ["Werden als JSON-Objekt an /chat/completions übergeben."],
+                                ),
+                              ],
+                            ),
+                            (() => {
+                              const modelOptions = resolveModelOptions(
+                                model.llmDraftModels,
+                                model.llmDiscoveredModels,
+                                model.llmDraftModel,
+                                model.hasLanguageModel,
+                              )
+                              const availableLevels = parseThinkingLevels(
+                                model.llmDraftThinkingLevels,
+                              )
+                              const selectedModel =
+                                model.llmDraftModel.trim() !== ""
+                                  ? model.llmDraftModel.trim()
+                                  : (modelOptions[0]?.value ?? "")
+                              const hasThinking =
+                                model.llmDraftThinkingParam.trim() !== "" &&
+                                availableLevels.length > 0 &&
+                                !isLanguageModelSelection(selectedModel)
+
+                              return h.div(
+                                [h.Class("form-row")],
+                                [
+                                  h.div(
+                                    [h.Class("form-group")],
+                                    [
+                                      h.label([h.For("llm-active-model")], ["Modell"]),
+                                      h.select(
+                                        [
+                                          h.Id("llm-active-model"),
+                                          h.Class("form-input"),
+                                          h.Disabled(modelOptions.length === 0),
+                                          h.Value(selectedModel),
+                                          h.OnChange((value) =>
+                                            Message.SelectedLlmModel({ value }),
+                                          ),
+                                        ],
+                                        modelOptions.length > 0
+                                          ? modelOptions.map((item) =>
+                                              h.option(
+                                                [
+                                                  h.Value(item.value),
+                                                  h.Selected(selectedModel === item.value),
+                                                ],
+                                                [item.label],
+                                              ),
+                                            )
+                                          : [
+                                              h.option(
+                                                [h.Value(""), h.Selected(true)],
+                                                ["Noch keine Modelle"],
+                                              ),
+                                            ],
+                                      ),
+                                    ],
+                                  ),
+                                  h.div(
+                                    [h.Class("form-group")],
+                                    [
+                                      h.label([h.For("llm-thinking-level")], ["Thinking-Level"]),
+                                      h.select(
+                                        [
+                                          h.Id("llm-thinking-level"),
+                                          h.Class("form-input"),
+                                          h.Disabled(!hasThinking),
+                                          h.Value(hasThinking ? model.llmDraftThinkingLevel : ""),
+                                          h.OnChange((value) =>
+                                            Message.UpdatedLlmThinkingLevel({ value }),
+                                          ),
+                                        ],
+                                        hasThinking
+                                          ? [
+                                              h.option(
+                                                [
+                                                  h.Value(""),
+                                                  h.Selected(model.llmDraftThinkingLevel === ""),
+                                                ],
+                                                ["Standard (nicht gesetzt)"],
+                                              ),
+                                              ...availableLevels.map((item) =>
+                                                h.option(
+                                                  [
+                                                    h.Value(item.value),
+                                                    h.Selected(
+                                                      model.llmDraftThinkingLevel === item.value,
+                                                    ),
+                                                  ],
+                                                  [item.label],
+                                                ),
+                                              ),
+                                            ]
+                                          : [
+                                              h.option(
+                                                [h.Value(""), h.Selected(true)],
+                                                ["Standard"],
+                                              ),
+                                            ],
+                                      ),
+                                    ],
                                   ),
                                 ],
                               )
                             })(),
-                          ],
-                        ),
-                        h.div(
-                          [h.Class("form-group")],
-                          [
-                            h.label([h.For("llm-thinking-param")], ["Thinking-Parameter"]),
-                            h.input([
-                              h.Id("llm-thinking-param"),
-                              h.Class("form-input"),
-                              h.Type("text"),
-                              h.Placeholder(
-                                "z. B. reasoning_effort oder chat_template_kwargs.enable_thinking",
-                              ),
-                              h.Autocomplete("off"),
-                              h.Value(model.llmDraftThinkingParam),
-                              h.OnInput((value) => Message.UpdatedLlmThinkingParam({ value })),
-                            ]),
-                          ],
-                        ),
-                        h.div(
-                          [h.Class("form-group")],
-                          [
-                            h.label(
-                              [h.For("llm-thinking-levels")],
-                              ["Verfügbare Thinking-Level (kommagetrennt)"],
-                            ),
-                            h.input([
-                              h.Id("llm-thinking-levels"),
-                              h.Class("form-input"),
-                              h.Type("text"),
-                              h.Placeholder(
-                                "z. B. Aus=none, Niedrig=low, Hoch=high oder Aus=false, An=true",
-                              ),
-                              h.Autocomplete("off"),
-                              h.Value(model.llmDraftThinkingLevels),
-                              h.OnInput((value) => Message.UpdatedLlmThinkingLevels({ value })),
-                            ]),
-                          ],
-                        ),
-                        h.div(
-                          [h.Class("form-group")],
-                          [
-                            h.label(
-                              [h.For("llm-extra-args")],
-                              ["Zusätzliche Parameter (JSON, optional)"],
-                            ),
-                            h.textarea([
-                              h.Id("llm-extra-args"),
-                              h.Class("form-input form-textarea-mono"),
-                              h.Rows(2),
-                              h.Placeholder('z. B. {"temperature": 0.2, "max_tokens": 64}'),
-                              h.Spellcheck(false),
-                              h.Value(model.llmDraftExtraArgs),
-                              h.OnInput((value) => Message.UpdatedLlmExtraArgs({ value })),
-                            ]),
-                            h.p(
-                              [h.Class("form-hint")],
-                              ["Werden als JSON-Objekt an /chat/completions übergeben."],
-                            ),
-                          ],
-                        ),
-                        (() => {
-                          const modelOptions = resolveModelOptions(
-                            model.llmDraftModels,
-                            model.llmDiscoveredModels,
-                            model.llmDraftModel,
-                            model.hasLanguageModel,
-                          )
-                          const availableLevels = parseThinkingLevels(model.llmDraftThinkingLevels)
-                          const selectedModel =
-                            model.llmDraftModel.trim() !== ""
-                              ? model.llmDraftModel.trim()
-                              : (modelOptions[0]?.value ?? "")
-                          const hasThinking =
-                            model.llmDraftThinkingParam.trim() !== "" &&
-                            availableLevels.length > 0 &&
-                            !isLanguageModelSelection(selectedModel)
-
-                          return h.div(
-                            [h.Class("form-row")],
-                            [
-                              h.div(
-                                [h.Class("form-group")],
-                                [
-                                  h.label([h.For("llm-active-model")], ["Modell"]),
-                                  h.select(
+                            h.div(
+                              [h.Class("settings-group-actions llm-test-actions")],
+                              [
+                                ...(["models", "chat", "tools"] as const).map((mode) => {
+                                  const isRunning = LlmTestState.match(model.llmTestState, {
+                                    Idle: () => false,
+                                    Testing: () => true,
+                                    Streaming: () => true,
+                                    Succeeded: () => false,
+                                    Failed: () => false,
+                                  })
+                                  const label =
+                                    mode === "models"
+                                      ? "Liste testen"
+                                      : mode === "chat"
+                                        ? "Chat testen"
+                                        : "Tools testen"
+                                  const isNativeSelected = isLanguageModelSelection(
+                                    model.llmDraftModel,
+                                  )
+                                  const isDisabled =
+                                    isRunning ||
+                                    (mode === "chat"
+                                      ? model.llmDraftBaseUrl.trim() === "" && !isNativeSelected
+                                      : model.llmDraftBaseUrl.trim() === "" || isNativeSelected)
+                                  return h.button(
                                     [
-                                      h.Id("llm-active-model"),
-                                      h.Class("form-input"),
-                                      h.Disabled(modelOptions.length === 0),
-                                      h.Value(selectedModel),
-                                      h.OnChange((value) => Message.SelectedLlmModel({ value })),
+                                      h.Type("button"),
+                                      h.Id(`btn-test-llm-${mode}`),
+                                      h.Class("btn btn-secondary"),
+                                      h.Disabled(isDisabled),
+                                      h.OnClick(Message.ClickedTestLlm({ mode })),
                                     ],
-                                    modelOptions.length > 0
-                                      ? modelOptions.map((item) =>
-                                          h.option(
-                                            [
-                                              h.Value(item.value),
-                                              h.Selected(selectedModel === item.value),
-                                            ],
-                                            [item.label],
-                                          ),
-                                        )
-                                      : [
-                                          h.option(
-                                            [h.Value(""), h.Selected(true)],
-                                            ["Noch keine Modelle"],
-                                          ),
-                                        ],
-                                  ),
-                                ],
-                              ),
-                              h.div(
-                                [h.Class("form-group")],
-                                [
-                                  h.label([h.For("llm-thinking-level")], ["Thinking-Level"]),
-                                  h.select(
-                                    [
-                                      h.Id("llm-thinking-level"),
-                                      h.Class("form-input"),
-                                      h.Disabled(!hasThinking),
-                                      h.Value(hasThinking ? model.llmDraftThinkingLevel : ""),
-                                      h.OnChange((value) =>
-                                        Message.UpdatedLlmThinkingLevel({ value }),
-                                      ),
-                                    ],
-                                    hasThinking
-                                      ? [
-                                          h.option(
-                                            [
-                                              h.Value(""),
-                                              h.Selected(model.llmDraftThinkingLevel === ""),
-                                            ],
-                                            ["Standard (nicht gesetzt)"],
-                                          ),
-                                          ...availableLevels.map((item) =>
-                                            h.option(
-                                              [
-                                                h.Value(item.value),
-                                                h.Selected(
-                                                  model.llmDraftThinkingLevel === item.value,
-                                                ),
-                                              ],
-                                              [item.label],
-                                            ),
-                                          ),
-                                        ]
-                                      : [h.option([h.Value(""), h.Selected(true)], ["Standard"])],
-                                  ),
-                                ],
-                              ),
-                            ],
-                          )
-                        })(),
-                        h.div(
-                          [h.Class("settings-group-actions llm-test-actions")],
-                          [
-                            ...(["models", "chat", "tools"] as const).map((mode) => {
-                              const isRunning = LlmTestState.match(model.llmTestState, {
-                                Idle: () => false,
-                                Testing: () => true,
-                                Streaming: () => true,
-                                Succeeded: () => false,
-                                Failed: () => false,
-                              })
-                              const label =
-                                mode === "models"
-                                  ? "Liste testen"
-                                  : mode === "chat"
-                                    ? "Chat testen"
-                                    : "Tools testen"
-                              const isNativeSelected = isLanguageModelSelection(model.llmDraftModel)
-                              const isDisabled =
-                                isRunning ||
-                                (mode === "chat"
-                                  ? model.llmDraftBaseUrl.trim() === "" && !isNativeSelected
-                                  : model.llmDraftBaseUrl.trim() === "" || isNativeSelected)
-                              return h.button(
-                                [
-                                  h.Type("button"),
-                                  h.Id(`btn-test-llm-${mode}`),
-                                  h.Class("btn btn-secondary"),
-                                  h.Disabled(isDisabled),
-                                  h.OnClick(Message.ClickedTestLlm({ mode })),
-                                ],
-                                [label],
-                              )
-                            }),
+                                    [label],
+                                  )
+                                }),
+                                LlmTestState.match(model.llmTestState, {
+                                  Idle: () => h.empty,
+                                  Testing: () => h.empty,
+                                  Streaming: () => h.empty,
+                                  Succeeded: () =>
+                                    h.span(
+                                      [
+                                        h.Id("llm-test-status"),
+                                        h.Class("llm-test-status is-ok"),
+                                        h.AriaLabel("OK"),
+                                      ],
+                                      [viewIcon("check", h)],
+                                    ),
+                                  Failed: () =>
+                                    h.span(
+                                      [
+                                        h.Id("llm-test-status"),
+                                        h.Class("llm-test-status is-error"),
+                                        h.AriaLabel("Nicht OK"),
+                                      ],
+                                      [viewIcon("cross", h)],
+                                    ),
+                                }),
+                              ],
+                            ),
                             LlmTestState.match(model.llmTestState, {
                               Idle: () => h.empty,
                               Testing: () => h.empty,
-                              Streaming: () => h.empty,
-                              Succeeded: () =>
-                                h.span(
-                                  [
-                                    h.Id("llm-test-status"),
-                                    h.Class("llm-test-status is-ok"),
-                                    h.AriaLabel("OK"),
-                                  ],
-                                  [viewIcon("check", h)],
+                              Streaming: ({ content, reasoning }) =>
+                                h.div(
+                                  [h.Id("llm-test-result")],
+                                  [LlmResponse.view({ content, reasoning, isStreaming: true }, h)],
                                 ),
-                              Failed: () =>
-                                h.span(
-                                  [
-                                    h.Id("llm-test-status"),
-                                    h.Class("llm-test-status is-error"),
-                                    h.AriaLabel("Nicht OK"),
-                                  ],
-                                  [viewIcon("cross", h)],
+                              Succeeded: ({ content, reasoning, models }) => {
+                                if (content.trim() === "" && reasoning.trim() === "") {
+                                  return h.p(
+                                    [h.Id("llm-test-result"), h.Class("form-hint")],
+                                    [
+                                      models.length > 0
+                                        ? models.join(", ")
+                                        : "Keine Modelle gefunden.",
+                                    ],
+                                  )
+                                }
+                                return h.div(
+                                  [h.Id("llm-test-result")],
+                                  [LlmResponse.view({ content, reasoning, isStreaming: false }, h)],
+                                )
+                              },
+                              Failed: ({ message }) =>
+                                h.p(
+                                  [h.Id("llm-test-result"), h.Class("form-hint is-danger")],
+                                  [message],
                                 ),
                             }),
-                          ],
-                        ),
-                        LlmTestState.match(model.llmTestState, {
-                          Idle: () => h.empty,
-                          Testing: () => h.empty,
-                          Streaming: ({ content, reasoning }) =>
-                            h.div(
-                              [h.Id("llm-test-result")],
-                              [LlmResponse.view({ content, reasoning, isStreaming: true }, h)],
-                            ),
-                          Succeeded: ({ content, reasoning, models }) => {
-                            if (content.trim() === "" && reasoning.trim() === "") {
-                              return h.p(
-                                [h.Id("llm-test-result"), h.Class("form-hint")],
-                                [models.length > 0 ? models.join(", ") : "Keine Modelle gefunden."],
-                              )
-                            }
-                            return h.div(
-                              [h.Id("llm-test-result")],
-                              [LlmResponse.view({ content, reasoning, isStreaming: false }, h)],
-                            )
-                          },
-                          Failed: ({ message }) =>
-                            h.p(
-                              [h.Id("llm-test-result"), h.Class("form-hint is-danger")],
-                              [message],
-                            ),
-                        }),
-                      ]
-                    : []),
+                          ]
+                        : []),
+                    ],
+                  ),
                 ],
               ),
-            ],
-          ),
-          h.footer(
-            [h.Class("modal-footer")],
-            [
-              h.div([h.Class("modal-footer-left")]),
-              h.div(
-                [h.Class("modal-footer-right")],
+              h.footer(
+                [h.Class("modal-footer")],
                 [
-                  h.button(
+                  h.div([h.Class("modal-footer-left")]),
+                  h.div(
+                    [h.Class("modal-footer-right")],
                     [
-                      h.Type("button"),
-                      h.Id("btn-cancel-settings"),
-                      h.Class("btn btn-secondary"),
-                      h.OnClick(Message.ClickedCloseSettingsDialog()),
+                      h.button(
+                        [
+                          h.Type("button"),
+                          h.Id("btn-cancel-settings"),
+                          h.Class("btn btn-secondary"),
+                          h.OnClick(Message.ClickedCloseSettingsDialog()),
+                        ],
+                        ["Abbrechen"],
+                      ),
+                      h.button(
+                        [
+                          h.Type("button"),
+                          h.Id("btn-save-settings"),
+                          h.Class("btn btn-primary"),
+                          h.OnClick(Message.ClickedSaveSettingsDialog()),
+                        ],
+                        ["Speichern"],
+                      ),
                     ],
-                    ["Abbrechen"],
-                  ),
-                  h.button(
-                    [
-                      h.Type("button"),
-                      h.Id("btn-save-settings"),
-                      h.Class("btn btn-primary"),
-                      h.OnClick(Message.ClickedSaveSettingsDialog()),
-                    ],
-                    ["Speichern"],
                   ),
                 ],
               ),
@@ -5539,6 +5556,22 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
           ),
         ],
       ),
+      model.clearAllHistoryState._tag === "Confirming"
+        ? Editor.viewConfirmDeleteDialog(
+            {
+              overlayId: "clear-all-history-confirm",
+              titleId: "clear-all-history-confirm-title",
+              title: "Alle Versionen löschen",
+              prompt: "Alle gespeicherten Versionen aller Dateien löschen?",
+              cancelButtonId: "btn-clear-all-history-cancel",
+              onCancel: Message.ClickedCancelClearAllHistory(),
+              confirmButtonId: "btn-clear-all-history-confirm",
+              confirmLabel: "Endgültig löschen",
+              onConfirm: Message.ClickedConfirmClearAllHistory(),
+            },
+            h,
+          )
+        : h.empty,
     ],
   )
 }

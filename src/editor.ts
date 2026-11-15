@@ -152,6 +152,7 @@ export const HistoryState = defineTaggedUnion({
   Open: {
     entries: Schema.Array(HistoryEntry),
     isConfirmingClear: Schema.Boolean,
+    isConfirmingDeleteLatest: Schema.optionalKey(Schema.Boolean),
     isHistoryEnabled: Schema.Boolean,
     maybePreviewContent: Schema.Option(Schema.String),
   },
@@ -505,8 +506,12 @@ export const closePreview = (model: Model): Model =>
 export const isConfirmingDelete = (model: Model): boolean =>
   Model.match(model, {
     EditFolder: (folder) => folder.isConfirmingDelete,
-    EditFile: (file) => file.isConfirmingDelete,
-    CreateFile: () => false,
+    EditFile: (file) =>
+      file.isConfirmingDelete ||
+      (file.historyState._tag === "Open" &&
+        (file.historyState.isConfirmingClear ||
+          file.historyState.isConfirmingDeleteLatest === true)),
+    CreateFile: (file) => file.isDeletingTemplate,
     CreateFolder: () => false,
     ConfirmOverwrite: () => false,
   })
@@ -514,8 +519,18 @@ export const isConfirmingDelete = (model: Model): boolean =>
 export const cancelDelete = (model: Model): Model =>
   Model.match(model, {
     EditFolder: (folder) => modifyFields(folder, { isConfirmingDelete: () => false }),
-    EditFile: (file) => modifyFields(file, { isConfirmingDelete: () => false }),
-    CreateFile: () => model,
+    EditFile: (file) =>
+      modifyFields(file, {
+        isConfirmingDelete: () => false,
+        historyState: (historyState) =>
+          historyState._tag === "Open"
+            ? modifyFields(historyState, {
+                isConfirmingClear: () => false,
+                isConfirmingDeleteLatest: () => false,
+              })
+            : historyState,
+      }),
+    CreateFile: (file) => modifyFields(file, { isDeletingTemplate: () => false }),
     CreateFolder: () => model,
     ConfirmOverwrite: () => model,
   })
@@ -878,6 +893,8 @@ export const Message = defineMessageUnion({
     message: Schema.String,
   },
   ClickedDeleteLatestHistoryEntry: {},
+  ClickedCancelDeleteLatestHistoryEntry: {},
+  ClickedConfirmDeleteLatestHistoryEntry: {},
   SucceededDeleteLatestHistoryEntry: {},
   FailedDeleteLatestHistoryEntry: {
     message: Schema.String,
@@ -3447,6 +3464,46 @@ export const update = (
     },
 
     ClickedDeleteLatestHistoryEntry: () => {
+      if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const openState = model.historyState
+      return {
+        model: modifyFields(model, {
+          historyState: () =>
+            HistoryState.Open({
+              entries: openState.entries,
+              isConfirmingClear: openState.isConfirmingClear,
+              isConfirmingDeleteLatest: true,
+              isHistoryEnabled: openState.isHistoryEnabled,
+              maybePreviewContent: openState.maybePreviewContent,
+            }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedCancelDeleteLatestHistoryEntry: () => {
+      if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      const openState = model.historyState
+      return {
+        model: modifyFields(model, {
+          historyState: () =>
+            HistoryState.Open({
+              entries: openState.entries,
+              isConfirmingClear: openState.isConfirmingClear,
+              isConfirmingDeleteLatest: false,
+              isHistoryEnabled: openState.isHistoryEnabled,
+              maybePreviewContent: openState.maybePreviewContent,
+            }),
+        }),
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    ClickedConfirmDeleteLatestHistoryEntry: () => {
       if (model._tag !== "EditFile") {
         return { model, outMessage: OutMessage.None() }
       }
@@ -3475,6 +3532,7 @@ export const update = (
             HistoryState.Open({
               entries: nextEntries,
               isConfirmingClear: false,
+              isConfirmingDeleteLatest: false,
               isHistoryEnabled: openState.isHistoryEnabled,
               maybePreviewContent: Option.none(),
             }),
@@ -3509,10 +3567,6 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
     (t) => t.id === state.selectedTemplateId,
   )
   const isCustomSelected = Option.isSome(selectedTemplate)
-  const selectedTemplateLabel = Option.match(selectedTemplate, {
-    onNone: () => "Vorlage",
-    onSome: (t) => t.label,
-  })
 
   return h.div(
     [h.Class("form-group")],
@@ -3631,51 +3685,6 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
                     [viewIcon("save", h)],
                   ),
                   h.span([h.Class("icon-label-btn-text")], ["Speichern"]),
-                ],
-              ),
-            ],
-          )
-        : h.empty,
-      state.isDeletingTemplate
-        ? h.div(
-            [h.Id("modal-delete-template-box"), h.Class("template-save-row")],
-            [
-              h.span(
-                [h.Class("template-delete-prompt")],
-                [`Vorlage „${selectedTemplateLabel}“ wirklich löschen?`],
-              ),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Id("modal-btn-cancel-delete-template"),
-                  h.Class("btn btn-secondary icon-label-btn"),
-                  h.AriaLabel("Abbrechen"),
-                  h.DataAttribute("tip", "Abbrechen"),
-                  h.OnClick(Message.ClickedCancelDeleteTemplate()),
-                ],
-                [
-                  h.span(
-                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                    [viewIcon("close", h)],
-                  ),
-                  h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
-                ],
-              ),
-              h.button(
-                [
-                  h.Type("button"),
-                  h.Id("modal-btn-confirm-delete-template"),
-                  h.Class("btn btn-danger icon-label-btn"),
-                  h.AriaLabel("Löschen"),
-                  h.DataAttribute("tip", "Löschen"),
-                  h.OnClick(Message.ClickedConfirmDeleteTemplate()),
-                ],
-                [
-                  h.span(
-                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                    [viewIcon("trash", h)],
-                  ),
-                  h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
                 ],
               ),
             ],
@@ -4522,19 +4531,37 @@ const viewEditorModal = (
   )
 }
 
-const viewConfirmDeleteModal = (
-  entryName: string,
-  entryKind: FileEntryKind,
-  h: Html.HtmlBuilder<Message>,
-): Html.Html => {
-  const isFolder = entryKind === "directory"
-  const noun = isFolder ? "den Ordner" : "die Datei"
-  return h.div(
+export const viewConfirmDeleteDialog = <Msg>(
+  {
+    overlayId,
+    titleId,
+    title,
+    prompt,
+    cancelButtonId,
+    onCancel,
+    confirmButtonId,
+    confirmLabel,
+    onConfirm,
+  }: {
+    readonly overlayId?: string
+    readonly titleId: string
+    readonly title: string
+    readonly prompt: string
+    readonly cancelButtonId?: string
+    readonly onCancel: Msg
+    readonly confirmButtonId?: string
+    readonly confirmLabel: string
+    readonly onConfirm: Msg
+  },
+  h: Html.HtmlBuilder<Msg>,
+): Html.Html =>
+  h.div(
     [
+      ...(overlayId ? [h.Id(overlayId)] : []),
       h.Class("modal-overlay"),
       h.Role("dialog"),
       h.AriaModal(true),
-      h.AriaLabelledBy("modal-confirm-delete-title"),
+      h.AriaLabelledBy(titleId),
     ],
     [
       h.div(
@@ -4543,34 +4570,19 @@ const viewConfirmDeleteModal = (
           h.header(
             [h.Class("modal-header")],
             [
-              h.h3(
-                [h.Id("modal-confirm-delete-title"), h.Class("modal-title")],
-                ["Eintrag löschen"],
-              ),
+              h.h3([h.Id(titleId), h.Class("modal-title")], [title]),
               h.button(
                 [
                   h.Type("button"),
                   h.Class("modal-close-btn"),
                   h.AriaLabel("Schließen"),
-                  h.OnClick(Message.ClickedCancelDelete()),
+                  h.OnClick(onCancel),
                 ],
                 [viewIcon("close", h)],
               ),
             ],
           ),
-          h.div(
-            [h.Class("modal-body")],
-            [
-              h.p(
-                [],
-                [
-                  isFolder
-                    ? `Möchten Sie ${noun} „${entryName}“ und dessen gesamten Inhalt wirklich unwiderruflich löschen?`
-                    : `Möchten Sie ${noun} „${entryName}“ wirklich unwiderruflich löschen?`,
-                ],
-              ),
-            ],
-          ),
+          h.div([h.Class("modal-body")], [h.p([], [prompt])]),
           h.footer(
             [h.Class("modal-footer")],
             [
@@ -4580,20 +4592,21 @@ const viewConfirmDeleteModal = (
                 [
                   h.button(
                     [
+                      ...(cancelButtonId ? [h.Id(cancelButtonId)] : []),
                       h.Type("button"),
-                      h.Id("modal-btn-cancel-delete"),
                       h.Class("btn btn-secondary"),
-                      h.OnClick(Message.ClickedCancelDelete()),
+                      h.OnClick(onCancel),
                     ],
                     ["Abbrechen"],
                   ),
                   h.button(
                     [
+                      ...(confirmButtonId ? [h.Id(confirmButtonId)] : []),
                       h.Type("button"),
                       h.Class("btn btn-danger"),
-                      h.OnClick(Message.ClickedConfirmDelete()),
+                      h.OnClick(onConfirm),
                     ],
-                    ["Löschen"],
+                    [confirmLabel],
                   ),
                 ],
               ),
@@ -4602,6 +4615,28 @@ const viewConfirmDeleteModal = (
         ],
       ),
     ],
+  )
+
+const viewConfirmDeleteModal = (
+  entryName: string,
+  entryKind: FileEntryKind,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html => {
+  const isFolder = entryKind === "directory"
+  const noun = isFolder ? "den Ordner" : "die Datei"
+  return viewConfirmDeleteDialog(
+    {
+      titleId: "modal-confirm-delete-title",
+      title: "Eintrag löschen",
+      prompt: isFolder
+        ? `Möchten Sie ${noun} „${entryName}“ und dessen gesamten Inhalt wirklich unwiderruflich löschen?`
+        : `Möchten Sie ${noun} „${entryName}“ wirklich unwiderruflich löschen?`,
+      cancelButtonId: "modal-btn-cancel-delete",
+      onCancel: Message.ClickedCancelDelete(),
+      confirmLabel: "Löschen",
+      onConfirm: Message.ClickedConfirmDelete(),
+    },
+    h,
   )
 }
 
@@ -4785,7 +4820,7 @@ const viewHistoryOverlay = (
               HistoryState.match(historyState, {
                 Closed: () => h.empty,
                 Loading: () => h.p([h.Class("editor-history-empty")], ["Verlauf wird geladen..."]),
-                Open: ({ entries, isConfirmingClear }) =>
+                Open: ({ entries, isConfirmingClear, isConfirmingDeleteLatest }) =>
                   Array.match(entries, {
                     onEmpty: () =>
                       h.p(
@@ -4796,72 +4831,74 @@ const viewHistoryOverlay = (
                       h.div(
                         [h.Class("editor-history-content")],
                         [
-                          isConfirmingClear
-                            ? h.div(
+                          h.div(
+                            [h.Class("editor-history-toolbar")],
+                            [
+                              h.button(
                                 [
-                                  h.Id("editor-history-clear-confirm"),
-                                  h.Class("template-save-row"),
+                                  h.Type("button"),
+                                  h.Id("editor-history-delete-latest-btn"),
+                                  h.Class("btn btn-secondary icon-label-btn"),
+                                  h.OnClick(Message.ClickedDeleteLatestHistoryEntry()),
                                 ],
                                 [
                                   h.span(
-                                    [h.Class("template-delete-prompt")],
-                                    ["Gesamten Verlauf wirklich löschen?"],
+                                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                    [viewIcon("trash", h)],
                                   ),
-                                  h.button(
-                                    [
-                                      h.Type("button"),
-                                      h.Id("editor-history-clear-cancel"),
-                                      h.Class("btn btn-secondary"),
-                                      h.OnClick(Message.ClickedCancelClearHistory()),
-                                    ],
-                                    ["Abbrechen"],
-                                  ),
-                                  h.button(
-                                    [
-                                      h.Type("button"),
-                                      h.Id("editor-history-clear-confirm-btn"),
-                                      h.Class("btn btn-danger"),
-                                      h.OnClick(Message.ClickedConfirmClearHistory()),
-                                    ],
-                                    ["Endgültig löschen"],
-                                  ),
-                                ],
-                              )
-                            : h.div(
-                                [h.Class("editor-history-toolbar")],
-                                [
-                                  h.button(
-                                    [
-                                      h.Type("button"),
-                                      h.Id("editor-history-delete-latest-btn"),
-                                      h.Class("btn btn-secondary icon-label-btn"),
-                                      h.OnClick(Message.ClickedDeleteLatestHistoryEntry()),
-                                    ],
-                                    [
-                                      h.span(
-                                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                        [viewIcon("trash", h)],
-                                      ),
-                                      h.span([h.Class("icon-label-btn-text")], ["Neueste löschen"]),
-                                    ],
-                                  ),
-                                  h.button(
-                                    [
-                                      h.Type("button"),
-                                      h.Id("editor-history-clear-btn"),
-                                      h.Class("btn btn-danger icon-label-btn"),
-                                      h.OnClick(Message.ClickedRequestClearHistory()),
-                                    ],
-                                    [
-                                      h.span(
-                                        [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
-                                        [viewIcon("trash", h)],
-                                      ),
-                                      h.span([h.Class("icon-label-btn-text")], ["Verlauf löschen"]),
-                                    ],
-                                  ),
+                                  h.span([h.Class("icon-label-btn-text")], ["Neueste löschen"]),
                                 ],
                               ),
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("editor-history-clear-btn"),
+                                  h.Class("btn btn-danger icon-label-btn"),
+                                  h.OnClick(Message.ClickedRequestClearHistory()),
+                                ],
+                                [
+                                  h.span(
+                                    [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
+                                    [viewIcon("trash", h)],
+                                  ),
+                                  h.span([h.Class("icon-label-btn-text")], ["Verlauf löschen"]),
+                                ],
+                              ),
+                            ],
+                          ),
+                          isConfirmingDeleteLatest === true
+                            ? viewConfirmDeleteDialog(
+                                {
+                                  overlayId: "editor-history-delete-latest-confirm",
+                                  titleId: "editor-history-delete-latest-title",
+                                  title: "Neueste Version löschen",
+                                  prompt:
+                                    "Neueste gespeicherte Version wirklich unwiderruflich löschen?",
+                                  cancelButtonId: "editor-history-delete-latest-cancel",
+                                  onCancel: Message.ClickedCancelDeleteLatestHistoryEntry(),
+                                  confirmButtonId: "editor-history-delete-latest-confirm-btn",
+                                  confirmLabel: "Löschen",
+                                  onConfirm: Message.ClickedConfirmDeleteLatestHistoryEntry(),
+                                },
+                                h,
+                              )
+                            : h.empty,
+                          isConfirmingClear
+                            ? viewConfirmDeleteDialog(
+                                {
+                                  overlayId: "editor-history-clear-confirm",
+                                  titleId: "editor-history-clear-title",
+                                  title: "Verlauf löschen",
+                                  prompt: "Gesamten Verlauf wirklich löschen?",
+                                  cancelButtonId: "editor-history-clear-cancel",
+                                  onCancel: Message.ClickedCancelClearHistory(),
+                                  confirmButtonId: "editor-history-clear-confirm-btn",
+                                  confirmLabel: "Endgültig löschen",
+                                  onConfirm: Message.ClickedConfirmClearHistory(),
+                                },
+                                h,
+                              )
+                            : h.empty,
                           h.ul(
                             [h.Class("editor-history-list")],
                             Array.map(nonEmptyEntries, (entry) => {
@@ -4987,6 +5024,29 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               h,
             ),
             state.isPreviewOpen ? viewPreviewOverlay(state.content, h) : h.empty,
+            state.isDeletingTemplate
+              ? viewConfirmDeleteDialog(
+                  {
+                    overlayId: "modal-delete-template-box",
+                    titleId: "modal-delete-template-title",
+                    title: "Vorlage löschen",
+                    prompt: `Vorlage „${pipe(
+                      state.userTemplates,
+                      Array.findFirst((t) => t.id === state.selectedTemplateId),
+                      Option.match({
+                        onNone: () => "",
+                        onSome: (t) => t.label,
+                      }),
+                    )}“ wirklich löschen?`,
+                    cancelButtonId: "modal-btn-cancel-delete-template",
+                    onCancel: Message.ClickedCancelDeleteTemplate(),
+                    confirmButtonId: "modal-btn-confirm-delete-template",
+                    confirmLabel: "Löschen",
+                    onConfirm: Message.ClickedConfirmDeleteTemplate(),
+                  },
+                  h,
+                )
+              : h.empty,
           ],
         ),
 
