@@ -1060,7 +1060,12 @@ code {
   resize: none;
 }
 
-.modal-close-btn:hover {
+.modal-close-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.modal-close-btn:hover:not(:disabled) {
   background: var(--social-bg);
   color: var(--text-h);
 }

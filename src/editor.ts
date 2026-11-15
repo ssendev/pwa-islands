@@ -4362,6 +4362,21 @@ const viewEditorModal = (
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const saveLabel = isEditingExisting ? "Speichern" : "Erstellen"
+  const undoInTitlebar = llmViewInputs.monacoSettings.undoInTitlebar
+  const showStepButtons = historyControls !== undefined && historyControls.showStepButtons
+  const viewStepButton = (kind: "undo" | "redo", className: string, canStep: boolean): Html.Html =>
+    h.button(
+      [
+        h.Type("button"),
+        h.Id(kind === "undo" ? "modal-btn-undo" : "modal-btn-redo"),
+        h.Class(className),
+        h.AriaLabel(kind === "undo" ? "Rückgängig" : "Wiederholen"),
+        h.Title(kind === "undo" ? "Rückgängig (Strg+Z)" : "Wiederholen (Strg+Y)"),
+        h.Disabled(!canStep),
+        h.OnClick(kind === "undo" ? Message.ClickedUndo() : Message.ClickedRedo()),
+      ],
+      [viewIcon(kind, h)],
+    )
   const effectiveLlmBarMode: LlmBarMode =
     !isTextFile || (llmBarMode === "Chat" && !llmViewInputs.llmEnabled) ? "Closed" : llmBarMode
   const llmBarModeOptions: ReadonlyArray<{
@@ -4418,6 +4433,20 @@ const viewEditorModal = (
               h.div(
                 [h.Class("modal-header-actions")],
                 [
+                  ...(showStepButtons && undoInTitlebar && historyControls !== undefined
+                    ? [
+                        viewStepButton(
+                          "undo",
+                          "modal-close-btn modal-header-btn",
+                          historyControls.canUndo,
+                        ),
+                        viewStepButton(
+                          "redo",
+                          "modal-close-btn modal-header-btn",
+                          historyControls.canRedo,
+                        ),
+                      ]
+                    : []),
                   !isFolder
                     ? h.button(
                         [
@@ -4583,18 +4612,11 @@ const viewEditorModal = (
                         h.div(
                           [h.Class("editor-history-nav"), h.Role("group"), h.AriaLabel("Verlauf")],
                           [
-                            historyControls.showStepButtons
-                              ? h.button(
-                                  [
-                                    h.Type("button"),
-                                    h.Id("modal-btn-undo"),
-                                    h.Class("btn btn-secondary btn-icon"),
-                                    h.AriaLabel("Rückgängig"),
-                                    h.Title("Rückgängig (Strg+Z)"),
-                                    h.Disabled(!historyControls.canUndo),
-                                    h.OnClick(Message.ClickedUndo()),
-                                  ],
-                                  [viewIcon("undo", h)],
+                            showStepButtons && !undoInTitlebar
+                              ? viewStepButton(
+                                  "undo",
+                                  "btn btn-secondary btn-icon",
+                                  historyControls.canUndo,
                                 )
                               : h.empty,
                             h.button(
@@ -4608,18 +4630,11 @@ const viewEditorModal = (
                               ],
                               [viewIcon("history", h)],
                             ),
-                            historyControls.showStepButtons
-                              ? h.button(
-                                  [
-                                    h.Type("button"),
-                                    h.Id("modal-btn-redo"),
-                                    h.Class("btn btn-secondary btn-icon"),
-                                    h.AriaLabel("Wiederholen"),
-                                    h.Title("Wiederholen (Strg+Y)"),
-                                    h.Disabled(!historyControls.canRedo),
-                                    h.OnClick(Message.ClickedRedo()),
-                                  ],
-                                  [viewIcon("redo", h)],
+                            showStepButtons && !undoInTitlebar
+                              ? viewStepButton(
+                                  "redo",
+                                  "btn btn-secondary btn-icon",
+                                  historyControls.canRedo,
                                 )
                               : h.empty,
                           ],

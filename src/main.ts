@@ -402,6 +402,7 @@ export const Model = Schema.Struct({
   editorTheme: MonacoThemeSchema,
   editorLineDecorationsWidth: Schema.Number,
   editorLineNumbersMinChars: Schema.Number,
+  editorUndoInTitlebar: Schema.Boolean,
   clearAllHistoryState: ClearAllHistoryState,
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
@@ -574,6 +575,7 @@ export const Message = defineMessageUnion({
   SelectedSettingsEditorTheme: { theme: MonacoThemeSchema },
   UpdatedSettingsEditorLineDecorationsWidth: { value: Schema.Number },
   UpdatedSettingsEditorLineNumbersMinChars: { value: Schema.Number },
+  ToggledSettingsEditorUndoInTitlebar: { isEnabled: Schema.Boolean },
   CompletedSaveMonacoSettings: {},
   SelectedSettingsAppTheme: { theme: AppThemeSchema },
   CompletedSaveAppTheme: {},
@@ -1035,6 +1037,7 @@ export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
     theme: MonacoThemeSchema,
     lineDecorationsWidth: Schema.Number,
     lineNumbersMinChars: Schema.Number,
+    undoInTitlebar: Schema.Boolean,
   },
   messages: [Message.CompletedSaveMonacoSettings],
   execute: (args) =>
@@ -1048,6 +1051,7 @@ export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
           theme: args.theme,
           lineDecorationsWidth: args.lineDecorationsWidth,
           lineNumbersMinChars: args.lineNumbersMinChars,
+          undoInTitlebar: args.undoInTitlebar,
         }),
       catch: () => new Error("Failed to save monaco settings"),
     }).pipe(
@@ -2095,6 +2099,7 @@ export const init = (
         editorTheme: defaultMonacoSettings.theme,
         editorLineDecorationsWidth: defaultMonacoSettings.lineDecorationsWidth,
         editorLineNumbersMinChars: defaultMonacoSettings.lineNumbersMinChars,
+        editorUndoInTitlebar: defaultMonacoSettings.undoInTitlebar,
         clearAllHistoryState: ClearAllHistoryState.Idle(),
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -2178,6 +2183,7 @@ export const init = (
       editorTheme: defaultMonacoSettings.theme,
       editorLineDecorationsWidth: defaultMonacoSettings.lineDecorationsWidth,
       editorLineNumbersMinChars: defaultMonacoSettings.lineNumbersMinChars,
+      editorUndoInTitlebar: defaultMonacoSettings.undoInTitlebar,
       clearAllHistoryState: ClearAllHistoryState.Idle(),
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -2297,6 +2303,7 @@ const saveMonacoSettingsCommand = (model: Model) =>
     theme: model.editorTheme,
     lineDecorationsWidth: model.editorLineDecorationsWidth,
     lineNumbersMinChars: model.editorLineNumbersMinChars,
+    undoInTitlebar: model.editorUndoInTitlebar,
   })
 
 const parseRangeNumber = (raw: string, fallback: number, min: number, max: number): number => {
@@ -3425,6 +3432,16 @@ export const update = (
       }
     },
 
+    ToggledSettingsEditorUndoInTitlebar: ({ isEnabled }) => {
+      const nextModel = modifyFields(model, {
+        editorUndoInTitlebar: () => isEnabled,
+      })
+      return {
+        model: nextModel,
+        commands: [saveMonacoSettingsCommand(nextModel)],
+      }
+    },
+
     CompletedSaveMonacoSettings: () => ({
       model,
     }),
@@ -4057,6 +4074,7 @@ export const update = (
             monacoSettings?.lineDecorationsWidth ?? model.editorLineDecorationsWidth,
           editorLineNumbersMinChars: () =>
             monacoSettings?.lineNumbersMinChars ?? model.editorLineNumbersMinChars,
+          editorUndoInTitlebar: () => monacoSettings?.undoInTitlebar ?? model.editorUndoInTitlebar,
           llmModel: (current) => (current === "" ? llmModel : current),
           llmDraftModel: (current) => (current === "" ? llmModel : current),
           llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
@@ -5977,6 +5995,27 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         [h.Class("form-group")],
                         [
                           h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-editor-undo-in-titlebar"),
+                                h.Checked(model.editorUndoInTitlebar),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsEditorUndoInTitlebar({
+                                    isEnabled: !model.editorUndoInTitlebar,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Rückgängig in Titelbar"]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
                             [h.For("settings-editor-line-decorations-width")],
                             ["Dekorationsbreite"],
                           ),
@@ -7230,6 +7269,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
           theme: model.editorTheme,
           lineDecorationsWidth: model.editorLineDecorationsWidth,
           lineNumbersMinChars: model.editorLineNumbersMinChars,
+          undoInTitlebar: model.editorUndoInTitlebar,
         },
         appTheme: model.appTheme,
       },

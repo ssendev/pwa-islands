@@ -156,6 +156,7 @@ const readyModel: Model = {
   editorTheme: "system",
   editorLineDecorationsWidth: 10,
   editorLineNumbersMinChars: 5,
+  editorUndoInTitlebar: false,
   clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),

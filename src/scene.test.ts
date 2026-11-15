@@ -143,6 +143,7 @@ const readyModel: Model = {
   editorTheme: "system",
   editorLineDecorationsWidth: 10,
   editorLineNumbersMinChars: 5,
+  editorUndoInTitlebar: false,
   clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
@@ -2249,6 +2250,7 @@ describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
           theme: "system",
           lineDecorationsWidth: 10,
           lineNumbersMinChars: 5,
+          undoInTitlebar: false,
         }),
       ),
       Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
@@ -2272,6 +2274,7 @@ describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
           theme: "vs-dark",
           lineDecorationsWidth: 10,
           lineNumbersMinChars: 5,
+          undoInTitlebar: false,
         }),
       ),
       Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
@@ -2287,6 +2290,7 @@ describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
           theme: "vs-dark",
           lineDecorationsWidth: 0,
           lineNumbersMinChars: 5,
+          undoInTitlebar: false,
         }),
       ),
       Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
@@ -2304,12 +2308,61 @@ describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
           theme: "vs-dark",
           lineDecorationsWidth: 0,
           lineNumbersMinChars: 3,
+          undoInTitlebar: false,
         }),
       ),
       Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
       sceneExpect(selector("#settings-editor-line-numbers-min-chars-value")).toHaveText(
         "3 Zeichen",
       ),
+    )
+  })
+
+  it("verschiebt Rückgängig und Wiederholen bei aktivierter Titelbar-Einstellung nach oben statt unten", () => {
+    const modelWithEditFile: Model = {
+      ...readyModel,
+      editorUndoInTitlebar: false,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "index.html",
+          name: "index.html",
+          fileMode: EditorFileMode.Text({ content: "<h1>Hallo</h1>" }),
+          maybeValidationError: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          isLlmModeMenuOpen: false,
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: 62,
+          editorSplitDrag: Option.none(),
+          canUndo: true,
+          canRedo: true,
+          historyState: Editor.HistoryState.Closed(),
+          isHistoryEnabled: true,
+          hasHistoryEntries: true,
+          isConfirmingDelete: false,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(modelWithEditFile),
+      sceneExpect(selector(".modal-footer .editor-history-nav #modal-btn-undo")).toExist(),
+      sceneExpect(selector(".modal-footer .editor-history-nav #modal-btn-redo")).toExist(),
+      sceneExpect(selector(".modal-header-actions #modal-btn-undo")).toBeAbsent(),
+      sceneExpect(selector(".modal-header-actions #modal-btn-redo")).toBeAbsent(),
+      given({ ...modelWithEditFile, editorUndoInTitlebar: true }),
+      sceneExpect(selector(".modal-header-actions #modal-btn-undo")).toExist(),
+      sceneExpect(selector(".modal-header-actions #modal-btn-redo")).toExist(),
+      sceneExpect(selector(".modal-footer .editor-history-nav #modal-btn-undo")).toBeAbsent(),
+      sceneExpect(selector(".modal-footer .editor-history-nav #modal-btn-redo")).toBeAbsent(),
+      sceneExpect(selector(".modal-footer .editor-history-nav #modal-btn-history")).toExist(),
     )
   })
 

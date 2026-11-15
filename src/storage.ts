@@ -492,6 +492,7 @@ export const MonacoSettingsSchema = Schema.Struct({
   theme: MonacoThemeSchema,
   lineDecorationsWidth: Schema.Number,
   lineNumbersMinChars: Schema.Number,
+  undoInTitlebar: Schema.Boolean,
 })
 export type MonacoSettings = typeof MonacoSettingsSchema.Type
 
@@ -499,10 +500,11 @@ export const defaultMonacoSettings: MonacoSettings = {
   lineNumbers: true,
   folding: true,
   wordWrap: true,
-  scrollBeyondLastLine: false,
+  scrollBeyondLastLine: true,
   theme: "system",
   lineDecorationsWidth: 10,
   lineNumbersMinChars: 5,
+  undoInTitlebar: false,
 }
 
 const clampInt = (value: number, min: number, max: number): number =>
@@ -558,6 +560,10 @@ export async function getStoredMonacoSettings(): Promise<MonacoSettings> {
           Number.isFinite(record.lineNumbersMinChars)
             ? clampInt(record.lineNumbersMinChars, 0, 10)
             : defaultMonacoSettings.lineNumbersMinChars
+        const undoInTitlebar =
+          "undoInTitlebar" in record && typeof record.undoInTitlebar === "boolean"
+            ? record.undoInTitlebar
+            : defaultMonacoSettings.undoInTitlebar
         resolve({
           lineNumbers,
           folding,
@@ -566,6 +572,7 @@ export async function getStoredMonacoSettings(): Promise<MonacoSettings> {
           theme,
           lineDecorationsWidth,
           lineNumbersMinChars,
+          undoInTitlebar,
         })
       }
       req.onerror = () => reject(req.error)
