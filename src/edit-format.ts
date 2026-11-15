@@ -9,6 +9,7 @@ import {
   formatHashlineSystemPrompt,
   formatLlmContext as formatHashlineContext,
   formatUpdatedHashlines,
+  hashLine,
 } from "./hashline"
 
 export const EditFormat = Schema.Literals(["hashline", "search-replace", "unified-diff"])
@@ -120,8 +121,16 @@ const UNIFIED_DIFF_INSTRUCTIONS = [
   "```",
 ]
 
-export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = true): string =>
-  Match.value(format).pipe(
+const ADDITIONAL_TOOLS_INSTRUCTIONS = [
+  "",
+  "Weitere verfügbare Werkzeuge:",
+  "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after` für Kontextzeilen vor/nach Treffern).",
+  "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (`startLine`, `endLine`).",
+  "- `write`: Schreibt die gesamte aktuelle Datei komplett neu (`content`) – nur verwenden, wenn umfangreiche Änderungen nötig sind.",
+]
+
+export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = true): string => {
+  const basePrompt = Match.value(format).pipe(
     Match.when("hashline", () => formatHashlineSystemPrompt(useToolCalls)),
     Match.when("search-replace", () =>
       [
@@ -147,6 +156,8 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
     ),
     Match.exhaustive,
   )
+  return useToolCalls ? [basePrompt, ...ADDITIONAL_TOOLS_INSTRUCTIONS].join("\n") : basePrompt
+}
 
 export const formatLlmContextForFormat = (
   format: EditFormat,
@@ -230,6 +241,331 @@ export const getEditorEditToolForFormat = (format: EditFormat) => {
       },
     },
   } as const
+}
+
+export const EDITOR_READ_TOOL = {
+  type: "function",
+  function: {
+    name: "read",
+    description:
+      "Liest den Inhalt der aktuell geöffneten Datei oder einen angegebenen Zeilenbereich.",
+    parameters: {
+      type: "object",
+      properties: {
+        startLine: {
+          type: "integer",
+          description: "Optionale 1-basierte Startzeile (Standard: 1).",
+        },
+        endLine: {
+          type: "integer",
+          description: "Optionale 1-basierte Endzeile (Standard: bis Dateiende).",
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+} as const
+
+export const EDITOR_SEARCH_TOOL = {
+  type: "function",
+  function: {
+    name: "search",
+    description:
+      "Durchsucht die aktuell geöffnete Datei zeilenweise nach einem Suchbegriff oder regulären Ausdruck.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Der Suchbegriff oder reguläre Ausdruck.",
+        },
+        isRegex: {
+          type: "boolean",
+          description:
+            "Wenn true, wird query als regulärer Ausdruck interpretiert (Standard: false).",
+        },
+        caseSensitive: {
+          type: "boolean",
+          description: "Wenn true, wird Groß-/Kleinschreibung beachtet (Standard: false).",
+        },
+        before: {
+          type: "integer",
+          description: "Optionale Anzahl an Kontextzeilen vor jedem Treffer (Standard: 0).",
+        },
+        after: {
+          type: "integer",
+          description: "Optionale Anzahl an Kontextzeilen nach jedem Treffer (Standard: 0).",
+        },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    },
+  },
+} as const
+
+export const EDITOR_WRITE_TOOL = {
+  type: "function",
+  function: {
+    name: "write",
+    description:
+      "Schreibt die aktuell geöffnete Datei komplett neu. Nur verwenden, wenn ein vollständiges Neuschreiben sinnvoller ist als gezielte Edits.",
+    parameters: {
+      type: "object",
+      properties: {
+        content: {
+          type: "string",
+          description: "Der vollständige neue Inhalt der Datei.",
+        },
+      },
+      required: ["content"],
+      additionalProperties: false,
+    },
+  },
+} as const
+
+export const getEditorToolsForFormat = (format: EditFormat) =>
+  [
+    getEditorEditToolForFormat(format),
+    EDITOR_READ_TOOL,
+    EDITOR_SEARCH_TOOL,
+    EDITOR_WRITE_TOOL,
+  ] as const
+
+export const EditorToolTextResult = defineTaggedUnion({
+  Ok: {
+    text: Schema.String,
+  },
+  Error: {
+    message: Schema.String,
+  },
+})
+export type EditorToolTextResult = typeof EditorToolTextResult.Type
+
+export const EditorWriteToolResult = defineTaggedUnion({
+  Ok: {
+    content: Schema.String,
+    message: Schema.String,
+  },
+  Error: {
+    message: Schema.String,
+  },
+})
+export type EditorWriteToolResult = typeof EditorWriteToolResult.Type
+
+const MAX_READ_LINES = 400
+const MAX_SEARCH_MATCHES = 50
+
+const parseToolJsonObject = (rawArgs: string): Record<string, unknown> => {
+  const trimmed = rawArgs.trim()
+  if (trimmed === "") {
+    return {}
+  }
+  const parsed: unknown = JSON.parse(trimmed)
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Werkzeug-Argumente müssen ein JSON-Objekt sein.")
+  }
+  return parsed as Record<string, unknown>
+}
+
+const formatNumberedLine = (format: EditFormat, lineNumber: number, line: string): string =>
+  format === "hashline" ? `${lineNumber}:${hashLine(line)}|${line}` : `${lineNumber}: ${line}`
+
+export const executeReadTool = (
+  format: EditFormat,
+  fileName: string,
+  content: string,
+  rawArgs: string,
+): EditorToolTextResult => {
+  let args: Record<string, unknown>
+  try {
+    args = parseToolJsonObject(rawArgs)
+  } catch (err) {
+    return EditorToolTextResult.Error({
+      message: err instanceof Error ? err.message : "Ungültige JSON-Argumente.",
+    })
+  }
+
+  const lines = content.replace(/\r\n/g, "\n").split("\n")
+  const totalLines = lines.length
+
+  const rawStart = args.startLine
+  if (rawStart !== undefined && (typeof rawStart !== "number" || !Number.isFinite(rawStart))) {
+    return EditorToolTextResult.Error({ message: 'Parameter "startLine" muss eine Zahl sein.' })
+  }
+  const rawEnd = args.endLine
+  if (rawEnd !== undefined && (typeof rawEnd !== "number" || !Number.isFinite(rawEnd))) {
+    return EditorToolTextResult.Error({ message: 'Parameter "endLine" muss eine Zahl sein.' })
+  }
+
+  const start = rawStart !== undefined ? Math.max(1, Math.floor(rawStart)) : 1
+  if (start > totalLines) {
+    return EditorToolTextResult.Error({
+      message: `Startzeile ${start} liegt hinter dem Dateiende (${totalLines} Zeilen).`,
+    })
+  }
+
+  const end =
+    rawEnd !== undefined
+      ? Math.min(totalLines, Math.floor(rawEnd))
+      : Math.min(totalLines, start + MAX_READ_LINES - 1)
+  if (end < start) {
+    return EditorToolTextResult.Error({
+      message: `Endzeile (${end}) darf nicht vor der Startzeile (${start}) liegen.`,
+    })
+  }
+
+  const slice = lines.slice(start - 1, end)
+  const formatted = Array.map(slice, (line, idx) =>
+    formatNumberedLine(format, start + idx, line),
+  ).join("\n")
+  const continuationHint =
+    rawEnd === undefined && end < totalLines
+      ? `\n\n(Weitere Zeilen vorhanden – nutze \`read\` mit \`startLine: ${end + 1}\`.)`
+      : ""
+
+  return EditorToolTextResult.Ok({
+    text:
+      [
+        `Datei \`${fileName}\` (Zeilen ${start}–${end} von ${totalLines}):`,
+        "",
+        "```",
+        formatted,
+        "```",
+      ].join("\n") + continuationHint,
+  })
+}
+
+export const executeSearchTool = (
+  format: EditFormat,
+  fileName: string,
+  content: string,
+  rawArgs: string,
+): EditorToolTextResult => {
+  let args: Record<string, unknown>
+  try {
+    args = parseToolJsonObject(rawArgs)
+  } catch (err) {
+    return EditorToolTextResult.Error({
+      message: err instanceof Error ? err.message : "Ungültige JSON-Argumente.",
+    })
+  }
+
+  const query = args.query
+  if (typeof query !== "string" || query === "") {
+    return EditorToolTextResult.Error({ message: 'Suchbegriff ("query") darf nicht leer sein.' })
+  }
+  const isRegex = args.isRegex === true
+  const caseSensitive = args.caseSensitive === true
+  const rawBefore = args.before
+  if (
+    rawBefore !== undefined &&
+    (typeof rawBefore !== "number" || !Number.isFinite(rawBefore) || rawBefore < 0)
+  ) {
+    return EditorToolTextResult.Error({
+      message: 'Parameter "before" muss eine nicht-negative Zahl sein.',
+    })
+  }
+  const rawAfter = args.after
+  if (
+    rawAfter !== undefined &&
+    (typeof rawAfter !== "number" || !Number.isFinite(rawAfter) || rawAfter < 0)
+  ) {
+    return EditorToolTextResult.Error({
+      message: 'Parameter "after" muss eine nicht-negative Zahl sein.',
+    })
+  }
+  const beforeCount = rawBefore !== undefined ? Math.floor(rawBefore) : 0
+  const afterCount = rawAfter !== undefined ? Math.floor(rawAfter) : 0
+
+  let matcher: (line: string) => boolean
+  if (isRegex) {
+    try {
+      const regex = new RegExp(query, caseSensitive ? "" : "i")
+      matcher = (line) => regex.test(line)
+    } catch (err) {
+      return EditorToolTextResult.Error({
+        message: `Ungültiger regulärer Ausdruck: ${err instanceof Error ? err.message : String(err)}`,
+      })
+    }
+  } else {
+    const needle = caseSensitive ? query : query.toLowerCase()
+    matcher = (line) => (caseSensitive ? line : line.toLowerCase()).includes(needle)
+  }
+
+  const lines = content.replace(/\r\n/g, "\n").split("\n")
+  const matchIndices = lines.flatMap((line, idx) => (matcher(line) ? [idx] : []))
+
+  if (Array.isReadonlyArrayEmpty(matchIndices)) {
+    return EditorToolTextResult.Ok({
+      text: `Keine Treffer für „${query}“ in \`${fileName}\` gefunden.`,
+    })
+  }
+
+  const shownMatchIndices = matchIndices.slice(0, MAX_SEARCH_MATCHES)
+  const hasContext = beforeCount > 0 || afterCount > 0
+  const ranges = Array.reduce(
+    shownMatchIndices,
+    [] as ReadonlyArray<{ readonly start: number; readonly end: number }>,
+    (acc, matchIdx) => {
+      const start = Math.max(0, matchIdx - beforeCount)
+      const end = Math.min(lines.length - 1, matchIdx + afterCount)
+      const prev = acc[acc.length - 1]
+      if (prev && start <= prev.end + 1) {
+        return [...acc.slice(0, -1), { start: prev.start, end: Math.max(prev.end, end) }]
+      }
+      return [...acc, { start, end }]
+    },
+  )
+
+  const shown = ranges
+    .map((range) =>
+      Array.makeBy(range.end - range.start + 1, (offset) => {
+        const lineIdx = range.start + offset
+        return formatNumberedLine(format, lineIdx + 1, lines[lineIdx] ?? "")
+      }).join("\n"),
+    )
+    .join(hasContext ? "\n...\n" : "\n")
+
+  const moreHint =
+    matchIndices.length > MAX_SEARCH_MATCHES
+      ? `\n\n(… und ${matchIndices.length - MAX_SEARCH_MATCHES} weitere Treffer.)`
+      : ""
+
+  return EditorToolTextResult.Ok({
+    text:
+      [
+        `Treffer für „${query}“ in \`${fileName}\` (${matchIndices.length}):`,
+        "",
+        "```",
+        shown,
+        "```",
+      ].join("\n") + moreHint,
+  })
+}
+
+export const executeWriteTool = (fileName: string, rawArgs: string): EditorWriteToolResult => {
+  let args: Record<string, unknown>
+  try {
+    args = parseToolJsonObject(rawArgs)
+  } catch (err) {
+    return EditorWriteToolResult.Error({
+      message: err instanceof Error ? err.message : "Ungültige JSON-Argumente.",
+    })
+  }
+
+  const newContent = args.content
+  if (typeof newContent !== "string") {
+    return EditorWriteToolResult.Error({
+      message: 'Parameter "content" fehlt oder ist kein Text.',
+    })
+  }
+
+  const normalized = newContent.replace(/\r\n/g, "\n")
+  const lineCount = normalized.split("\n").length
+  return EditorWriteToolResult.Ok({
+    content: normalized,
+    message: `Datei \`${fileName}\` wurde neu geschrieben (${lineCount} Zeilen).`,
+  })
 }
 
 export const formatToolResultForFormat = (

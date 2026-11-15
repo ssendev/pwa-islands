@@ -1,14 +1,19 @@
 // LLM / AGENT
 // Alles rund um den OpenAI-kompatiblen LLM-Zugang lebt hier.
 
-import { Schema } from "effect"
+import { Array as EffectArray, Schema } from "effect"
 import {
   DEFAULT_EDIT_FORMAT,
   EditApplyResult,
   EditFormat,
+  EditorToolTextResult,
+  EditorWriteToolResult,
   applyEditsForFormat,
+  executeReadTool,
+  executeSearchTool,
+  executeWriteTool,
   formatToolResultForFormat,
-  getEditorEditToolForFormat,
+  getEditorToolsForFormat,
 } from "./edit-format"
 
 export const LlmProvider = Schema.Literals(["openai", "language-model"])
@@ -1381,7 +1386,7 @@ export const requestEditorChatCompletion = async (
   const requestBody = buildChatRequestBody({ ...config, model: activeModel }, "", {
     messages: toOpenAiEditorMessages(messages),
     max_tokens: 4096,
-    tools: [getEditorEditToolForFormat(config.editFormat)],
+    tools: getEditorToolsForFormat(config.editFormat),
     tool_choice: "auto",
   })
   const response = await fetch(joinUrl(config.baseUrl, "/chat/completions"), {
@@ -1488,12 +1493,22 @@ export type EditorChatTurnResult = {
 }
 
 const MAX_EDIT_ERROR_RETRIES = 4
+const MAX_TOOL_STEPS = 12
 
 const joinNonEmptyParts = (parts: ReadonlyArray<string>): string =>
   parts
     .map((part) => part.trim())
     .filter((part) => part !== "")
     .join("\n\n")
+
+const parseToolArgsRecord = (rawArguments: string): Record<string, unknown> | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(rawArguments.trim())
+    return isRecord(parsed) ? parsed : undefined
+  } catch {
+    return undefined
+  }
+}
 
 const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): string =>
   toolCalls
@@ -1502,6 +1517,33 @@ const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): s
       if (name === "edit") {
         const args = extractEditorToolArgs(call.arguments).trim()
         return args !== "" ? `Tool-Aufruf: edit\n${args}` : "Tool-Aufruf: edit"
+      }
+      if (name === "search") {
+        const parsed = parseToolArgsRecord(call.arguments)
+        const query = parsed && typeof parsed.query === "string" ? parsed.query.trim() : ""
+        return query !== "" ? `Tool-Aufruf: search ("${query}")` : "Tool-Aufruf: search"
+      }
+      if (name === "read") {
+        const parsed = parseToolArgsRecord(call.arguments)
+        const start =
+          parsed && typeof parsed.startLine === "number" ? Math.floor(parsed.startLine) : undefined
+        const end =
+          parsed && typeof parsed.endLine === "number" ? Math.floor(parsed.endLine) : undefined
+        if (start !== undefined && end !== undefined) {
+          return `Tool-Aufruf: read (Zeilen ${start}–${end})`
+        }
+        if (start !== undefined) {
+          return `Tool-Aufruf: read (ab Zeile ${start})`
+        }
+        return "Tool-Aufruf: read"
+      }
+      if (name === "write") {
+        const parsed = parseToolArgsRecord(call.arguments)
+        if (parsed && typeof parsed.content === "string") {
+          const lineCount = parsed.content.replace(/\r\n/g, "\n").split("\n").length
+          return `Tool-Aufruf: write (${lineCount} Zeilen)`
+        }
+        return "Tool-Aufruf: write"
       }
       return name !== "" ? `Tool-Aufruf: ${name}` : ""
     })
@@ -1544,10 +1586,147 @@ export const runEditorChatTurn = async ({
   readonly onUpdate?: (update: EditorChatStreamUpdate) => void
   readonly signal?: AbortSignal
 }): Promise<EditorChatTurnResult> => {
+  type ToolBatchState = {
+    readonly content: string
+    readonly appliedCount: number
+    readonly hasModifiedFile: boolean
+    readonly toolMessages: ReadonlyArray<EditorChatMessage>
+    readonly errorMessages: ReadonlyArray<string>
+  }
+
+  const executeToolCall = (state: ToolBatchState, call: EditorChatToolCall): ToolBatchState => {
+    const name = call.name.trim()
+    if (name === "edit") {
+      const editsText = extractEditorToolArgs(call.arguments)
+      return EditApplyResult.match<ToolBatchState>(
+        applyEditsForFormat(config.editFormat, state.content, editsText),
+        {
+          Ok: ({ content: nextContent, appliedCount, updatedSnippet }) => ({
+            ...state,
+            content: nextContent,
+            appliedCount: state.appliedCount + appliedCount,
+            hasModifiedFile: true,
+            toolMessages: [
+              ...state.toolMessages,
+              {
+                _tag: "Tool",
+                toolCallId: call.id,
+                content: formatToolResultForFormat(config.editFormat, fileName, updatedSnippet),
+              },
+            ],
+          }),
+          Error: ({ message: errorMessage }) => {
+            const fullError = `Fehler beim Anwenden der Änderungen: ${errorMessage}`
+            return {
+              ...state,
+              toolMessages: [
+                ...state.toolMessages,
+                { _tag: "Tool", toolCallId: call.id, content: fullError },
+              ],
+              errorMessages: [...state.errorMessages, fullError],
+            }
+          },
+        },
+      )
+    }
+
+    if (name === "write") {
+      return EditorWriteToolResult.match<ToolBatchState>(
+        executeWriteTool(fileName, call.arguments),
+        {
+          Ok: ({ content: nextContent, message }) => ({
+            ...state,
+            content: nextContent,
+            appliedCount: state.appliedCount + 1,
+            hasModifiedFile: true,
+            toolMessages: [
+              ...state.toolMessages,
+              { _tag: "Tool", toolCallId: call.id, content: message },
+            ],
+          }),
+          Error: ({ message: errorMessage }) => {
+            const fullError = `Fehler beim Neuschreiben der Datei: ${errorMessage}`
+            return {
+              ...state,
+              toolMessages: [
+                ...state.toolMessages,
+                { _tag: "Tool", toolCallId: call.id, content: fullError },
+              ],
+              errorMessages: [...state.errorMessages, fullError],
+            }
+          },
+        },
+      )
+    }
+
+    if (name === "read") {
+      return EditorToolTextResult.match<ToolBatchState>(
+        executeReadTool(config.editFormat, fileName, state.content, call.arguments),
+        {
+          Ok: ({ text }) => ({
+            ...state,
+            toolMessages: [
+              ...state.toolMessages,
+              { _tag: "Tool", toolCallId: call.id, content: text },
+            ],
+          }),
+          Error: ({ message: errorMessage }) => {
+            const fullError = `Fehler beim Lesen der Datei: ${errorMessage}`
+            return {
+              ...state,
+              toolMessages: [
+                ...state.toolMessages,
+                { _tag: "Tool", toolCallId: call.id, content: fullError },
+              ],
+              errorMessages: [...state.errorMessages, fullError],
+            }
+          },
+        },
+      )
+    }
+
+    if (name === "search") {
+      return EditorToolTextResult.match<ToolBatchState>(
+        executeSearchTool(config.editFormat, fileName, state.content, call.arguments),
+        {
+          Ok: ({ text }) => ({
+            ...state,
+            toolMessages: [
+              ...state.toolMessages,
+              { _tag: "Tool", toolCallId: call.id, content: text },
+            ],
+          }),
+          Error: ({ message: errorMessage }) => {
+            const fullError = `Fehler beim Suchen in der Datei: ${errorMessage}`
+            return {
+              ...state,
+              toolMessages: [
+                ...state.toolMessages,
+                { _tag: "Tool", toolCallId: call.id, content: fullError },
+              ],
+              errorMessages: [...state.errorMessages, fullError],
+            }
+          },
+        },
+      )
+    }
+
+    const unknownError = `Unbekanntes Werkzeug: ${call.name}`
+    return {
+      ...state,
+      toolMessages: [
+        ...state.toolMessages,
+        { _tag: "Tool", toolCallId: call.id, content: unknownError },
+      ],
+      errorMessages: [...state.errorMessages, unknownError],
+    }
+  }
+
   const step = async (
     messages: ReadonlyArray<EditorChatMessage>,
     currentContent: string,
     errorRetriesLeft: number,
+    toolStepsLeft: number,
     completedTurns: ReadonlyArray<EditorChatTurnBlock>,
   ): Promise<EditorChatTurnResult> => {
     const turnOnUpdate = onUpdate
@@ -1572,71 +1751,155 @@ export const runEditorChatTurn = async ({
         ? [{ content: replyContent, reasoning: replyReasoning, isError: false }]
         : []
 
-    const editCall = reply.toolCalls.find((call) => call.name === "edit")
-    const hasInlineEdit =
-      !editCall &&
-      resolveProvider(config) === "language-model" &&
-      hasEditAttemptForFormat(config.editFormat, reply.content)
-    if (!editCall && !hasInlineEdit) {
-      return {
-        messages: [...messages, assistantMsg],
+    if (EffectArray.isReadonlyArrayEmpty(reply.toolCalls)) {
+      const hasInlineEdit =
+        resolveProvider(config) === "language-model" &&
+        hasEditAttemptForFormat(config.editFormat, reply.content)
+      if (!hasInlineEdit) {
+        return {
+          messages: [...messages, assistantMsg],
+          appliedCount: 0,
+          turns: [...completedTurns, ...replyTurns],
+        }
+      }
+
+      const editsText = extractEditBlockFromText(reply.content)
+      const feedbackToolCallId = "language-model-edit"
+      return EditApplyResult.match(
+        applyEditsForFormat(config.editFormat, currentContent, editsText),
+        {
+          Ok: ({ content: nextContent, appliedCount, updatedSnippet }) => {
+            const toolMsg: EditorChatMessage = {
+              _tag: "Tool",
+              toolCallId: feedbackToolCallId,
+              content: formatToolResultForFormat(config.editFormat, fileName, updatedSnippet),
+            }
+            return {
+              messages: [...messages, assistantMsg, toolMsg],
+              updatedContent: nextContent,
+              appliedCount,
+              turns: [...completedTurns, ...replyTurns],
+            }
+          },
+          Error: ({ message: errorMessage }) => {
+            const fullError = `Fehler beim Anwenden der Änderungen: ${errorMessage}`
+            const toolMsg: EditorChatMessage = {
+              _tag: "Tool",
+              toolCallId: feedbackToolCallId,
+              content: fullError,
+            }
+            const nextMessages = [...messages, assistantMsg, toolMsg]
+            const errorTurn: EditorChatTurnBlock = {
+              content: fullError,
+              reasoning: "",
+              isError: true,
+            }
+            const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
+              ...completedTurns,
+              ...replyTurns,
+              errorTurn,
+            ]
+            if (errorRetriesLeft <= 0) {
+              onUpdate?.({
+                completedTurns: nextCompletedTurns,
+                activeTurn: { content: "", reasoning: "" },
+              })
+              throw new Error(errorMessage)
+            }
+            onUpdate?.({
+              completedTurns: nextCompletedTurns,
+              activeTurn: { content: "Korrigiere Bearbeitung …", reasoning: "" },
+            })
+            return step(
+              nextMessages,
+              currentContent,
+              errorRetriesLeft - 1,
+              toolStepsLeft,
+              nextCompletedTurns,
+            )
+          },
+        },
+      )
+    }
+
+    const batch = EffectArray.reduce(
+      reply.toolCalls,
+      {
+        content: currentContent,
         appliedCount: 0,
-        turns: [...completedTurns, ...replyTurns],
+        hasModifiedFile: false,
+        toolMessages: [],
+        errorMessages: [],
+      } satisfies ToolBatchState,
+      executeToolCall,
+    )
+    const nextMessages = [...messages, assistantMsg, ...batch.toolMessages]
+
+    if (EffectArray.isReadonlyArrayNonEmpty(batch.errorMessages)) {
+      const combinedError = batch.errorMessages.join("\n")
+      const errorTurn: EditorChatTurnBlock = {
+        content: combinedError,
+        reasoning: "",
+        isError: true,
+      }
+      const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
+        ...completedTurns,
+        ...replyTurns,
+        errorTurn,
+      ]
+      if (errorRetriesLeft <= 0) {
+        onUpdate?.({
+          completedTurns: nextCompletedTurns,
+          activeTurn: { content: "", reasoning: "" },
+        })
+        throw new Error(combinedError)
+      }
+      onUpdate?.({
+        completedTurns: nextCompletedTurns,
+        activeTurn: { content: "Korrigiere Bearbeitung …", reasoning: "" },
+      })
+      return step(
+        nextMessages,
+        batch.content,
+        errorRetriesLeft - 1,
+        toolStepsLeft,
+        nextCompletedTurns,
+      )
+    }
+
+    const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
+      ...completedTurns,
+      ...replyTurns,
+    ]
+    if (batch.hasModifiedFile) {
+      return {
+        messages: nextMessages,
+        updatedContent: batch.content,
+        appliedCount: batch.appliedCount,
+        turns: nextCompletedTurns,
       }
     }
 
-    const editsText = editCall
-      ? extractEditorToolArgs(editCall.arguments)
-      : extractEditBlockFromText(reply.content)
-    const feedbackToolCallId = editCall ? editCall.id : "language-model-edit"
-    const applyResult = applyEditsForFormat(config.editFormat, currentContent, editsText)
+    if (toolStepsLeft <= 0) {
+      onUpdate?.({
+        completedTurns: nextCompletedTurns,
+        activeTurn: { content: "", reasoning: "" },
+      })
+      throw new Error("Maximale Anzahl an Werkzeugschritten erreicht.")
+    }
 
-    return EditApplyResult.match(applyResult, {
-      Ok: ({ content: nextContent, appliedCount, updatedSnippet }) => {
-        const toolMsg: EditorChatMessage = {
-          _tag: "Tool",
-          toolCallId: feedbackToolCallId,
-          content: formatToolResultForFormat(config.editFormat, fileName, updatedSnippet),
-        }
-        return {
-          messages: [...messages, assistantMsg, toolMsg],
-          updatedContent: nextContent,
-          appliedCount,
-          turns: [...completedTurns, ...replyTurns],
-        }
-      },
-      Error: ({ message: errorMessage }) => {
-        const toolMsg: EditorChatMessage = {
-          _tag: "Tool",
-          toolCallId: feedbackToolCallId,
-          content: `Fehler beim Anwenden der Änderungen: ${errorMessage}`,
-        }
-        const nextMessages = [...messages, assistantMsg, toolMsg]
-        const errorTurn: EditorChatTurnBlock = {
-          content: `Fehler beim Anwenden der Änderungen: ${errorMessage}`,
-          reasoning: "",
-          isError: true,
-        }
-        const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
-          ...completedTurns,
-          ...replyTurns,
-          errorTurn,
-        ]
-        if (errorRetriesLeft <= 0) {
-          onUpdate?.({
-            completedTurns: nextCompletedTurns,
-            activeTurn: { content: "", reasoning: "" },
-          })
-          throw new Error(errorMessage)
-        }
-        onUpdate?.({
-          completedTurns: nextCompletedTurns,
-          activeTurn: { content: "Korrigiere Bearbeitung …", reasoning: "" },
-        })
-        return step(nextMessages, currentContent, errorRetriesLeft - 1, nextCompletedTurns)
-      },
+    onUpdate?.({
+      completedTurns: nextCompletedTurns,
+      activeTurn: { content: "Analysiere Ergebnis …", reasoning: "" },
     })
+    return step(
+      nextMessages,
+      batch.content,
+      errorRetriesLeft,
+      toolStepsLeft - 1,
+      nextCompletedTurns,
+    )
   }
 
-  return step(initialMessages, initialContent, MAX_EDIT_ERROR_RETRIES, [])
+  return step(initialMessages, initialContent, MAX_EDIT_ERROR_RETRIES, MAX_TOOL_STEPS, [])
 }

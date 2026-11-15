@@ -6147,7 +6147,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               ),
                             ],
                             [
-                              h.option([h.Value("system")], ["Automatisch (App-Theme)"]),
+                              h.option([h.Value("system")], ["App-Theme (Automatisch)"]),
                               h.option([h.Value("vs")], ["Hell"]),
                               h.option([h.Value("vs-dark")], ["Dunkel"]),
                               h.option([h.Value("hc-black")], ["Hoher Kontrast (Dunkel)"]),

@@ -758,6 +758,186 @@ describe("runEditorChatTurn", () => {
       content: expect.stringContaining("Änderungen angewendet"),
     })
   })
+
+  it("führt search- und read-Werkzeuge in Schleife aus und wendet danach edit an", async () => {
+    const { hashLine } = await import("./hashline")
+    const original = "<h1>Kopf</h1>\n<p>Alt</p>\n<footer>Ende</footer>"
+    const h2 = hashLine("<p>Alt</p>")
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_search",
+                      type: "function",
+                      function: {
+                        name: "search",
+                        arguments: JSON.stringify({ query: "Alt" }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_read",
+                      type: "function",
+                      function: {
+                        name: "read",
+                        arguments: JSON.stringify({ startLine: 2, endLine: 3 }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_edit",
+                      type: "function",
+                      function: {
+                        name: "edit",
+                        arguments: JSON.stringify({
+                          edits: `REPLACE 2:${h2}\n<p>Neu</p>\nEND`,
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        editFormat: "hashline",
+        baseUrl: "https://api.example.com/v1",
+        model: "gpt-4o-mini",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: original,
+      initialMessages: [{ _tag: "User", content: "Ändere Alt zu Neu" }],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")) as {
+      tools?: Array<{ function?: { name?: string } }>
+    }
+    expect(firstBody.tools?.map((t) => t.function?.name)).toEqual([
+      "edit",
+      "read",
+      "search",
+      "write",
+    ])
+    expect(result.updatedContent).toBe("<h1>Kopf</h1>\n<p>Neu</p>\n<footer>Ende</footer>")
+    expect(result.appliedCount).toBe(1)
+    expect(result.messages[2]).toEqual({
+      _tag: "Tool",
+      toolCallId: "call_search",
+      content: expect.stringContaining(`2:${h2}|<p>Alt</p>`),
+    })
+    expect(result.messages[4]).toEqual({
+      _tag: "Tool",
+      toolCallId: "call_read",
+      content: expect.stringContaining("Zeilen 2–3 von 3"),
+    })
+    expect(result.turns.map((turn) => turn.content)).toEqual([
+      'Tool-Aufruf: search ("Alt")',
+      "Tool-Aufruf: read (Zeilen 2–3)",
+      expect.stringContaining("Tool-Aufruf: edit"),
+    ])
+  })
+
+  it("wendet write-Tool-Aufruf an, schreibt Datei neu und stoppt bis zur nächsten User-Nachricht", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_write",
+                      type: "function",
+                      function: {
+                        name: "write",
+                        arguments: JSON.stringify({
+                          content: "<!doctype html>\n<p>Komplett neu</p>",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        editFormat: "unified-diff",
+        baseUrl: "https://api.example.com/v1",
+        model: "gpt-4o-mini",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: "<p>Alt</p>",
+      initialMessages: [{ _tag: "User", content: "Schreibe die Datei neu" }],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(result.updatedContent).toBe("<!doctype html>\n<p>Komplett neu</p>")
+    expect(result.appliedCount).toBe(1)
+    expect(result.messages[2]).toEqual({
+      _tag: "Tool",
+      toolCallId: "call_write",
+      content: "Datei `index.html` wurde neu geschrieben (2 Zeilen).",
+    })
+    expect(result.turns[0]?.content).toBe("Tool-Aufruf: write (2 Zeilen)")
+  })
 })
 
 describe("LanguageModel-API", () => {

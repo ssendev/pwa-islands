@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest"
 import {
   EditApplyResult,
+  EditorToolTextResult,
+  EditorWriteToolResult,
   applyEditsForFormat,
   applySearchReplaceEdits,
   applyUnifiedDiffEdits,
+  executeReadTool,
+  executeSearchTool,
+  executeWriteTool,
   formatFencedFileForFormat,
   formatLlmContextForFormat,
   formatSystemPromptForFormat,
+  getEditorToolsForFormat,
 } from "./edit-format"
+import { hashLine } from "./hashline"
 
 describe("edit-format", () => {
   it("formats plain file and instructions for search-replace", () => {
@@ -160,6 +167,190 @@ describe("edit-format", () => {
     expect(applyUnifiedDiffEdits(original, missing)).toEqual(
       EditApplyResult.Error({
         message: "Diff-Hunk 1 konnte nicht zugeordnet werden.",
+      }),
+    )
+  })
+
+  it("provides edit, read, search, and write tools", () => {
+    const tools = getEditorToolsForFormat("hashline")
+    expect(tools.map((t) => t.function.name)).toEqual(["edit", "read", "search", "write"])
+    expect(formatSystemPromptForFormat("hashline", true)).toContain("`search`")
+    expect(formatSystemPromptForFormat("hashline", true)).toContain("`read`")
+    expect(formatSystemPromptForFormat("hashline", true)).toContain("`write`")
+  })
+
+  it("executes read tool with optional line range and format-specific prefixes", () => {
+    const content = "<h1>Titel</h1>\n<p>Eins</p>\n<p>Zwei</p>"
+    const hashlineRead = executeReadTool(
+      "hashline",
+      "index.html",
+      content,
+      JSON.stringify({ startLine: 2, endLine: 3 }),
+    )
+    expect(hashlineRead).toEqual(
+      EditorToolTextResult.Ok({
+        text: [
+          "Datei `index.html` (Zeilen 2–3 von 3):",
+          "",
+          "```",
+          `2:${hashLine("<p>Eins</p>")}|<p>Eins</p>`,
+          `3:${hashLine("<p>Zwei</p>")}|<p>Zwei</p>`,
+          "```",
+        ].join("\n"),
+      }),
+    )
+
+    const plainRead = executeReadTool("unified-diff", "index.html", content, "{}")
+    expect(plainRead).toEqual(
+      EditorToolTextResult.Ok({
+        text: [
+          "Datei `index.html` (Zeilen 1–3 von 3):",
+          "",
+          "```",
+          "1: <h1>Titel</h1>",
+          "2: <p>Eins</p>",
+          "3: <p>Zwei</p>",
+          "```",
+        ].join("\n"),
+      }),
+    )
+
+    expect(
+      executeReadTool("hashline", "index.html", content, JSON.stringify({ startLine: 10 })),
+    ).toEqual(
+      EditorToolTextResult.Error({
+        message: "Startzeile 10 liegt hinter dem Dateiende (3 Zeilen).",
+      }),
+    )
+  })
+
+  it("executes search tool for plain text and regex queries", () => {
+    const content = "<h1>Titel</h1>\n<p>Hallo Welt</p>\n<p>hallo welt 2</p>"
+    const plainSearch = executeSearchTool(
+      "hashline",
+      "index.html",
+      content,
+      JSON.stringify({ query: "hallo" }),
+    )
+    expect(plainSearch).toEqual(
+      EditorToolTextResult.Ok({
+        text: [
+          "Treffer für „hallo“ in `index.html` (2):",
+          "",
+          "```",
+          `2:${hashLine("<p>Hallo Welt</p>")}|<p>Hallo Welt</p>`,
+          `3:${hashLine("<p>hallo welt 2</p>")}|<p>hallo welt 2</p>`,
+          "```",
+        ].join("\n"),
+      }),
+    )
+
+    const regexSearch = executeSearchTool(
+      "unified-diff",
+      "index.html",
+      content,
+      JSON.stringify({ query: "welt\\s+\\d+", isRegex: true, caseSensitive: true }),
+    )
+    expect(regexSearch).toEqual(
+      EditorToolTextResult.Ok({
+        text: [
+          "Treffer für „welt\\s+\\d+“ in `index.html` (1):",
+          "",
+          "```",
+          "3: <p>hallo welt 2</p>",
+          "```",
+        ].join("\n"),
+      }),
+    )
+
+    expect(
+      executeSearchTool("hashline", "index.html", content, JSON.stringify({ query: "fehlt" })),
+    ).toEqual(
+      EditorToolTextResult.Ok({
+        text: "Keine Treffer für „fehlt“ in `index.html` gefunden.",
+      }),
+    )
+
+    expect(
+      executeSearchTool(
+        "hashline",
+        "index.html",
+        content,
+        JSON.stringify({ query: "[", isRegex: true }),
+      ),
+    ).toEqual(
+      EditorToolTextResult.Error({
+        message: expect.stringContaining("Ungültiger regulärer Ausdruck:"),
+      }),
+    )
+  })
+
+  it("executes search tool with before and after context lines and merges overlapping blocks", () => {
+    const content = [
+      "1-oben",
+      "2-treffer-a",
+      "3-mitte",
+      "4-treffer-b",
+      "5-abstand",
+      "6-abstand",
+      "7-vor",
+      "8-treffer-c",
+      "9-unten",
+    ].join("\n")
+
+    const withContext = executeSearchTool(
+      "unified-diff",
+      "index.html",
+      content,
+      JSON.stringify({ query: "treffer-[a-c]", isRegex: true, before: 1, after: 1 }),
+    )
+    expect(withContext).toEqual(
+      EditorToolTextResult.Ok({
+        text: [
+          "Treffer für „treffer-[a-c]“ in `index.html` (3):",
+          "",
+          "```",
+          "1: 1-oben",
+          "2: 2-treffer-a",
+          "3: 3-mitte",
+          "4: 4-treffer-b",
+          "5: 5-abstand",
+          "...",
+          "7: 7-vor",
+          "8: 8-treffer-c",
+          "9: 9-unten",
+          "```",
+        ].join("\n"),
+      }),
+    )
+
+    expect(
+      executeSearchTool(
+        "unified-diff",
+        "index.html",
+        content,
+        JSON.stringify({ query: "treffer", before: -1 }),
+      ),
+    ).toEqual(
+      EditorToolTextResult.Error({
+        message: 'Parameter "before" muss eine nicht-negative Zahl sein.',
+      }),
+    )
+  })
+
+  it("executes write tool to replace entire file content", () => {
+    expect(
+      executeWriteTool("index.html", JSON.stringify({ content: "<p>Neu</p>\r\n<p>Zwei</p>" })),
+    ).toEqual(
+      EditorWriteToolResult.Ok({
+        content: "<p>Neu</p>\n<p>Zwei</p>",
+        message: "Datei `index.html` wurde neu geschrieben (2 Zeilen).",
+      }),
+    )
+
+    expect(executeWriteTool("index.html", "{}")).toEqual(
+      EditorWriteToolResult.Error({
+        message: 'Parameter "content" fehlt oder ist kein Text.',
       }),
     )
   })
