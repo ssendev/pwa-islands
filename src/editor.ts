@@ -4186,6 +4186,8 @@ export type ViewInputs = {
   readonly llmSelectedThinkingLevel: string
   readonly monacoSettings: MonacoSettings
   readonly appTheme: AppTheme
+  readonly llmChatAiName?: string
+  readonly llmChatUserName?: string
 }
 
 const viewLlmChatHistory = (
@@ -4195,6 +4197,8 @@ const viewLlmChatHistory = (
   isThinkingMarkdown: boolean,
   isContentMarkdown: boolean,
   isUserMarkdown: boolean,
+  aiName: string,
+  userName: string,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
@@ -4288,7 +4292,7 @@ const viewLlmChatHistory = (
         ),
       ],
       [
-        hBuilder.span([hBuilder.Class("modal-llm-chat-role")], [isError ? "Fehler" : "KI"]),
+        hBuilder.span([hBuilder.Class("modal-llm-chat-role")], [isError ? "Fehler" : aiName]),
         LlmResponse.view(
           {
             content,
@@ -4316,7 +4320,7 @@ const viewLlmChatHistory = (
             h.div(
               [h.Class("llm-response-section-header modal-llm-chat-user-header")],
               [
-                h.span([h.Class("modal-llm-chat-role")], ["Du"]),
+                h.span([h.Class("modal-llm-chat-role")], [userName]),
                 h.button(
                   [
                     h.Type("button"),
@@ -4497,6 +4501,8 @@ const viewLlmChatBar = (
   isThinkingMarkdown: boolean,
   isContentMarkdown: boolean,
   isUserMarkdown: boolean,
+  aiName: string,
+  userName: string,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
@@ -4511,6 +4517,8 @@ const viewLlmChatBar = (
         isThinkingMarkdown,
         isContentMarkdown,
         isUserMarkdown,
+        aiName,
+        userName,
         h,
       ),
       h.div(
@@ -4849,6 +4857,8 @@ const viewEditorModal = (
                     isLlmThinkingMarkdown,
                     isLlmContentMarkdown,
                     isLlmUserMarkdown,
+                    llmViewInputs.llmChatAiName?.trim() || "KI",
+                    llmViewInputs.llmChatUserName?.trim() || "Du",
                     h,
                   )
                 : h.empty,

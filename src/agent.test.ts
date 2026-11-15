@@ -7,11 +7,14 @@ import {
   extractChatReply,
   extractModelNames,
   extractStreamReply,
+  filterAndSortModelNames,
   parseExtraArgs,
   parseModelList,
   parseModelOptions,
   parseThinkingLevels,
   parseThinkingValue,
+  resolveAllProviderModelOptions,
+  resolveModelOptions,
   runEditorChatTurn,
   streamChatParts,
   streamToolCallParts,
@@ -293,7 +296,7 @@ describe("testLlmConnection", () => {
     expect(result).toEqual({
       content: "",
       reasoning: "",
-      models: ["gpt-4o", "gpt-4o-mini", "o3-mini", "claude-3.5"],
+      models: ["claude-3.5", "gpt-4o", "gpt-4o-mini", "o3-mini"],
     })
   })
 
@@ -1160,5 +1163,53 @@ describe("LanguageModel-API", () => {
     expect(result.updatedContent).toBeUndefined()
     expect(result.appliedCount).toBe(0)
     expect(result.turns[0]?.content).toBe("Diese Datei enthält einen Absatz.")
+  })
+})
+
+describe("Modellfilter und Sortierung", () => {
+  it("filtert per RegExp und sortiert Modellnamen alphabetisch", () => {
+    expect(
+      filterAndSortModelNames(["qwen3", "gpt-4o-mini", "claude-3", "gpt-4o"], "^gpt-"),
+    ).toEqual(["gpt-4o", "gpt-4o-mini"])
+    expect(filterAndSortModelNames(["z-model", "a-model", "m-model"], "[ungueltig")).toEqual([
+      "a-model",
+      "m-model",
+      "z-model",
+    ])
+  })
+
+  it("filtert und sortiert resolveModelOptions und resolveAllProviderModelOptions", () => {
+    const options = resolveModelOptions(
+      "Zebra=z-1, Alpha=a-1",
+      ["gpt-4o", "claude-3"],
+      "",
+      false,
+      "^(a-1|gpt-)",
+    )
+    expect(options.map((o) => o.label)).toEqual(["Alpha", "gpt-4o"])
+
+    const providerOptions = resolveAllProviderModelOptions(
+      [
+        {
+          id: "p1",
+          name: "P1",
+          enabled: true,
+          baseUrl: "https://example.com/v1",
+          apiKey: "",
+          models: "zeta, alpha",
+          modelFilter: "^(alpha|gpt)",
+          discoveredModels: ["gpt-4o-mini", "claude-3"],
+          editFormat: "",
+          streaming: true,
+          toolCalls: true,
+          thinkingParam: "",
+          thinkingLevels: "",
+          extraArgs: "",
+        },
+      ],
+      {},
+      "",
+    )
+    expect(providerOptions.map((o) => o.label)).toEqual(["alpha", "gpt-4o-mini"])
   })
 })

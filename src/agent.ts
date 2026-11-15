@@ -40,6 +40,7 @@ export const OpenAiProviderConfig = Schema.Struct({
   baseUrl: Schema.String,
   apiKey: Schema.String,
   models: Schema.String,
+  modelFilter: Schema.optional(Schema.String),
   discoveredModels: Schema.optional(Schema.Array(Schema.String)),
   editFormat: ProviderEditFormat,
   streaming: Schema.Boolean,
@@ -58,6 +59,7 @@ export type LlmSettings = {
   baseUrl: string
   apiKey: string
   models: string
+  modelFilter?: string
   streaming: boolean
   toolCalls: boolean
   thinkingParam: string
@@ -325,13 +327,34 @@ export const extractStreamReply = (sseText: string): string => {
   return parts.content.trim() !== "" ? parts.content : parts.reasoning
 }
 
+export const compileModelFilter = (pattern: string): RegExp | null => {
+  const trimmed = pattern.trim()
+  if (trimmed === "") {
+    return null
+  }
+  try {
+    return new RegExp(trimmed, "i")
+  } catch {
+    return null
+  }
+}
+
+export const filterAndSortModelNames = (
+  names: ReadonlyArray<string>,
+  filterPattern = "",
+): ReadonlyArray<string> => {
+  const regex = compileModelFilter(filterPattern)
+  const filtered = regex === null ? [...names] : names.filter((name) => regex.test(name))
+  return filtered.sort((a, b) => a.localeCompare(b, "de", { sensitivity: "base" }))
+}
+
 /** Prüft `GET /models`: die Antwort muss eine OpenAI-Modellliste (`data`-Array) sein. */
 export const listModels = async (settings: LlmSettings): Promise<ReadonlyArray<string>> => {
   const response = await fetch(joinUrl(settings.baseUrl, "/models"), {
     headers: authHeaders(settings.apiKey),
   })
   const body = await ensureOk(response)
-  return extractModelNames(body)
+  return filterAndSortModelNames(extractModelNames(body), settings.modelFilter ?? "")
 }
 
 export type LabeledOption = {
@@ -411,6 +434,7 @@ export const resolveAllProviderModelOptions = (
       continue
     }
     const providerName = getProviderDisplayName(provider)
+    const filterRegex = compileModelFilter(provider.modelFilter ?? "")
     const manualOptions = parseModelOptions(provider.models)
     const storedDiscovered = provider.discoveredModels ?? []
     const liveDiscovered = discoveredModelsByProvider[provider.id] ?? []
@@ -425,6 +449,9 @@ export const resolveAllProviderModelOptions = (
         continue
       }
       seenInProvider.add(item.value)
+      if (filterRegex !== null && !filterRegex.test(item.value) && !filterRegex.test(item.label)) {
+        continue
+      }
       const encodedValue = encodeProviderModelValue(provider.id, item.value)
       if (!seen.has(encodedValue)) {
         seen.add(encodedValue)
@@ -437,6 +464,7 @@ export const resolveAllProviderModelOptions = (
       }
     }
   }
+  providerOptions.sort((a, b) => a.label.localeCompare(b.label, "de", { sensitivity: "base" }))
   const nativeOptions: ReadonlyArray<ModelOption> = includeLanguageModel
     ? [{ label: LANGUAGE_MODEL_OPTION_LABEL, value: LANGUAGE_MODEL_OPTION_VALUE }]
     : []
@@ -495,7 +523,9 @@ export const resolveModelOptions = (
   discoveredModels: ReadonlyArray<string>,
   activeModel: string,
   includeLanguageModel = false,
+  modelFilter = "",
 ): ReadonlyArray<ModelOption> => {
+  const filterRegex = compileModelFilter(modelFilter)
   const manualOptions = parseModelOptions(models)
   const trimmedActive = activeModel.trim()
   const nativeOptions: ReadonlyArray<ModelOption> = includeLanguageModel
@@ -505,13 +535,17 @@ export const resolveModelOptions = (
     trimmedActive !== "" && trimmedActive !== LANGUAGE_MODEL_OPTION_VALUE
       ? [{ label: trimmedActive, value: trimmedActive }]
       : []
-  const seen = new Set<string>()
-  return [
+  const filteredProviderOptions = [
     ...manualOptions,
     ...discoveredModels.map((id) => ({ label: id, value: id })),
-    ...nativeOptions,
-    ...activeOptions,
-  ].filter((item) => {
+  ]
+    .filter(
+      (item) =>
+        filterRegex === null || filterRegex.test(item.value) || filterRegex.test(item.label),
+    )
+    .sort((a, b) => a.label.localeCompare(b.label, "de", { sensitivity: "base" }))
+  const seen = new Set<string>()
+  return [...filteredProviderOptions, ...nativeOptions, ...activeOptions].filter((item) => {
     if (seen.has(item.value)) {
       return false
     }

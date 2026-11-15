@@ -242,6 +242,7 @@ const parseStoredProvider = (
     baseUrl: typeof r.baseUrl === "string" ? r.baseUrl : "",
     apiKey: typeof r.apiKey === "string" ? r.apiKey : "",
     models: typeof r.models === "string" ? r.models : "",
+    modelFilter: typeof r.modelFilter === "string" ? r.modelFilter : "",
     discoveredModels: Array.isArray(r.discoveredModels)
       ? r.discoveredModels.filter((m): m is string => typeof m === "string")
       : [],
@@ -435,6 +436,54 @@ export async function storeEditorPreferences(prefs: EditorPreferences): Promise<
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
     const req = tx.objectStore(STORE_NAME).put({ ...prefs }, EDITOR_PREFERENCES_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export type LlmChatNames = {
+  aiName: string
+  userName: string
+}
+
+export const DEFAULT_LLM_CHAT_AI_NAME = "KI"
+export const DEFAULT_LLM_CHAT_USER_NAME = "Du"
+const LLM_CHAT_NAMES_KEY = "llm_chat_names"
+
+export async function getStoredLlmChatNames(): Promise<LlmChatNames> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(LLM_CHAT_NAMES_KEY)
+      req.onsuccess = () => {
+        const value: unknown = req.result
+        const record = typeof value === "object" && value !== null ? value : {}
+        const aiName =
+          "aiName" in record && typeof record.aiName === "string" && record.aiName.trim() !== ""
+            ? record.aiName.trim()
+            : DEFAULT_LLM_CHAT_AI_NAME
+        const userName =
+          "userName" in record &&
+          typeof record.userName === "string" &&
+          record.userName.trim() !== ""
+            ? record.userName.trim()
+            : DEFAULT_LLM_CHAT_USER_NAME
+        resolve({ aiName, userName })
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der KI-Chat-Namen:", error)
+    return { aiName: DEFAULT_LLM_CHAT_AI_NAME, userName: DEFAULT_LLM_CHAT_USER_NAME }
+  }
+}
+
+export async function storeLlmChatNames(names: LlmChatNames): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put({ ...names }, LLM_CHAT_NAMES_KEY)
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
   })

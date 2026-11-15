@@ -80,6 +80,7 @@ import {
   OpenAiProviderConfig,
   ProviderEditFormat,
   THINKING_PRESETS,
+  compileModelFilter,
   decodeProviderModelValue,
   detectLanguageModelAvailability,
   emptyLlmSettings,
@@ -113,6 +114,8 @@ import {
   type AppTheme,
   AppThemeSchema,
   DEFAULT_EDITOR_SPLIT_PERCENT,
+  DEFAULT_LLM_CHAT_AI_NAME,
+  DEFAULT_LLM_CHAT_USER_NAME,
   type MonacoTheme,
   MonacoSettingsSchema,
   MonacoThemeSchema,
@@ -123,12 +126,14 @@ import {
   getStoredAppTheme,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
+  getStoredLlmChatNames,
   getStoredLlmSettings,
   getStoredMonacoSettings,
   storeApiHistoryEnabled,
   storeAppTheme,
   storeEditorPreferences,
   storeHistoryEnabled,
+  storeLlmChatNames,
   storeLlmSettings,
   storeMonacoSettings,
 } from "./storage"
@@ -371,6 +376,8 @@ export const Model = Schema.Struct({
   llmExtraArgs: Schema.String,
   llmModel: Schema.String,
   llmThinkingLevel: Schema.String,
+  llmChatAiName: Schema.String,
+  llmChatUserName: Schema.String,
   llmDiscoveredModels: Schema.Array(Schema.String),
   hasLoadedEditorLlmModels: Schema.Boolean,
   editorIsMaximized: Schema.Boolean,
@@ -384,6 +391,7 @@ export const Model = Schema.Struct({
   llmDraftBaseUrl: Schema.String,
   llmDraftApiKey: Schema.String,
   llmDraftModels: Schema.String,
+  llmDraftModelFilter: Schema.String,
   llmDraftStreaming: Schema.Boolean,
   llmDraftToolCalls: Schema.Boolean,
   llmDraftThinkingParam: Schema.String,
@@ -603,9 +611,13 @@ export const Message = defineMessageUnion({
   UpdatedLlmDraftProviderEditFormat: { value: Schema.String },
   ToggledLlmEnabled: { isChecked: Schema.Boolean },
   UpdatedLlmEditFormat: { value: Schema.String },
+  UpdatedLlmChatAiName: { value: Schema.String },
+  UpdatedLlmChatUserName: { value: Schema.String },
+  CompletedSaveLlmChatNames: {},
   UpdatedLlmBaseUrl: { value: Schema.String },
   UpdatedLlmApiKey: { value: Schema.String },
   UpdatedLlmModels: { value: Schema.String },
+  UpdatedLlmModelFilter: { value: Schema.String },
   SelectedLlmModel: { value: Schema.String },
   ToggledLlmStreaming: { isChecked: Schema.Boolean },
   ToggledLlmToolCalls: { isChecked: Schema.Boolean },
@@ -623,6 +635,7 @@ export const Message = defineMessageUnion({
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
+    modelFilter: Schema.optional(Schema.String),
     streaming: Schema.Boolean,
     toolCalls: Schema.Boolean,
     thinkingParam: Schema.String,
@@ -640,6 +653,9 @@ export const Message = defineMessageUnion({
     apiHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
     appTheme: Schema.optionalKey(AppThemeSchema),
+    llmChatNames: Schema.optionalKey(
+      Schema.Struct({ aiName: Schema.String, userName: Schema.String }),
+    ),
   },
   CompletedSaveEditorPreferences: {},
   SucceededLoadEditorLlmModels: {
@@ -925,6 +941,26 @@ export const DetectLanguageModel = Command.define("DetectLanguageModel", {
   ),
 })
 
+export const SaveLlmChatNames = Command.define("SaveLlmChatNames", {
+  args: {
+    aiName: Schema.String,
+    userName: Schema.String,
+  },
+  messages: [Message.CompletedSaveLlmChatNames],
+  execute: ({ aiName, userName }) =>
+    Effect.tryPromise({
+      try: () =>
+        storeLlmChatNames({
+          aiName: aiName.trim() || DEFAULT_LLM_CHAT_AI_NAME,
+          userName: userName.trim() || DEFAULT_LLM_CHAT_USER_NAME,
+        }),
+      catch: () => new Error("Failed to save LLM chat names"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveLlmChatNames()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveLlmChatNames())),
+    ),
+})
+
 export const LoadLlmSettings = Command.define("LoadLlmSettings", {
   messages: [Message.CompletedLoadLlmSettings],
   execute: Effect.promise(() => getStoredLlmSettings()).pipe(
@@ -956,6 +992,7 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
+    modelFilter: Schema.optional(Schema.String),
     streaming: Schema.Boolean,
     toolCalls: Schema.Boolean,
     thinkingParam: Schema.String,
@@ -1069,20 +1106,23 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredApiHistoryEnabled(),
       getStoredMonacoSettings(),
       getStoredAppTheme(),
+      getStoredLlmChatNames(),
     ]),
   ).pipe(
-    Effect.map(([prefs, historyEnabled, apiHistoryEnabled, monacoSettings, appTheme]) =>
-      Message.CompletedLoadEditorPreferences({
-        isMaximized: prefs.isMaximized,
-        llmBarMode: prefs.llmBarMode,
-        llmModel: prefs.llmModel,
-        llmThinkingLevel: prefs.llmThinkingLevel,
-        editorSplitPercent: prefs.editorSplitPercent,
-        historyEnabled,
-        apiHistoryEnabled,
-        monacoSettings,
-        appTheme,
-      }),
+    Effect.map(
+      ([prefs, historyEnabled, apiHistoryEnabled, monacoSettings, appTheme, llmChatNames]) =>
+        Message.CompletedLoadEditorPreferences({
+          isMaximized: prefs.isMaximized,
+          llmBarMode: prefs.llmBarMode,
+          llmModel: prefs.llmModel,
+          llmThinkingLevel: prefs.llmThinkingLevel,
+          editorSplitPercent: prefs.editorSplitPercent,
+          historyEnabled,
+          apiHistoryEnabled,
+          monacoSettings,
+          appTheme,
+          llmChatNames,
+        }),
     ),
   ),
 })
@@ -1121,6 +1161,7 @@ export const LoadEditorLlmModels = Command.define("LoadEditorLlmModels", {
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
+    modelFilter: Schema.optional(Schema.String),
     streaming: Schema.Boolean,
     toolCalls: Schema.Boolean,
     thinkingParam: Schema.String,
@@ -1180,6 +1221,7 @@ export const TestLlm = Command.define("TestLlm", {
     baseUrl: Schema.String,
     apiKey: Schema.String,
     models: Schema.String,
+    modelFilter: Schema.optional(Schema.String),
     streaming: Schema.Boolean,
     toolCalls: Schema.Boolean,
     thinkingParam: Schema.String,
@@ -2068,6 +2110,8 @@ export const init = (
         llmExtraArgs: "",
         llmModel: "",
         llmThinkingLevel: "",
+        llmChatAiName: DEFAULT_LLM_CHAT_AI_NAME,
+        llmChatUserName: DEFAULT_LLM_CHAT_USER_NAME,
         llmDiscoveredModels: [],
         hasLoadedEditorLlmModels: false,
         editorIsMaximized: false,
@@ -2081,6 +2125,7 @@ export const init = (
         llmDraftBaseUrl: "",
         llmDraftApiKey: "",
         llmDraftModels: "",
+        llmDraftModelFilter: "",
         llmDraftStreaming: true,
         llmDraftToolCalls: true,
         llmDraftThinkingParam: emptyLlmSettings.thinkingParam,
@@ -2152,6 +2197,8 @@ export const init = (
       llmExtraArgs: "",
       llmModel: "",
       llmThinkingLevel: "",
+      llmChatAiName: DEFAULT_LLM_CHAT_AI_NAME,
+      llmChatUserName: DEFAULT_LLM_CHAT_USER_NAME,
       llmDiscoveredModels: [],
       hasLoadedEditorLlmModels: false,
       editorIsMaximized: false,
@@ -2165,6 +2212,7 @@ export const init = (
       llmDraftBaseUrl: "",
       llmDraftApiKey: "",
       llmDraftModels: "",
+      llmDraftModelFilter: "",
       llmDraftStreaming: true,
       llmDraftToolCalls: true,
       llmDraftThinkingParam: emptyLlmSettings.thinkingParam,
@@ -2609,6 +2657,9 @@ const maybeLoadEditorLlmModels = (
           baseUrl: targetProvider.baseUrl,
           apiKey: targetProvider.apiKey,
           models: targetProvider.models,
+          ...(targetProvider.modelFilter !== undefined && targetProvider.modelFilter !== ""
+            ? { modelFilter: targetProvider.modelFilter }
+            : {}),
           streaming: targetProvider.streaming,
           toolCalls: targetProvider.toolCalls,
           thinkingParam: targetProvider.thinkingParam,
@@ -3485,6 +3536,7 @@ export const update = (
         baseUrl: model.llmDraftBaseUrl,
         apiKey: model.llmDraftApiKey,
         models: model.llmDraftModels,
+        ...(model.llmDraftModelFilter !== "" ? { modelFilter: model.llmDraftModelFilter } : {}),
         discoveredModels: model.llmDiscoveredModels,
         editFormat: model.llmDraftProviderEditFormat,
         streaming: model.llmDraftStreaming,
@@ -3546,6 +3598,7 @@ export const update = (
         llmDraftBaseUrl: () => model.llmBaseUrl,
         llmDraftApiKey: () => model.llmApiKey,
         llmDraftModels: () => model.llmModels,
+        llmDraftModelFilter: () => "",
         llmDraftStreaming: () => model.llmStreaming,
         llmDraftToolCalls: () => model.llmToolCalls,
         llmDraftThinkingParam: () => model.llmThinkingParam,
@@ -3566,6 +3619,7 @@ export const update = (
         llmDraftBaseUrl: () => "",
         llmDraftApiKey: () => "",
         llmDraftModels: () => "",
+        llmDraftModelFilter: () => "",
         llmDiscoveredModels: () => [],
         llmDraftModel: () => "",
         llmDraftStreaming: () => true,
@@ -3604,6 +3658,7 @@ export const update = (
           llmDraftBaseUrl: () => provider.baseUrl,
           llmDraftApiKey: () => provider.apiKey,
           llmDraftModels: () => provider.models,
+          llmDraftModelFilter: () => provider.modelFilter ?? "",
           llmDiscoveredModels: () => provider.discoveredModels ?? [],
           llmDraftModel: () => matchingDraftModel,
           llmDraftStreaming: () => provider.streaming,
@@ -3801,6 +3856,28 @@ export const update = (
       }
     },
 
+    UpdatedLlmChatAiName: ({ value }) => ({
+      model: modifyFields(model, { llmChatAiName: () => value }),
+      commands: [
+        SaveLlmChatNames({
+          aiName: value,
+          userName: model.llmChatUserName,
+        }),
+      ],
+    }),
+
+    UpdatedLlmChatUserName: ({ value }) => ({
+      model: modifyFields(model, { llmChatUserName: () => value }),
+      commands: [
+        SaveLlmChatNames({
+          aiName: model.llmChatAiName,
+          userName: value,
+        }),
+      ],
+    }),
+
+    CompletedSaveLlmChatNames: () => ({ model }),
+
     UpdatedLlmBaseUrl: ({ value }) => ({
       model: modifyFields(model, {
         llmDraftBaseUrl: () => value,
@@ -3818,6 +3895,13 @@ export const update = (
     UpdatedLlmModels: ({ value }) => ({
       model: modifyFields(model, {
         llmDraftModels: () => value,
+        llmTestState: () => LlmTestState.Idle(),
+      }),
+    }),
+
+    UpdatedLlmModelFilter: ({ value }) => ({
+      model: modifyFields(model, {
+        llmDraftModelFilter: () => value,
         llmTestState: () => LlmTestState.Idle(),
       }),
     }),
@@ -3911,6 +3995,7 @@ export const update = (
         baseUrl: model.llmDraftBaseUrl,
         apiKey: model.llmDraftApiKey,
         models: model.llmDraftModels,
+        ...(model.llmDraftModelFilter !== "" ? { modelFilter: model.llmDraftModelFilter } : {}),
         streaming: model.llmDraftStreaming,
         toolCalls: model.llmDraftToolCalls,
         thinkingParam: model.llmDraftThinkingParam,
@@ -4054,6 +4139,7 @@ export const update = (
       apiHistoryEnabled,
       monacoSettings,
       appTheme,
+      llmChatNames,
     }) => {
       const nextAppTheme = appTheme ?? model.appTheme
       return {
@@ -4064,6 +4150,8 @@ export const update = (
           historyEnabled: () => historyEnabled ?? model.historyEnabled,
           apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
           appTheme: () => nextAppTheme,
+          llmChatAiName: () => llmChatNames?.aiName ?? model.llmChatAiName,
+          llmChatUserName: () => llmChatNames?.userName ?? model.llmChatUserName,
           editorLineNumbers: () => monacoSettings?.lineNumbers ?? model.editorLineNumbers,
           editorFolding: () => monacoSettings?.folding ?? model.editorFolding,
           editorWordWrap: () => monacoSettings?.wordWrap ?? model.editorWordWrap,
@@ -5116,6 +5204,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
         baseUrl: model.llmDraftBaseUrl,
         apiKey: model.llmDraftApiKey,
         models: model.llmDraftModels,
+        ...(model.llmDraftModelFilter !== "" ? { modelFilter: model.llmDraftModelFilter } : {}),
         streaming: model.llmDraftStreaming,
         toolCalls: model.llmDraftToolCalls,
         thinkingParam: model.llmDraftThinkingParam,
@@ -6161,7 +6250,40 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.section(
                     [h.Class("settings-group"), h.Id("settings-group-llm")],
                     [
-                      h.h4([h.Class("settings-group-title")], ["KI"]),
+                      h.h4([h.Class("settings-group-title")], ["KI-Chat"]),
+                      h.div(
+                        [h.Class("form-row")],
+                        [
+                          h.div(
+                            [h.Class("form-group")],
+                            [
+                              h.label([h.For("llm-chat-ai-name")], ["Name für KI"]),
+                              h.input([
+                                h.Type("text"),
+                                h.Id("llm-chat-ai-name"),
+                                h.Class("form-input"),
+                                h.Value(model.llmChatAiName),
+                                h.Placeholder(DEFAULT_LLM_CHAT_AI_NAME),
+                                h.OnInput((value) => Message.UpdatedLlmChatAiName({ value })),
+                              ]),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("form-group")],
+                            [
+                              h.label([h.For("llm-chat-user-name")], ["Name für Du"]),
+                              h.input([
+                                h.Type("text"),
+                                h.Id("llm-chat-user-name"),
+                                h.Class("form-input"),
+                                h.Value(model.llmChatUserName),
+                                h.Placeholder(DEFAULT_LLM_CHAT_USER_NAME),
+                                h.OnInput((value) => Message.UpdatedLlmChatUserName({ value })),
+                              ]),
+                            ],
+                          ),
+                        ],
+                      ),
                       h.div(
                         [h.Class("form-group")],
                         [
@@ -6443,6 +6565,31 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         ],
                       ),
                       h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("llm-model-filter")], ["Modellfilter (RegExp, optional)"]),
+                          h.input([
+                            h.Id("llm-model-filter"),
+                            h.Class("form-input"),
+                            h.Type("text"),
+                            h.Placeholder("z. B. ^(gpt-4|claude)"),
+                            h.Autocomplete("off"),
+                            h.Spellcheck(false),
+                            h.Value(model.llmDraftModelFilter),
+                            h.OnInput((value) => Message.UpdatedLlmModelFilter({ value })),
+                          ]),
+                          h.p(
+                            [h.Class("form-hint")],
+                            [
+                              model.llmDraftModelFilter.trim() !== "" &&
+                              compileModelFilter(model.llmDraftModelFilter) === null
+                                ? "Ungültiger regulärer Ausdruck – Filter ist aktuell inaktiv."
+                                : "Filtert sowohl abgerufene als auch angezeigte Modelle per RegExp (Groß-/Kleinschreibung ignoriert).",
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
                         [h.Class("form-row")],
                         [
                           h.div(
@@ -6590,6 +6737,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           model.llmDiscoveredModels,
                           model.llmDraftModel,
                           model.hasLanguageModel,
+                          model.llmDraftModelFilter,
                         )
                         const availableLevels = parseThinkingLevels(model.llmDraftThinkingLevels)
                         const selectedModel =
@@ -7261,6 +7409,8 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
         llmSelectedModel,
         llmThinkingLevels,
         llmSelectedThinkingLevel: model.llmThinkingLevel,
+        llmChatAiName: model.llmChatAiName,
+        llmChatUserName: model.llmChatUserName,
         monacoSettings: {
           lineNumbers: model.editorLineNumbers,
           folding: model.editorFolding,
