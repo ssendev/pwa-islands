@@ -85,6 +85,7 @@ describe("hashline", () => {
           "...",
           "// ab Zeile 7 gelöscht",
         ].join("\n"),
+        notes: [],
       }),
     )
   })
@@ -112,17 +113,29 @@ describe("hashline", () => {
           "...",
           "// ab Zeile 5 gelöscht",
         ].join("\n"),
+        notes: [],
       }),
     )
   })
 
-  it("reports hash mismatch errors", () => {
+  it("reports hash mismatch errors with current line and relocation hint", () => {
     const original = "line1\nline2"
     const response = `REPLACE 2:000\nupdated\nEND`
     const result = applyHashlineEdits(original, response)
     expect(result).toEqual(
       HashlineApplyResult.Error({
-        message: `Zeile 2: Hash stimmt nicht überein (erwartet ${hashLine("line2")}, angegeben 000).`,
+        message: expect.stringContaining(
+          `[REPLACE 2:000] Zeile 2: Hash stimmt nicht überein (erwartet ${hashLine("line2")}, angegeben 000). Aktueller Inhalt: \`2:${hashLine("line2")}|line2\``,
+        ),
+      }),
+    )
+
+    const shifted = "header\nline1\nuniqueTargetLine\nfooter"
+    const shiftedHash = hashLine("uniqueTargetLine")
+    const shiftedResult = applyHashlineEdits(shifted, `REPLACE 2:${shiftedHash}\nupdated\nEND`)
+    expect(shiftedResult).toEqual(
+      HashlineApplyResult.Error({
+        message: expect.stringContaining("passt zu Zeile 3"),
       }),
     )
   })
@@ -140,14 +153,46 @@ describe("hashline", () => {
     expect(result._tag).toBe("Error")
   })
 
-  it("reports unclosed blocks and empty clipboard", () => {
+  it("reports unclosed blocks, missing hash, and empty input", () => {
     expect(applyHashlineEdits("a", "   ")).toEqual(
-      HashlineApplyResult.Error({ message: "Die Zwischenablage ist leer." }),
+      HashlineApplyResult.Error({
+        message: "Keine Bearbeitungsbefehle gefunden – die Eingabe ist leer.",
+      }),
     )
     expect(applyHashlineEdits("a", `REPLACE 1:${hashLine("a")}\nb`)).toEqual(
       HashlineApplyResult.Error({
-        message: "Unvollständiger REPLACE-Block: fehlendes END.",
+        message: expect.stringContaining("Unvollständiger REPLACE-Block: fehlendes END."),
       }),
     )
+    expect(applyHashlineEdits("a\nb", "REPLACE 2\nc\nEND")).toEqual(
+      HashlineApplyResult.Error({
+        message: expect.stringContaining(`Korrekter Anker: \`2:${hashLine("b")}\``),
+      }),
+    )
+  })
+
+  it("tolerates copied line:hash| prefixes in replacement lines and implicit END", () => {
+    const original = "<h1>Alt</h1>\n<p>Text</p>"
+    const h1 = hashLine("<h1>Alt</h1>")
+    const h2 = hashLine("<p>Text</p>")
+    const response = [
+      `REPLACE 1:${h1}`,
+      `1:${h1}|<h1>Neu</h1>`,
+      `REPLACE 2:${h2}`,
+      "<p>Aktualisiert</p>",
+      "END",
+    ].join("\n")
+
+    const result = applyHashlineEdits(original, response)
+    expect(result).toEqual({
+      _tag: "Ok",
+      content: "<h1>Neu</h1>\n<p>Aktualisiert</p>",
+      appliedCount: 2,
+      changedLines: expect.any(String),
+      notes: [
+        expect.stringContaining("Kopierte `ZEILE:HASH|`-Präfixe"),
+        expect.stringContaining("Fehlendes END ergänzt"),
+      ],
+    })
   })
 })

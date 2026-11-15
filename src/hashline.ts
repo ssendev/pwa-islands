@@ -1,5 +1,6 @@
 import { Array, Match, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
+import { extractFencedLines } from "./edit-match"
 
 const FNV_OFFSET_BASIS = 0x811c9dc5
 const FNV_PRIME = 0x01000193
@@ -33,6 +34,8 @@ const HASHLINE_COMMAND_LINES = [
   "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
   "- Schreibe in den neuen Zeilen **keine** `ZEILE:HASH|`-Präfixe.",
   "- Verwende exakt die Zeilennummern und Hashes aus der Datei unten.",
+  "- Alle Anker eines Aufrufs beziehen sich auf den Dateistand **vor** diesem Aufruf (Zeilennummern nicht selbst verschieben).",
+  "- Bearbeitungen innerhalb eines Aufrufs dürfen sich nicht überlappen.",
   "",
   "Beispiel:",
   "```hashline",
@@ -93,6 +96,7 @@ export const HashlineApplyResult = defineTaggedUnion({
     content: Schema.String,
     appliedCount: Schema.Number,
     changedLines: Schema.String,
+    notes: Schema.Array(Schema.String),
   },
   Error: {
     message: Schema.String,
@@ -102,350 +106,466 @@ export type HashlineApplyResult = typeof HashlineApplyResult.Type
 
 interface LineAnchor {
   readonly line: number
-  readonly hash: string
+  readonly maybeHash: Option.Option<string>
 }
+
+type CommandKind = "REPLACE" | "INSERT_AFTER" | "INSERT_BEFORE" | "DELETE"
+type BlockCommandKind = Exclude<CommandKind, "DELETE">
 
 type EditOp =
   | {
       readonly _tag: "Replace"
+      readonly source: string
       readonly start: LineAnchor
       readonly end: LineAnchor
       readonly lines: ReadonlyArray<string>
     }
   | {
       readonly _tag: "InsertAfter"
+      readonly source: string
       readonly anchor: LineAnchor
       readonly lines: ReadonlyArray<string>
     }
   | {
       readonly _tag: "InsertBefore"
+      readonly source: string
       readonly anchor: LineAnchor
       readonly lines: ReadonlyArray<string>
     }
   | {
       readonly _tag: "Delete"
+      readonly source: string
       readonly start: LineAnchor
       readonly end: LineAnchor
     }
 
-const ANCHOR_PATTERN = /^(\d+):([0-9a-fA-F]{2,8})$/
-const COMMAND_PATTERN = /^(REPLACE|INSERT_AFTER|INSERT_BEFORE|DELETE)\s+(.+)$/i
+const COMMAND_PATTERN = /^(REPLACE|INSERT[ _-]?AFTER|INSERT[ _-]?BEFORE|DELETE)(?:\s+(.*))?$/i
+const END_PATTERN = /^END(?:[ _](?:REPLACE|INSERT(?:[ _](?:AFTER|BEFORE))?))?$/
+const ANCHOR_SOURCE = String.raw`(\d+)(?:\s*:\s*([0-9a-fA-F]{2,8})(?![0-9a-zA-Z]))?`
+const TARGET_PATTERN = new RegExp(
+  String.raw`^${ANCHOR_SOURCE}(?:\|.*?)?(?:\s*(?:\.\.\.?|–|—|-)\s*${ANCHOR_SOURCE}(?:\|.*)?)?\s*$`,
+)
+const COPIED_PREFIX_PATTERN = /^\d+:[0-9a-fA-F]{2,8}\|/
+const MAX_PREVIEW_CHARS = 120
+const MAX_LISTED_UNKNOWN_LINES = 3
+const RELOCATE_WINDOW = 100
 
-const parseAnchor = (raw: string): Option.Option<LineAnchor> => {
-  const match = ANCHOR_PATTERN.exec(raw.trim())
+const preview = (text: string): string =>
+  text.length > MAX_PREVIEW_CHARS ? `${text.slice(0, MAX_PREVIEW_CHARS)}…` : text
+
+const keywordToKind = (keyword: string): CommandKind => {
+  const upper = keyword.toUpperCase()
+  if (upper.startsWith("INSERT")) {
+    return upper.endsWith("AFTER") ? "INSERT_AFTER" : "INSERT_BEFORE"
+  }
+  return upper === "DELETE" ? "DELETE" : "REPLACE"
+}
+
+interface ParsedTarget {
+  readonly start: LineAnchor
+  readonly maybeEnd: Option.Option<LineAnchor>
+}
+
+const toAnchor = (
+  lineText: string | undefined,
+  hashText: string | undefined,
+): Option.Option<LineAnchor> =>
+  lineText === undefined
+    ? Option.none()
+    : Option.some({
+        line: Number(lineText),
+        maybeHash: Option.map(Option.fromNullishOr(hashText), (hash) => hash.toLowerCase()),
+      })
+
+const parseTarget = (raw: string): Option.Option<ParsedTarget> => {
+  const match = TARGET_PATTERN.exec(raw.trim())
   if (!match) {
     return Option.none()
   }
-  const line = Number(match[1])
-  if (!Number.isInteger(line) || line < 1) {
-    return Option.none()
-  }
-  return Option.some({
-    line,
-    hash: match[2].toLowerCase(),
+  return Option.map(toAnchor(match[1], match[2]), (start) => ({
+    start,
+    maybeEnd: toAnchor(match[3], match[4]),
+  }))
+}
+
+const isFullyHashedTarget = (target: ParsedTarget): boolean =>
+  Option.isSome(target.start.maybeHash) &&
+  Option.match(target.maybeEnd, {
+    onNone: () => true,
+    onSome: (end) => Option.isSome(end.maybeHash),
   })
-}
 
-const parseRange = (
-  raw: string,
-): Option.Option<{ readonly start: LineAnchor; readonly end: LineAnchor }> => {
-  const parts = raw.trim().split("..")
-  if (parts.length === 1) {
-    return Option.map(parseAnchor(parts[0]), (anchor) => ({ start: anchor, end: anchor }))
-  }
-  if (parts.length === 2) {
-    const maybeStart = parseAnchor(parts[0])
-    const maybeEnd = parseAnchor(parts[1])
-    if (Option.isSome(maybeStart) && Option.isSome(maybeEnd)) {
-      return Option.some({ start: maybeStart.value, end: maybeEnd.value })
-    }
-  }
-  return Option.none()
-}
-
-const extractFencedLines = (lines: ReadonlyArray<string>): ReadonlyArray<string> => {
-  interface FenceState {
-    readonly inFence: boolean
-    readonly currentBlock: ReadonlyArray<string>
-    readonly blocks: ReadonlyArray<ReadonlyArray<string>>
-  }
-
-  const finalState = Array.reduce(
-    lines,
-    { inFence: false, currentBlock: [], blocks: [] } as FenceState,
-    (state, line) => {
-      const trimmed = line.trim()
-      if (!state.inFence) {
-        if (trimmed.startsWith("```")) {
-          return { ...state, inFence: true, currentBlock: [] }
-        }
-        return state
-      }
-      if (trimmed === "```") {
-        return {
-          inFence: false,
-          currentBlock: [],
-          blocks: [...state.blocks, state.currentBlock],
-        }
-      }
-      return {
-        ...state,
-        currentBlock: [...state.currentBlock, line],
-      }
-    },
-  )
-
-  if (Array.isReadonlyArrayNonEmpty(finalState.blocks)) {
-    return Array.flatten(finalState.blocks)
-  }
-  return lines
+interface ParseAccumulator {
+  readonly ops: ReadonlyArray<EditOp>
+  readonly errors: ReadonlyArray<string>
+  readonly notes: ReadonlyArray<string>
+  readonly unknownLines: ReadonlyArray<string>
 }
 
 type ParseState =
-  | {
-      readonly _tag: "Idle"
-      readonly ops: ReadonlyArray<EditOp>
-      readonly errors: ReadonlyArray<string>
-    }
-  | {
+  | ({ readonly _tag: "Idle" } & ParseAccumulator)
+  | ({
       readonly _tag: "Collecting"
-      readonly kind: "REPLACE" | "INSERT_AFTER" | "INSERT_BEFORE"
+      readonly kind: BlockCommandKind
+      readonly source: string
       readonly start: LineAnchor
       readonly end: LineAnchor
       readonly buffer: ReadonlyArray<string>
-      readonly ops: ReadonlyArray<EditOp>
-      readonly errors: ReadonlyArray<string>
-    }
+    } & ParseAccumulator)
 
-const initialParseState: ParseState = { _tag: "Idle", ops: [], errors: [] }
+const initialParseState: ParseState = {
+  _tag: "Idle",
+  ops: [],
+  errors: [],
+  notes: [],
+  unknownLines: [],
+}
+
+const stripCopiedPrefixes = (
+  lines: ReadonlyArray<string>,
+): { readonly lines: ReadonlyArray<string>; readonly isStripped: boolean } => {
+  const contentLines = lines.filter((line) => line.trim() !== "")
+  if (
+    Array.isReadonlyArrayEmpty(contentLines) ||
+    !contentLines.every((line) => COPIED_PREFIX_PATTERN.test(line))
+  ) {
+    return { lines, isStripped: false }
+  }
+  return {
+    lines: Array.map(lines, (line) => line.replace(COPIED_PREFIX_PATTERN, "")),
+    isStripped: true,
+  }
+}
+
+const finishCollecting = (
+  state: Extract<ParseState, { _tag: "Collecting" }>,
+  isImplicitEnd: boolean,
+): Extract<ParseState, { _tag: "Idle" }> => {
+  const body = stripCopiedPrefixes(state.buffer)
+  const newOp: EditOp =
+    state.kind === "REPLACE"
+      ? {
+          _tag: "Replace",
+          source: state.source,
+          start: state.start,
+          end: state.end,
+          lines: body.lines,
+        }
+      : state.kind === "INSERT_AFTER"
+        ? { _tag: "InsertAfter", source: state.source, anchor: state.start, lines: body.lines }
+        : { _tag: "InsertBefore", source: state.source, anchor: state.start, lines: body.lines }
+  const notes = [
+    ...(body.isStripped
+      ? [`[${state.source}] Kopierte \`ZEILE:HASH|\`-Präfixe in den neuen Zeilen wurden entfernt.`]
+      : []),
+    ...(isImplicitEnd
+      ? [`[${state.source}] Fehlendes END ergänzt (nächster Befehl folgte direkt).`]
+      : []),
+  ]
+  return {
+    _tag: "Idle",
+    ops: [...state.ops, newOp],
+    errors: state.errors,
+    notes: [...state.notes, ...notes],
+    unknownLines: state.unknownLines,
+  }
+}
+
+const startCommand = (
+  state: Extract<ParseState, { _tag: "Idle" }>,
+  commandLine: string,
+  keyword: string,
+  rawTarget: string,
+): ParseState => {
+  const kind = keywordToKind(keyword)
+  const source = preview(commandLine)
+  const allowsRange = kind === "REPLACE" || kind === "DELETE"
+  const formatExample = allowsRange
+    ? `\`${kind} 12:a3f\` oder \`${kind} 12:a3f..14:b4c\``
+    : `\`${kind} 12:a3f\``
+  const withError = (message: string): ParseState => ({
+    ...state,
+    errors: [...state.errors, `[${source}] ${message}`],
+  })
+
+  if (rawTarget === "") {
+    return withError(`Zielangabe fehlt. Erwartet z. B. ${formatExample}.`)
+  }
+
+  return Option.match(parseTarget(rawTarget), {
+    onNone: () =>
+      withError(
+        `Ungültige Zielangabe „${preview(rawTarget)}“. Erwartet ${formatExample} (Zeilennummer und Hash aus der Dateiansicht, ohne den Zeileninhalt). Neue Zeilen gehören in die Folgezeilen, nicht in die Befehlszeile.`,
+      ),
+    onSome: ({ start, maybeEnd }): ParseState => {
+      if (kind === "DELETE") {
+        return {
+          ...state,
+          ops: [
+            ...state.ops,
+            { _tag: "Delete", source, start, end: Option.getOrElse(maybeEnd, () => start) },
+          ],
+        }
+      }
+      if (kind !== "REPLACE" && Option.isSome(maybeEnd)) {
+        return withError(
+          `${kind} erwartet genau einen Anker, keinen Bereich. Erwartet z. B. ${formatExample}.`,
+        )
+      }
+      return {
+        _tag: "Collecting",
+        kind,
+        source,
+        start,
+        end: Option.getOrElse(maybeEnd, () => start),
+        buffer: [],
+        ops: state.ops,
+        errors: state.errors,
+        notes: state.notes,
+        unknownLines: state.unknownLines,
+      }
+    },
+  })
+}
+
+const matchImplicitCommand = (trimmed: string): Option.Option<RegExpExecArray> => {
+  const match = COMMAND_PATTERN.exec(trimmed)
+  if (!match || match[1] !== match[1]?.toUpperCase()) {
+    return Option.none()
+  }
+  return Option.match(parseTarget(match[2] ?? ""), {
+    onNone: () => Option.none(),
+    onSome: (target) => (isFullyHashedTarget(target) ? Option.some(match) : Option.none()),
+  })
+}
+
+const describeUnknownLines = (
+  unknownLines: ReadonlyArray<string>,
+  lastOp: Option.Option<EditOp>,
+): ReadonlyArray<string> => {
+  if (Array.isReadonlyArrayEmpty(unknownLines)) {
+    return []
+  }
+  const listed = unknownLines
+    .slice(0, MAX_LISTED_UNKNOWN_LINES)
+    .map((line) => `„${preview(line)}“`)
+    .join(", ")
+  const more =
+    unknownLines.length > MAX_LISTED_UNKNOWN_LINES
+      ? ` und ${unknownLines.length - MAX_LISTED_UNKNOWN_LINES} weitere`
+      : ""
+  const looksCopied = unknownLines.some((line) => COPIED_PREFIX_PATTERN.test(line))
+  const followsDelete = Option.match(lastOp, {
+    onNone: () => false,
+    onSome: (op) => op._tag === "Delete",
+  })
+  const hints = [
+    "Außerhalb eines Befehls sind nur Befehlszeilen (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE mit `ZEILE:HASH`) erlaubt; neue Zeilen stehen zwischen Befehlszeile und END.",
+    ...(looksCopied
+      ? [
+          "Zeilen im Format `ZEILE:HASH|INHALT` stammen aus der Dateiansicht – verwende nur `ZEILE:HASH` als Anker in einem Befehl.",
+        ]
+      : []),
+    ...(followsDelete
+      ? ["DELETE hat keinen Inhaltsblock – zum Ersetzen von Zeilen REPLACE … END verwenden."]
+      : []),
+  ]
+  return [`Unbekannte Zeile(n) außerhalb eines Befehls: ${listed}${more}. ${hints.join(" ")}`]
+}
 
 const parseEditOps = (
   rawText: string,
-): { readonly ops: ReadonlyArray<EditOp>; readonly errors: ReadonlyArray<string> } => {
+): {
+  readonly ops: ReadonlyArray<EditOp>
+  readonly errors: ReadonlyArray<string>
+  readonly notes: ReadonlyArray<string>
+} => {
   const normalized = rawText.replace(/\r\n/g, "\n")
   const candidateLines = extractFencedLines(normalized.split("\n"))
 
   const finalState = Array.reduce(candidateLines, initialParseState, (state, line): ParseState => {
+    const trimmed = line.trim()
     if (state._tag === "Collecting") {
-      if (line.trim() === "END") {
-        const newOp: EditOp =
-          state.kind === "REPLACE"
-            ? { _tag: "Replace", start: state.start, end: state.end, lines: state.buffer }
-            : state.kind === "INSERT_AFTER"
-              ? { _tag: "InsertAfter", anchor: state.start, lines: state.buffer }
-              : { _tag: "InsertBefore", anchor: state.start, lines: state.buffer }
-        return {
-          _tag: "Idle",
-          ops: [...state.ops, newOp],
-          errors: state.errors,
-        }
+      if (END_PATTERN.test(trimmed)) {
+        return finishCollecting(state, false)
       }
-      return {
-        ...state,
-        buffer: [...state.buffer, line],
-      }
+      return Option.match(matchImplicitCommand(trimmed), {
+        onNone: () => ({ ...state, buffer: [...state.buffer, line] }),
+        onSome: (match) =>
+          startCommand(finishCollecting(state, true), trimmed, match[1] ?? "", match[2] ?? ""),
+      })
     }
 
-    const trimmed = line.trim()
-    if (trimmed === "") {
+    if (trimmed === "" || trimmed.startsWith("```") || END_PATTERN.test(trimmed)) {
       return state
     }
 
     const cmdMatch = COMMAND_PATTERN.exec(trimmed)
     if (!cmdMatch) {
-      return {
-        ...state,
-        errors: [...state.errors, `Unbekannter Befehl: „${trimmed}“`],
-      }
+      return { ...state, unknownLines: [...state.unknownLines, trimmed] }
     }
-
-    const keyword = cmdMatch[1].toUpperCase()
-    const target = cmdMatch[2]
-
-    if (keyword === "DELETE") {
-      return Option.match(parseRange(target), {
-        onNone: () => ({
-          ...state,
-          errors: [...state.errors, `Ungültige Zielangabe bei DELETE: „${target}“`],
-        }),
-        onSome: ({ start, end }) => ({
-          ...state,
-          ops: [...state.ops, { _tag: "Delete", start, end }],
-        }),
-      })
-    }
-
-    if (keyword === "REPLACE") {
-      return Option.match(parseRange(target), {
-        onNone: () => ({
-          ...state,
-          errors: [...state.errors, `Ungültige Zielangabe bei REPLACE: „${target}“`],
-        }),
-        onSome: ({ start, end }) => ({
-          _tag: "Collecting",
-          kind: "REPLACE",
-          start,
-          end,
-          buffer: [],
-          ops: state.ops,
-          errors: state.errors,
-        }),
-      })
-    }
-
-    if (keyword === "INSERT_AFTER" || keyword === "INSERT_BEFORE") {
-      return Option.match(parseAnchor(target), {
-        onNone: () => ({
-          ...state,
-          errors: [...state.errors, `Ungültiger Anker bei ${keyword}: „${target}“`],
-        }),
-        onSome: (anchor) => ({
-          _tag: "Collecting",
-          kind: keyword,
-          start: anchor,
-          end: anchor,
-          buffer: [],
-          ops: state.ops,
-          errors: state.errors,
-        }),
-      })
-    }
-
-    return state
+    return startCommand(state, trimmed, cmdMatch[1] ?? "", (cmdMatch[2] ?? "").trim())
   })
+
+  const unknownErrors = describeUnknownLines(finalState.unknownLines, Array.last(finalState.ops))
 
   if (finalState._tag === "Collecting") {
     return {
       ops: finalState.ops,
-      errors: [...finalState.errors, `Unvollständiger ${finalState.kind}-Block: fehlendes END.`],
+      errors: [
+        ...finalState.errors,
+        ...unknownErrors,
+        `[${finalState.source}] Unvollständiger ${finalState.kind}-Block: fehlendes END. Schließe die neuen Zeilen mit einer eigenen Zeile \`END\` ab.`,
+      ],
+      notes: finalState.notes,
     }
   }
 
   return {
     ops: finalState.ops,
-    errors: finalState.errors,
+    errors: [...finalState.errors, ...unknownErrors],
+    notes: finalState.notes,
   }
 }
 
 interface LineSplice {
+  readonly opIndex: number
   readonly index: number
   readonly deleteCount: number
   readonly insertLines: ReadonlyArray<string>
   readonly description: string
 }
 
+const describeFileLine = (
+  originalLines: ReadonlyArray<string>,
+  originalHashes: ReadonlyArray<string>,
+  line: number,
+): string =>
+  `\`${line}:${originalHashes[line - 1] ?? ""}|${preview(originalLines[line - 1] ?? "")}\``
+
 const validateAnchor = (
+  source: string,
   anchor: LineAnchor,
   originalLines: ReadonlyArray<string>,
+  originalHashes: ReadonlyArray<string>,
 ): Option.Option<string> => {
-  if (anchor.line < 1 || anchor.line > originalLines.length) {
+  const lineCount = originalLines.length
+  if (!Number.isInteger(anchor.line) || anchor.line < 1 || anchor.line > lineCount) {
     return Option.some(
-      `Zeile ${anchor.line} existiert nicht (Datei hat ${originalLines.length} Zeilen).`,
+      `[${source}] Zeile ${anchor.line} existiert nicht – die Datei hat ${lineCount} Zeilen (gültig: 1–${lineCount}).`,
     )
   }
-  const actualHash = hashLine(originalLines[anchor.line - 1])
-  if (actualHash !== anchor.hash) {
-    return Option.some(
-      `Zeile ${anchor.line}: Hash stimmt nicht überein (erwartet ${actualHash}, angegeben ${anchor.hash}).`,
-    )
-  }
-  return Option.none()
+  const actualHash = originalHashes[anchor.line - 1] ?? ""
+  return Option.match(anchor.maybeHash, {
+    onNone: () =>
+      Option.some(
+        `[${source}] Hash für Zeile ${anchor.line} fehlt. Korrekter Anker: \`${anchor.line}:${actualHash}\` (aktueller Inhalt: ${describeFileLine(originalLines, originalHashes, anchor.line)}).`,
+      ),
+    onSome: (givenHash) => {
+      if (givenHash === actualHash) {
+        return Option.none()
+      }
+      const windowStart = Math.max(1, anchor.line - RELOCATE_WINDOW)
+      const windowEnd = Math.min(lineCount, anchor.line + RELOCATE_WINDOW)
+      const relocated = Array.filter(
+        Array.makeBy(windowEnd - windowStart + 1, (offset) => windowStart + offset),
+        (line) => line !== anchor.line && originalHashes[line - 1] === givenHash,
+      )
+      const relocationHint =
+        relocated.length === 1 && relocated[0] !== undefined
+          ? ` Der angegebene Hash passt zu Zeile ${relocated[0]}: ${describeFileLine(originalLines, originalHashes, relocated[0])} – vermutlich ist die Zeilennummer verschoben. Alle Anker beziehen sich auf den Dateistand vor diesem Aufruf.`
+          : " Die Zeile hat sich vermutlich geändert – lies die betroffenen Zeilen erneut, um aktuelle Hashes zu erhalten."
+      return Option.some(
+        `[${source}] Zeile ${anchor.line}: Hash stimmt nicht überein (erwartet ${actualHash}, angegeben ${givenHash}). Aktueller Inhalt: ${describeFileLine(originalLines, originalHashes, anchor.line)}.${relocationHint}`,
+      )
+    },
+  })
 }
+
+const validateRange = (
+  source: string,
+  start: LineAnchor,
+  end: LineAnchor,
+  originalLines: ReadonlyArray<string>,
+  originalHashes: ReadonlyArray<string>,
+): ReadonlyArray<string> =>
+  Array.getSomes([
+    validateAnchor(source, start, originalLines, originalHashes),
+    end.line !== start.line
+      ? validateAnchor(source, end, originalLines, originalHashes)
+      : Option.none(),
+    start.line > end.line
+      ? Option.some(
+          `[${source}] Ungültiger Bereich: Endzeile ${end.line} liegt vor Startzeile ${start.line}.`,
+        )
+      : Option.none(),
+  ])
 
 const opToSplice = (
   op: EditOp,
+  opIndex: number,
   originalLines: ReadonlyArray<string>,
+  originalHashes: ReadonlyArray<string>,
 ): {
   readonly splice: Option.Option<LineSplice>
   readonly errors: ReadonlyArray<string>
-} =>
-  Match.value(op).pipe(
-    Match.tag("Replace", (replaceOp) => {
-      const errors = Array.getSomes([
-        validateAnchor(replaceOp.start, originalLines),
-        replaceOp.end.line !== replaceOp.start.line
-          ? validateAnchor(replaceOp.end, originalLines)
-          : Option.none(),
-        replaceOp.start.line > replaceOp.end.line
-          ? Option.some(
-              `Ungültiger Bereich bei REPLACE: ${replaceOp.start.line}..${replaceOp.end.line}.`,
-            )
-          : Option.none(),
-      ])
-      if (Array.isReadonlyArrayNonEmpty(errors)) {
-        return { splice: Option.none(), errors }
-      }
-      return {
-        splice: Option.some({
+} => {
+  const result = (
+    errors: ReadonlyArray<string>,
+    splice: Omit<LineSplice, "opIndex" | "description">,
+  ) =>
+    Array.isReadonlyArrayNonEmpty(errors)
+      ? { splice: Option.none(), errors }
+      : {
+          splice: Option.some({ ...splice, opIndex, description: op.source }),
+          errors: [],
+        }
+
+  return Match.value(op).pipe(
+    Match.tag("Replace", (replaceOp) =>
+      result(
+        validateRange(op.source, replaceOp.start, replaceOp.end, originalLines, originalHashes),
+        {
           index: replaceOp.start.line - 1,
           deleteCount: replaceOp.end.line - replaceOp.start.line + 1,
           insertLines: replaceOp.lines,
-          description: `REPLACE ${replaceOp.start.line}..${replaceOp.end.line}`,
-        }),
-        errors: [],
-      }
-    }),
-    Match.tag("Delete", (deleteOp) => {
-      const errors = Array.getSomes([
-        validateAnchor(deleteOp.start, originalLines),
-        deleteOp.end.line !== deleteOp.start.line
-          ? validateAnchor(deleteOp.end, originalLines)
-          : Option.none(),
-        deleteOp.start.line > deleteOp.end.line
-          ? Option.some(
-              `Ungültiger Bereich bei DELETE: ${deleteOp.start.line}..${deleteOp.end.line}.`,
-            )
-          : Option.none(),
-      ])
-      if (Array.isReadonlyArrayNonEmpty(errors)) {
-        return { splice: Option.none(), errors }
-      }
-      return {
-        splice: Option.some({
+        },
+      ),
+    ),
+    Match.tag("Delete", (deleteOp) =>
+      result(
+        validateRange(op.source, deleteOp.start, deleteOp.end, originalLines, originalHashes),
+        {
           index: deleteOp.start.line - 1,
           deleteCount: deleteOp.end.line - deleteOp.start.line + 1,
           insertLines: [],
-          description: `DELETE ${deleteOp.start.line}..${deleteOp.end.line}`,
-        }),
-        errors: [],
-      }
-    }),
+        },
+      ),
+    ),
     Match.tag("InsertAfter", (insertOp) => {
-      const maybeError = validateAnchor(insertOp.anchor, originalLines)
-      if (Option.isSome(maybeError)) {
-        return { splice: Option.none(), errors: [maybeError.value] }
-      }
-      return {
-        splice: Option.some({
-          index: insertOp.anchor.line,
-          deleteCount: 0,
-          insertLines: insertOp.lines,
-          description: `INSERT_AFTER ${insertOp.anchor.line}`,
-        }),
-        errors: [],
-      }
+      const isFileStart = insertOp.anchor.line === 0
+      return result(
+        isFileStart
+          ? []
+          : Option.toArray(
+              validateAnchor(op.source, insertOp.anchor, originalLines, originalHashes),
+            ),
+        { index: insertOp.anchor.line, deleteCount: 0, insertLines: insertOp.lines },
+      )
     }),
-    Match.tag("InsertBefore", (insertOp) => {
-      const maybeError = validateAnchor(insertOp.anchor, originalLines)
-      if (Option.isSome(maybeError)) {
-        return { splice: Option.none(), errors: [maybeError.value] }
-      }
-      return {
-        splice: Option.some({
-          index: insertOp.anchor.line - 1,
-          deleteCount: 0,
-          insertLines: insertOp.lines,
-          description: `INSERT_BEFORE ${insertOp.anchor.line}`,
-        }),
-        errors: [],
-      }
-    }),
+    Match.tag("InsertBefore", (insertOp) =>
+      result(
+        Option.toArray(validateAnchor(op.source, insertOp.anchor, originalLines, originalHashes)),
+        { index: insertOp.anchor.line - 1, deleteCount: 0, insertLines: insertOp.lines },
+      ),
+    ),
     Match.exhaustive,
   )
+}
 
 const splicesOverlap = (a: LineSplice, b: LineSplice): boolean => {
   if (a.deleteCount === 0 && b.deleteCount === 0) {
-    return a.index === b.index
+    return false
   }
   if (a.deleteCount === 0) {
     return a.index > b.index && a.index < b.index + b.deleteCount
@@ -456,12 +576,20 @@ const splicesOverlap = (a: LineSplice, b: LineSplice): boolean => {
   return a.index < b.index + b.deleteCount && b.index < a.index + a.deleteCount
 }
 
+const ascendingSpliceOrder: Order.Order<LineSplice> = Order.combineAll([
+  Order.mapInput(Order.Number, (splice: LineSplice) => splice.index),
+  Order.mapInput(Order.Number, (splice: LineSplice) => splice.deleteCount),
+  Order.mapInput(Order.Number, (splice: LineSplice) => splice.opIndex),
+])
+
 export const applyHashlineEdits = (
   originalContent: string,
   responseText: string,
 ): HashlineApplyResult => {
   if (responseText.trim() === "") {
-    return HashlineApplyResult.Error({ message: "Die Zwischenablage ist leer." })
+    return HashlineApplyResult.Error({
+      message: "Keine Bearbeitungsbefehle gefunden – die Eingabe ist leer.",
+    })
   }
 
   const parsed = parseEditOps(responseText)
@@ -470,12 +598,20 @@ export const applyHashlineEdits = (
   }
   if (Array.isReadonlyArrayEmpty(parsed.ops)) {
     return HashlineApplyResult.Error({
-      message: "Keine gültigen Bearbeitungsbefehle in der Zwischenablage gefunden.",
+      message: [
+        "Keine gültigen Bearbeitungsbefehle gefunden. Erwartet z. B.:",
+        "REPLACE 12:a3f",
+        "  <neuer Inhalt>",
+        "END",
+      ].join("\n"),
     })
   }
 
   const originalLines = originalContent.replace(/\r\n/g, "\n").split("\n")
-  const validated = Array.map(parsed.ops, (op) => opToSplice(op, originalLines))
+  const originalHashes = Array.map(originalLines, hashLine)
+  const validated = Array.map(parsed.ops, (op, opIndex) =>
+    opToSplice(op, opIndex, originalLines, originalHashes),
+  )
   const validationErrors = Array.flatten(Array.map(validated, (v) => v.errors))
   if (Array.isReadonlyArrayNonEmpty(validationErrors)) {
     return HashlineApplyResult.Error({ message: validationErrors.join("\n") })
@@ -490,7 +626,9 @@ export const applyHashlineEdits = (
             return Option.none()
           }
           return splicesOverlap(a, b)
-            ? Option.some(`Überlappende Bearbeitungen: ${a.description} und ${b.description}.`)
+            ? Option.some(
+                `[${a.description}] und [${b.description}] überlappen sich. Alle Anker beziehen sich auf den Dateistand vor diesem Aufruf – fasse überlappende Bearbeitungen zu einem einzigen Befehl zusammen.`,
+              )
             : Option.none()
         }),
       ),
@@ -501,17 +639,7 @@ export const applyHashlineEdits = (
     return HashlineApplyResult.Error({ message: overlapErrors.join("\n") })
   }
 
-  const descendingSpliceOrder: Order.Order<LineSplice> = Order.make((a, b) => {
-    if (b.index !== a.index) {
-      return b.index < a.index ? -1 : 1
-    }
-    if (b.deleteCount !== a.deleteCount) {
-      return b.deleteCount < a.deleteCount ? -1 : 1
-    }
-    return 0
-  })
-
-  const sortedDescending = Array.sort(splices, descendingSpliceOrder)
+  const sortedDescending = Array.sort(splices, Order.flip(ascendingSpliceOrder))
 
   const nextLines = Array.reduce(
     sortedDescending,
@@ -522,16 +650,6 @@ export const applyHashlineEdits = (
       ...lines.slice(splice.index + splice.deleteCount),
     ],
   )
-
-  const ascendingSpliceOrder: Order.Order<LineSplice> = Order.make((a, b) => {
-    if (a.index !== b.index) {
-      return a.index < b.index ? -1 : 1
-    }
-    if (a.deleteCount !== b.deleteCount) {
-      return a.deleteCount < b.deleteCount ? -1 : 1
-    }
-    return 0
-  })
 
   const sortedAscending = Array.sort(splices, ascendingSpliceOrder)
   const changedHunks = Array.reduce(
@@ -556,5 +674,6 @@ export const applyHashlineEdits = (
     content: nextLines.join("\n"),
     appliedCount: splices.length,
     changedLines: changedHunks.join("\n...\n"),
+    notes: parsed.notes,
   })
 }

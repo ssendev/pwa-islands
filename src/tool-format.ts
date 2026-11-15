@@ -110,18 +110,25 @@ const skipWhitespace = (input: string, startIndex: number): number => {
   return i
 }
 
-const parsePartialJsonObject = (trimmed: string): Record<string, unknown> | undefined => {
+const parsePartialJsonObjectDetailed = (
+  trimmed: string,
+): { readonly record: Record<string, unknown>; readonly isComplete: boolean } | undefined => {
   if (!trimmed.startsWith("{")) {
     return undefined
   }
   const record: Record<string, unknown> = {}
+  let isComplete = false
   let i = 1
   while (i < trimmed.length) {
     i = skipWhitespace(trimmed, i)
     if (trimmed[i] === ",") {
       i = skipWhitespace(trimmed, i + 1)
     }
-    if (i >= trimmed.length || trimmed[i] === "}") {
+    if (trimmed[i] === "}") {
+      isComplete = true
+      break
+    }
+    if (i >= trimmed.length) {
       break
     }
     if (trimmed[i] !== '"') {
@@ -177,7 +184,43 @@ const parsePartialJsonObject = (trimmed: string): Record<string, unknown> | unde
       }
     }
   }
-  return Object.keys(record).length > 0 ? record : undefined
+  return { record, isComplete }
+}
+
+const parsePartialJsonObject = (trimmed: string): Record<string, unknown> | undefined => {
+  const detailed = parsePartialJsonObjectDetailed(trimmed)
+  return detailed !== undefined && Object.keys(detailed.record).length > 0
+    ? detailed.record
+    : undefined
+}
+
+export type LenientJsonObject =
+  | { readonly _tag: "Valid"; readonly record: Record<string, unknown> }
+  | { readonly _tag: "Repaired"; readonly record: Record<string, unknown> }
+  | { readonly _tag: "Truncated"; readonly record: Record<string, unknown> }
+  | { readonly _tag: "NotAnObject"; readonly value: unknown }
+  | { readonly _tag: "Invalid"; readonly detail: string }
+
+export const parseJsonObjectLenient = (raw: string): LenientJsonObject => {
+  const trimmed = raw.trim()
+  try {
+    const parsed: unknown = JSON.parse(trimmed)
+    return isPlainObject(parsed)
+      ? { _tag: "Valid", record: parsed }
+      : { _tag: "NotAnObject", value: parsed }
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err)
+    const partial = parsePartialJsonObjectDetailed(trimmed)
+    if (partial === undefined) {
+      return { _tag: "Invalid", detail }
+    }
+    if (partial.isComplete) {
+      return { _tag: "Repaired", record: partial.record }
+    }
+    return Object.keys(partial.record).length > 0
+      ? { _tag: "Truncated", record: partial.record }
+      : { _tag: "Invalid", detail }
+  }
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>

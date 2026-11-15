@@ -9,11 +9,13 @@ import {
   EditorToolTextResult,
   EditorWriteToolResult,
   applyEditsForFormat,
+  executeEditTool,
   executeReadTool,
   executeSearchTool,
   executeWriteTool,
   formatToolResultForFormat,
   getEditorToolsForFormat,
+  parseEditToolArguments,
 } from "./edit-format"
 import { formatToolArguments } from "./tool-format"
 
@@ -1307,34 +1309,9 @@ const toOpenAiEditorMessages = (
     }
   })
 
-const extractEditorToolArgs = (rawArguments: string, depth = 0): string => {
-  const trimmed = rawArguments.trim()
-  if (trimmed === "") {
-    return ""
-  }
-  try {
-    const parsed: unknown = JSON.parse(trimmed)
-    if (typeof parsed === "string") {
-      if (depth < 2 && (parsed.trim().startsWith("{") || parsed.trim().startsWith('"'))) {
-        return extractEditorToolArgs(parsed, depth + 1)
-      }
-      return parsed
-    }
-    if (isRecord(parsed)) {
-      if (typeof parsed.edits === "string") {
-        return parsed.edits
-      }
-      if (typeof parsed.text === "string") {
-        return parsed.text
-      }
-      if (typeof parsed.patch === "string") {
-        return parsed.patch
-      }
-    }
-  } catch {
-    return rawArguments
-  }
-  return ""
+const extractEditorToolArgs = (rawArguments: string): string => {
+  const parsed = parseEditToolArguments(rawArguments)
+  return parsed._tag === "Ok" ? parsed.editsText : ""
 }
 
 const extractNonStreamingEditorResponse = (
@@ -1691,9 +1668,8 @@ export const runEditorChatTurn = async ({
   const executeToolCall = (state: ToolBatchState, call: EditorChatToolCall): ToolBatchState => {
     const name = call.name.trim()
     if (name === "edit") {
-      const editsText = extractEditorToolArgs(call.arguments)
       return EditApplyResult.match<ToolBatchState>(
-        applyEditsForFormat(config.editFormat, state.content, editsText),
+        executeEditTool(config.editFormat, state.content, call.arguments),
         {
           Ok: ({ content: nextContent, appliedCount, updatedSnippet }) => ({
             ...state,

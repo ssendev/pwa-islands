@@ -6,6 +6,7 @@ import {
   applyEditsForFormat,
   applySearchReplaceEdits,
   applyUnifiedDiffEdits,
+  executeEditTool,
   executeReadTool,
   executeSearchTool,
   executeWriteTool,
@@ -67,12 +68,13 @@ describe("edit-format", () => {
 
     expect(applySearchReplaceEdits(original, ambiguous)).toEqual(
       EditApplyResult.Error({
-        message: "SEARCH-Block 1 ist mehrdeutig (2 Treffer) – bitte mehr Kontextzeilen angeben.",
+        message:
+          "SEARCH-Block 1 ist mehrdeutig (2 Treffer in Zeilen 1, 2) – bitte mehr Kontextzeilen angeben, damit genau eine Stelle passt.",
       }),
     )
     expect(applySearchReplaceEdits(original, missing)).toEqual(
       EditApplyResult.Error({
-        message: "SEARCH-Block 1 nicht gefunden (<p>Fehlt</p>).",
+        message: expect.stringContaining("SEARCH-Block 1 wurde in der Datei nicht gefunden."),
       }),
     )
   })
@@ -161,12 +163,15 @@ describe("edit-format", () => {
 
     expect(applyUnifiedDiffEdits(original, ambiguous)).toEqual(
       EditApplyResult.Error({
-        message: "Diff-Hunk 1 ist mehrdeutig (2 Treffer) – bitte mehr Kontextzeilen angeben.",
+        message:
+          "Diff-Hunk 1 ist mehrdeutig (2 Treffer in Zeilen 1, 2) – bitte mehr Kontextzeilen angeben, damit genau eine Stelle passt.",
       }),
     )
     expect(applyUnifiedDiffEdits(original, missing)).toEqual(
       EditApplyResult.Error({
-        message: "Diff-Hunk 1 konnte nicht zugeordnet werden.",
+        message: expect.stringContaining(
+          "Diff-Hunk 1 konnte in der Datei nicht zugeordnet werden.",
+        ),
       }),
     )
   })
@@ -353,5 +358,105 @@ describe("edit-format", () => {
         message: 'Parameter "content" fehlt oder ist kein Text.',
       }),
     )
+  })
+
+  it("handles lenient JSON, truncated arguments, and helpful errors in executeEditTool", () => {
+    const original = "<div>\n  <p>Alt</p>\n</div>"
+
+    // Repariert nachgestelltes Komma im JSON-Objekt
+    expect(
+      executeEditTool(
+        "search-replace",
+        original,
+        '{"edits": "<<<<<<< SEARCH\\n  <p>Alt</p>\\n=======\\n  <p>Neu</p>\\n>>>>>>> REPLACE", }',
+      ),
+    ).toEqual(
+      EditApplyResult.Ok({
+        content: "<div>\n  <p>Neu</p>\n</div>",
+        appliedCount: 1,
+        updatedSnippet: "",
+      }),
+    )
+
+    // Akzeptiert Array von Zeilen/Befehlen sowie Alias-Parameter
+    expect(
+      executeEditTool(
+        "unified-diff",
+        original,
+        JSON.stringify({ patch: ["@@", " <div>", "-  <p>Alt</p>", "+  <p>Neu</p>", " </div>"] }),
+      ),
+    ).toEqual(
+      EditApplyResult.Ok({
+        content: "<div>\n  <p>Neu</p>\n</div>",
+        appliedCount: 1,
+        updatedSnippet: "",
+      }),
+    )
+
+    // Meldet abgeschnittene Argumente verständlich
+    expect(
+      executeEditTool("search-replace", original, '{"edits": "<<<<<<< SEARCH\\n  <p>Alt'),
+    ).toEqual(
+      EditApplyResult.Error({
+        message: expect.stringContaining("abgeschnitten (unvollständiges JSON)"),
+      }),
+    )
+
+    // Meldet fehlenden edits-Parameter mit Hinweis auf vorhandene Keys
+    expect(
+      executeEditTool("unified-diff", original, JSON.stringify({ file: "index.html" })),
+    ).toEqual(
+      EditApplyResult.Error({
+        message: expect.stringContaining("Vorhandene Parameter: file."),
+      }),
+    )
+  })
+
+  it("tolerates indentation differences and reports closest region hints", () => {
+    const original = ["<section>", "    <h2>Titel</h2>", "    <p>Text</p>", "</section>"].join("\n")
+
+    // Search/Replace mit 2 statt 4 Leerzeichen Einrückung
+    const srIndented = [
+      "<<<<<<< SEARCH",
+      "  <h2>Titel</h2>",
+      "  <p>Text</p>",
+      "=======",
+      "  <h2>Neu</h2>",
+      "  <p>Text</p>",
+      ">>>>>>> REPLACE",
+    ].join("\n")
+    expect(applySearchReplaceEdits(original, srIndented)).toEqual(
+      EditApplyResult.Ok({
+        content: ["<section>", "    <h2>Neu</h2>", "    <p>Text</p>", "</section>"].join("\n"),
+        appliedCount: 1,
+        updatedSnippet: "",
+      }),
+    )
+
+    // Headerloser Unified Diff ohne @@
+    const headerlessDiff = [" <section>", "-    <h2>Titel</h2>", "+    <h2>Neu</h2>"].join("\n")
+    expect(applyUnifiedDiffEdits(original, headerlessDiff)).toEqual(
+      EditApplyResult.Ok({
+        content: ["<section>", "    <h2>Neu</h2>", "    <p>Text</p>", "</section>"].join("\n"),
+        appliedCount: 1,
+        updatedSnippet: "",
+      }),
+    )
+
+    // Nicht gefundener Block nennt ähnlichste Stelle und erste Abweichung
+    const nearMiss = [
+      "@@",
+      " <section>",
+      "-    <h2>Falsch</h2>",
+      "+    <h2>Neu</h2>",
+      "     <p>Text</p>",
+    ].join("\n")
+    const nearMissResult = applyUnifiedDiffEdits(original, nearMiss)
+    expect(nearMissResult._tag).toBe("Error")
+    if (nearMissResult._tag === "Error") {
+      expect(nearMissResult.message).toContain("Ähnlichste Stelle: Zeilen 1–3")
+      expect(nearMissResult.message).toContain("erwartet: `    <h2>Falsch</h2>`")
+      expect(nearMissResult.message).toContain("Datei:    `    <h2>Titel</h2>` (Zeile 2)")
+    }
   })
 })

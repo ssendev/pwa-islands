@@ -762,6 +762,85 @@ describe("runEditorChatTurn", () => {
     })
   })
 
+  it("meldet abgeschnittene edit-Tool-Argumente verständlich an das LLM zurück und wendet Korrektur an", async () => {
+    const original = "<div>\n  <p>Alt</p>\n</div>"
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_truncated",
+                      type: "function",
+                      function: {
+                        name: "edit",
+                        arguments: '{"edits": "@@\n   <p>Alt',
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  tool_calls: [
+                    {
+                      id: "call_fixed",
+                      type: "function",
+                      function: {
+                        name: "edit",
+                        arguments: JSON.stringify({
+                          edits: "@@\n <div>\n-  <p>Alt</p>\n+  <p>Neu</p>\n </div>",
+                        }),
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        editFormat: "unified-diff",
+        baseUrl: "https://api.example.com/v1",
+        model: "gpt-4o-mini",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: original,
+      initialMessages: [{ _tag: "User", content: "Ändere Alt zu Neu" }],
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(result.updatedContent).toBe("<div>\n  <p>Neu</p>\n</div>")
+    expect(result.messages[2]).toEqual({
+      _tag: "Tool",
+      toolCallId: "call_truncated",
+      content: expect.stringContaining("abgeschnitten (unvollständiges JSON)"),
+    })
+  })
+
   it("führt search- und read-Werkzeuge in Schleife aus und wendet danach edit an", async () => {
     const { hashLine } = await import("./hashline")
     const original = "<h1>Kopf</h1>\n<p>Alt</p>\n<footer>Ende</footer>"

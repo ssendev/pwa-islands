@@ -853,8 +853,8 @@ describe("PWA Islands Scene Tests", () => {
         }),
       }),
     }
-    const expectedError =
-      "Zeile 1: Hash stimmt nicht überein (erwartet " + hashLine("<p>Alt</p>") + ", angegeben 000)."
+    const h1 = hashLine("<p>Alt</p>")
+    const expectedError = `[REPLACE 1:000] Zeile 1: Hash stimmt nicht überein (erwartet ${h1}, angegeben 000). Aktueller Inhalt: \`1:${h1}|<p>Alt</p>\`. Die Zeile hat sich vermutlich geändert – lies die betroffenen Zeilen erneut, um aktuelle Hashes zu erhalten.`
 
     scene(
       { update, view },

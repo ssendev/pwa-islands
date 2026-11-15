@@ -1,5 +1,6 @@
-import { Array, Match, Option, Order, Schema } from "effect"
+import { Array, Match, Option, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
+import { type LineEditBlock, applyLineEditBlocks, previewLine } from "./edit-match"
 import {
   HashlineApplyResult,
   applyHashlineEdits,
@@ -11,6 +12,7 @@ import {
   formatUpdatedHashlines,
   hashLine,
 } from "./hashline"
+import { parseJsonObjectLenient } from "./tool-format"
 
 export const EditFormat = Schema.Literals(["hashline", "search-replace", "unified-diff"])
 export type EditFormat = typeof EditFormat.Type
@@ -47,16 +49,22 @@ export const EditApplyResult = defineTaggedUnion({
 export type EditApplyResult = typeof EditApplyResult.Type
 
 const stripOuterMarkdownFence = (raw: string): string => {
-  const normalized = raw.replace(/\r\n/g, "\n").trim()
-  const lines = normalized.split("\n")
-  if (
-    lines.length >= 2 &&
-    lines[0]?.startsWith("```") &&
-    lines[lines.length - 1]?.trim() === "```"
-  ) {
-    return lines.slice(1, -1).join("\n")
+  const lines = raw.replace(/\r\n/g, "\n").split("\n")
+  const firstNonBlank = lines.findIndex((line) => line.trim() !== "")
+  if (firstNonBlank === -1) {
+    return ""
   }
-  return normalized
+  const lastNonBlank =
+    lines.length - 1 - [...lines].reverse().findIndex((line) => line.trim() !== "")
+  const trimmedLines = lines.slice(firstNonBlank, lastNonBlank + 1)
+  if (
+    trimmedLines.length >= 2 &&
+    trimmedLines[0]?.trim().startsWith("```") &&
+    trimmedLines[trimmedLines.length - 1]?.trim() === "```"
+  ) {
+    return trimmedLines.slice(1, -1).join("\n")
+  }
+  return trimmedLines.join("\n")
 }
 
 const formatPlainFencedFile = (content: string): string =>
@@ -360,11 +368,114 @@ const parseToolJsonObject = (rawArgs: string): Record<string, unknown> => {
   if (trimmed === "") {
     return {}
   }
-  const parsed: unknown = JSON.parse(trimmed)
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  const parsed = parseJsonObjectLenient(trimmed)
+  if (parsed._tag === "Valid" || parsed._tag === "Repaired") {
+    return parsed.record
+  }
+  if (parsed._tag === "Truncated") {
+    throw new Error(
+      "Die Werkzeug-Argumente wurden abgeschnitten (unvollständiges JSON) – bitte den Aufruf vollständig wiederholen oder in kleinere Schritte aufteilen.",
+    )
+  }
+  if (parsed._tag === "NotAnObject") {
     throw new Error("Werkzeug-Argumente müssen ein JSON-Objekt sein.")
   }
-  return parsed as Record<string, unknown>
+  throw new Error(
+    `Ungültiges JSON in den Werkzeug-Argumenten (${parsed.detail}). Erwartet wird ein gültiges JSON-Objekt.`,
+  )
+}
+
+export type EditToolArgsResult =
+  | { readonly _tag: "Ok"; readonly editsText: string }
+  | { readonly _tag: "Error"; readonly message: string }
+
+const EDIT_ARG_KEYS = ["edits", "patch", "diff", "text", "changes"] as const
+
+const extractEditsFromRecord = (record: Record<string, unknown>): Option.Option<string> =>
+  Array.findFirst(EDIT_ARG_KEYS, (key) => {
+    const value = record[key]
+    if (typeof value === "string") {
+      return Option.some(value)
+    }
+    if (globalThis.Array.isArray(value) && value.every((item) => typeof item === "string")) {
+      return Option.some(value.join("\n"))
+    }
+    return Option.none()
+  })
+
+export const parseEditToolArguments = (rawArgs: string, depth = 0): EditToolArgsResult => {
+  const trimmed = rawArgs.trim()
+  if (trimmed === "") {
+    return {
+      _tag: "Error",
+      message:
+        'Argumente für `edit` sind leer. Erwartet wird ein JSON-Objekt wie `{"edits": "..."}`.',
+    }
+  }
+
+  const parsed = parseJsonObjectLenient(trimmed)
+  if (parsed._tag === "Valid" || parsed._tag === "Repaired") {
+    return Option.match(extractEditsFromRecord(parsed.record), {
+      onSome: (editsText) => ({ _tag: "Ok", editsText }),
+      onNone: () => {
+        const keys = Object.keys(parsed.record)
+        const presentHint = keys.length > 0 ? ` Vorhandene Parameter: ${keys.join(", ")}.` : ""
+        return {
+          _tag: "Error",
+          message: `Parameter "edits" fehlt oder ist kein Text.${presentHint} Erwartet wird \`{"edits": "..."}\`.`,
+        }
+      },
+    })
+  }
+
+  if (parsed._tag === "Truncated") {
+    return {
+      _tag: "Error",
+      message:
+        "Die Argumente für `edit` wurden abgeschnitten (unvollständiges JSON) – bitte kürzere Blöcke senden oder mehrere kleinere `edit`-Aufrufe verwenden.",
+    }
+  }
+
+  if (parsed._tag === "NotAnObject") {
+    if (typeof parsed.value === "string") {
+      const inner = parsed.value.trim()
+      if (depth < 2 && (inner.startsWith("{") || inner.startsWith('"'))) {
+        return parseEditToolArguments(parsed.value, depth + 1)
+      }
+      return { _tag: "Ok", editsText: parsed.value }
+    }
+    if (
+      globalThis.Array.isArray(parsed.value) &&
+      parsed.value.every((item) => typeof item === "string")
+    ) {
+      return { _tag: "Ok", editsText: parsed.value.join("\n") }
+    }
+    return {
+      _tag: "Error",
+      message: 'Werkzeug-Argumente für `edit` müssen ein JSON-Objekt wie `{"edits": "..."}` sein.',
+    }
+  }
+
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+    return { _tag: "Ok", editsText: rawArgs }
+  }
+
+  return {
+    _tag: "Error",
+    message: `Ungültiges JSON in den Argumenten für \`edit\` (${parsed.detail}). Erwartet wird \`{"edits": "..."}\`.`,
+  }
+}
+
+export const executeEditTool = (
+  format: EditFormat,
+  originalContent: string,
+  rawArgs: string,
+): EditApplyResult => {
+  const args = parseEditToolArguments(rawArgs)
+  if (args._tag === "Error") {
+    return EditApplyResult.Error({ message: args.message })
+  }
+  return applyEditsForFormat(format, originalContent, args.editsText)
 }
 
 const formatNumberedLine = (format: EditFormat, lineNumber: number, line: string): string =>
@@ -583,22 +694,34 @@ export const formatToolResultForFormat = (
 // SEARCH & REPLACE
 
 interface SearchReplaceBlock {
-  readonly search: string
-  readonly replace: string
+  readonly searchLines: ReadonlyArray<string>
+  readonly replaceLines: ReadonlyArray<string>
 }
 
+const SEARCH_START_PATTERN = /^<{3,}\s*SEARCH\b/i
+const SEPARATOR_PATTERN = /^={3,}\s*$/
+const REPLACE_END_PATTERN = /^>{3,}\s*REPLACE\b/i
+
 type SearchReplaceParseState =
-  | { readonly _tag: "Outside"; readonly blocks: ReadonlyArray<SearchReplaceBlock> }
+  | {
+      readonly _tag: "Outside"
+      readonly blocks: ReadonlyArray<SearchReplaceBlock>
+      readonly maybeError: Option.Option<string>
+    }
   | {
       readonly _tag: "InSearch"
+      readonly startLine: number
       readonly blocks: ReadonlyArray<SearchReplaceBlock>
       readonly searchLines: ReadonlyArray<string>
+      readonly maybeError: Option.Option<string>
     }
   | {
       readonly _tag: "InReplace"
+      readonly startLine: number
       readonly blocks: ReadonlyArray<SearchReplaceBlock>
       readonly searchLines: ReadonlyArray<string>
       readonly replaceLines: ReadonlyArray<string>
+      readonly maybeError: Option.Option<string>
     }
 
 const parseSearchReplaceBlocks = (
@@ -608,28 +731,80 @@ const parseSearchReplaceBlocks = (
   | { readonly _tag: "Error"; readonly message: string } => {
   const cleaned = stripOuterMarkdownFence(raw)
   if (cleaned === "") {
-    return { _tag: "Error", message: "Keine SEARCH/REPLACE-Blöcke gefunden." }
+    return {
+      _tag: "Error",
+      message: "Keine SEARCH/REPLACE-Blöcke gefunden – die Eingabe ist leer.",
+    }
   }
 
   const lines = cleaned.split("\n")
-  const finalState = Array.reduce<string, SearchReplaceParseState>(
-    lines,
-    { _tag: "Outside", blocks: [] },
-    (state, line): SearchReplaceParseState => {
+  const indexedLines = Array.map(lines, (line, idx) => ({ line, lineNum: idx + 1 }))
+  const initialState: SearchReplaceParseState = {
+    _tag: "Outside",
+    blocks: [],
+    maybeError: Option.none(),
+  }
+  const finalState = Array.reduce(
+    indexedLines,
+    initialState,
+    (state, { line, lineNum }): SearchReplaceParseState => {
+      if (Option.isSome(state.maybeError)) {
+        return state
+      }
       const trimmed = line.trim()
       if (state._tag === "Outside") {
-        if (trimmed === "<<<<<<< SEARCH") {
-          return { _tag: "InSearch", blocks: state.blocks, searchLines: [] }
+        if (SEARCH_START_PATTERN.test(trimmed)) {
+          return {
+            _tag: "InSearch",
+            startLine: lineNum,
+            blocks: state.blocks,
+            searchLines: [],
+            maybeError: Option.none(),
+          }
+        }
+        if (SEPARATOR_PATTERN.test(trimmed)) {
+          return {
+            ...state,
+            maybeError: Option.some(
+              `Zeile ${lineNum}: Unerwartetes „=======“ außerhalb eines SEARCH/REPLACE-Blocks.`,
+            ),
+          }
+        }
+        if (REPLACE_END_PATTERN.test(trimmed)) {
+          return {
+            ...state,
+            maybeError: Option.some(
+              `Zeile ${lineNum}: Unerwartetes „>>>>>>> REPLACE“ ohne vorheriges „<<<<<<< SEARCH“ und „=======“.`,
+            ),
+          }
         }
         return state
       }
       if (state._tag === "InSearch") {
-        if (trimmed === "=======") {
+        if (SEPARATOR_PATTERN.test(trimmed)) {
           return {
             _tag: "InReplace",
+            startLine: state.startLine,
             blocks: state.blocks,
             searchLines: state.searchLines,
             replaceLines: [],
+            maybeError: Option.none(),
+          }
+        }
+        if (SEARCH_START_PATTERN.test(trimmed)) {
+          return {
+            ...state,
+            maybeError: Option.some(
+              `Block ${state.blocks.length + 1} (ab Zeile ${state.startLine}): Unerwartetes „<<<<<<< SEARCH“ innerhalb des Suchteils – fehlt davor „=======“ und „>>>>>>> REPLACE“?`,
+            ),
+          }
+        }
+        if (REPLACE_END_PATTERN.test(trimmed)) {
+          return {
+            ...state,
+            maybeError: Option.some(
+              `Block ${state.blocks.length + 1} (ab Zeile ${state.startLine}): „>>>>>>> REPLACE“ vor „=======“ gefunden. Trenne Such- und Ersetzungsteil mit „=======“.`,
+            ),
           }
         }
         return {
@@ -637,16 +812,25 @@ const parseSearchReplaceBlocks = (
           searchLines: [...state.searchLines, line],
         }
       }
-      if (trimmed === ">>>>>>> REPLACE") {
+      if (REPLACE_END_PATTERN.test(trimmed)) {
         return {
           _tag: "Outside",
           blocks: [
             ...state.blocks,
             {
-              search: state.searchLines.join("\n"),
-              replace: state.replaceLines.join("\n"),
+              searchLines: state.searchLines,
+              replaceLines: state.replaceLines,
             },
           ],
+          maybeError: Option.none(),
+        }
+      }
+      if (SEARCH_START_PATTERN.test(trimmed)) {
+        return {
+          ...state,
+          maybeError: Option.some(
+            `Block ${state.blocks.length + 1} (ab Zeile ${state.startLine}): Unerwartetes „<<<<<<< SEARCH“ innerhalb eines offenen Blocks – fehlt davor „>>>>>>> REPLACE“?`,
+          ),
         }
       }
       return {
@@ -656,27 +840,35 @@ const parseSearchReplaceBlocks = (
     },
   )
 
-  if (finalState._tag !== "Outside") {
+  if (Option.isSome(finalState.maybeError)) {
+    return { _tag: "Error", message: finalState.maybeError.value }
+  }
+  if (finalState._tag === "InSearch") {
     return {
       _tag: "Error",
-      message: "Unvollständiger SEARCH/REPLACE-Block (erwartet ======= und >>>>>>> REPLACE).",
+      message: `Unvollständiger SEARCH/REPLACE-Block ${finalState.blocks.length + 1} (ab Zeile ${finalState.startLine}): Trennlinie „=======“ und Endmarkierung „>>>>>>> REPLACE“ fehlen.`,
+    }
+  }
+  if (finalState._tag === "InReplace") {
+    return {
+      _tag: "Error",
+      message: `Unvollständiger SEARCH/REPLACE-Block ${finalState.blocks.length + 1} (ab Zeile ${finalState.startLine}): Endmarkierung „>>>>>>> REPLACE“ fehlt.`,
     }
   }
   if (Array.isReadonlyArrayEmpty(finalState.blocks)) {
-    return { _tag: "Error", message: "Keine SEARCH/REPLACE-Blöcke gefunden." }
+    return {
+      _tag: "Error",
+      message: [
+        "Keine SEARCH/REPLACE-Blöcke gefunden. Erwartetes Format:",
+        "<<<<<<< SEARCH",
+        "alter Code",
+        "=======",
+        "neuer Code",
+        ">>>>>>> REPLACE",
+      ].join("\n"),
+    }
   }
   return { _tag: "Ok", blocks: finalState.blocks }
-}
-
-const findAllSubstringIndices = (haystack: string, needle: string): ReadonlyArray<number> => {
-  const collect = (fromIndex: number, acc: ReadonlyArray<number>): ReadonlyArray<number> => {
-    const idx = haystack.indexOf(needle, fromIndex)
-    if (idx === -1) {
-      return acc
-    }
-    return collect(idx + Math.max(1, needle.length), [...acc, idx])
-  }
-  return collect(0, [])
 }
 
 export const applySearchReplaceEdits = (
@@ -688,54 +880,30 @@ export const applySearchReplaceEdits = (
     return EditApplyResult.Error({ message: parsed.message })
   }
 
-  const initialContent = originalContent.replace(/\r\n/g, "\n")
+  const initialLines = originalContent.replace(/\r\n/g, "\n").split("\n")
+  const blocks: ReadonlyArray<LineEditBlock> = Array.map(parsed.blocks, (block, index) => ({
+    label: `SEARCH-Block ${index + 1}`,
+    searchLines: block.searchLines,
+    replaceLines: block.replaceLines,
+    maybeHintLine: Option.none(),
+    maybeInsertIndex: Option.none(),
+    maybeExactText: Option.some({
+      search: block.searchLines.join("\n"),
+      replace: block.replaceLines.join("\n"),
+    }),
+    notFoundText: "wurde in der Datei nicht gefunden.",
+    missingContextText: "darf bei nicht-leerer Datei nicht leer sein.",
+  }))
 
-  const applyStep = (content: string, index: number): EditApplyResult => {
-    if (index >= parsed.blocks.length) {
-      return EditApplyResult.Ok({
-        content,
-        appliedCount: parsed.blocks.length,
-        updatedSnippet: "",
-      })
-    }
-
-    const block = parsed.blocks[index]
-    if (!block) {
-      return EditApplyResult.Error({ message: "Interner Fehler beim Lesen der Blöcke." })
-    }
-
-    if (block.search === "") {
-      if (content === "") {
-        return applyStep(block.replace, index + 1)
-      }
-      return EditApplyResult.Error({
-        message: `SEARCH-Block ${index + 1} darf bei nicht-leerer Datei nicht leer sein.`,
-      })
-    }
-
-    const matches = findAllSubstringIndices(content, block.search)
-    if (Array.isReadonlyArrayEmpty(matches)) {
-      const preview = block.search.split("\n")[0]?.trim() ?? ""
-      return EditApplyResult.Error({
-        message: `SEARCH-Block ${index + 1} nicht gefunden (${preview.slice(0, 60)}).`,
-      })
-    }
-    if (matches.length > 1) {
-      return EditApplyResult.Error({
-        message: `SEARCH-Block ${index + 1} ist mehrdeutig (${matches.length} Treffer) – bitte mehr Kontextzeilen angeben.`,
-      })
-    }
-
-    const matchIndex = matches[0]
-    if (matchIndex === undefined) {
-      return EditApplyResult.Error({ message: "Interner Fehler beim Ersetzen." })
-    }
-    const nextContent =
-      content.slice(0, matchIndex) + block.replace + content.slice(matchIndex + block.search.length)
-    return applyStep(nextContent, index + 1)
+  const result = applyLineEditBlocks(initialLines, blocks)
+  if (result._tag === "Error") {
+    return EditApplyResult.Error({ message: result.errors.join("\n") })
   }
-
-  return applyStep(initialContent, 0)
+  return EditApplyResult.Ok({
+    content: result.lines.join("\n"),
+    appliedCount: result.appliedCount,
+    updatedSnippet: "",
+  })
 }
 
 // SIMPLIFIED UNIFIED DIFF
@@ -766,25 +934,34 @@ const parseUnifiedDiffHunks = (
   | { readonly _tag: "Error"; readonly message: string } => {
   const cleaned = stripOuterMarkdownFence(raw)
   if (cleaned === "") {
-    return { _tag: "Error", message: "Kein Unified Diff gefunden." }
+    return { _tag: "Error", message: "Kein Unified Diff gefunden – die Eingabe ist leer." }
   }
 
   const lines = cleaned.split("\n")
+  const indexedLines = Array.map(lines, (line, idx) => ({ line, lineNum: idx + 1 }))
   const parsedState = Array.reduce(
-    lines,
+    indexedLines,
     {
       hunks: [] as ReadonlyArray<DiffHunk>,
       current: Option.none<DiffHunk>(),
       hasError: Option.none<string>(),
     },
-    (state, line) => {
+    (state, { line, lineNum }) => {
       if (Option.isSome(state.hasError)) {
         return state
       }
-      if (Option.isNone(state.current) && (line.startsWith("--- ") || line.startsWith("+++ "))) {
+      const trimmed = line.trim()
+      if (
+        Option.isNone(state.current) &&
+        (line.startsWith("--- ") ||
+          line.startsWith("+++ ") ||
+          line.startsWith("diff --git ") ||
+          line.startsWith("index ") ||
+          trimmed.startsWith("```"))
+      ) {
         return state
       }
-      if (line.trim().startsWith("@@")) {
+      if (trimmed.startsWith("@@")) {
         const nextHunks = Option.match(state.current, {
           onNone: () => state.hunks,
           onSome: (hunk) => [...state.hunks, hunk],
@@ -803,61 +980,74 @@ const parseUnifiedDiffHunks = (
         return state
       }
 
+      const appendToHunk = (hunk: DiffHunk) => {
+        if (line.startsWith("-")) {
+          return {
+            ...state,
+            current: Option.some({
+              ...hunk,
+              searchLines: [...hunk.searchLines, line.slice(1)],
+            }),
+          }
+        }
+        if (line.startsWith("+")) {
+          return {
+            ...state,
+            current: Option.some({
+              ...hunk,
+              replaceLines: [...hunk.replaceLines, line.slice(1)],
+            }),
+          }
+        }
+        if (line.startsWith(" ")) {
+          const ctx = line.slice(1)
+          return {
+            ...state,
+            current: Option.some({
+              ...hunk,
+              searchLines: [...hunk.searchLines, ctx],
+              replaceLines: [...hunk.replaceLines, ctx],
+            }),
+          }
+        }
+        if (line === "") {
+          return {
+            ...state,
+            current: Option.some({
+              ...hunk,
+              searchLines: [...hunk.searchLines, ""],
+              replaceLines: [...hunk.replaceLines, ""],
+            }),
+          }
+        }
+        return {
+          ...state,
+          hasError: Option.some(
+            `Diff-Hunk ${state.hunks.length + 1} (Zeile ${lineNum}): Ungültige Diff-Zeile „${previewLine(line)}“ – jede Zeile im Hunk muss mit ' ' (Kontext), '-' (entfernen) oder '+' (hinzufügen) beginnen.`,
+          ),
+        }
+      }
+
       return Option.match(state.current, {
-        onNone: () =>
-          line.trim() === ""
-            ? state
-            : {
-                ...state,
-                hasError: Option.some(
-                  `Unerwartete Diff-Zeile außerhalb eines @@-Blocks: "${line}"`,
-                ),
-              },
-        onSome: (hunk) => {
-          if (line.startsWith("-")) {
-            return {
-              ...state,
-              current: Option.some({
-                ...hunk,
-                searchLines: [...hunk.searchLines, line.slice(1)],
-              }),
-            }
+        onNone: () => {
+          if (trimmed === "") {
+            return state
           }
-          if (line.startsWith("+")) {
-            return {
-              ...state,
-              current: Option.some({
-                ...hunk,
-                replaceLines: [...hunk.replaceLines, line.slice(1)],
-              }),
-            }
-          }
-          if (line.startsWith(" ")) {
-            const ctx = line.slice(1)
-            return {
-              ...state,
-              current: Option.some({
-                ...hunk,
-                searchLines: [...hunk.searchLines, ctx],
-                replaceLines: [...hunk.replaceLines, ctx],
-              }),
-            }
-          }
-          if (line === "") {
-            return {
-              ...state,
-              current: Option.some({
-                ...hunk,
-                searchLines: [...hunk.searchLines, ""],
-                replaceLines: [...hunk.replaceLines, ""],
-              }),
-            }
+          if (line.startsWith("-") || line.startsWith("+") || line.startsWith(" ")) {
+            return appendToHunk({
+              maybeHintLine: Option.none(),
+              searchLines: [],
+              replaceLines: [],
+            })
           }
           return {
             ...state,
-            hasError: Option.some(`Ungültige Diff-Zeile (erwartet ' ', '-' oder '+'): "${line}"`),
+            hasError: Option.some(
+              `Zeile ${lineNum} außerhalb eines @@-Blocks: „${previewLine(line)}“. Beginne jeden Diff-Abschnitt mit \`@@\` und präfixe Zeilen mit ' ', '-' oder '+'.`,
+            ),
           }
         },
+        onSome: appendToHunk,
       })
     },
   )
@@ -872,53 +1062,19 @@ const parseUnifiedDiffHunks = (
   })
 
   if (Array.isReadonlyArrayEmpty(allHunks)) {
-    return { _tag: "Error", message: "Keine @@-Hunks im Unified Diff gefunden." }
+    return {
+      _tag: "Error",
+      message: [
+        "Keine @@-Hunks im Unified Diff gefunden. Erwartetes Format:",
+        "@@",
+        " unveränderte Kontextzeile",
+        "-entfernte Zeile",
+        "+neue Zeile",
+      ].join("\n"),
+    }
   }
 
   return { _tag: "Ok", hunks: allHunks }
-}
-
-const findLineSliceMatches = (
-  haystack: ReadonlyArray<string>,
-  needle: ReadonlyArray<string>,
-): ReadonlyArray<number> => {
-  if (needle.length === 0 || needle.length > haystack.length) {
-    return []
-  }
-  const maxStart = haystack.length - needle.length
-  return Array.flatMap(
-    Array.makeBy(maxStart + 1, (i) => i),
-    (startIdx) => {
-      const matchesAll = Array.every(needle, (line, offset) => haystack[startIdx + offset] === line)
-      return matchesAll ? [startIdx] : []
-    },
-  )
-}
-
-const pickUniqueClosestMatch = (
-  matches: ReadonlyArray<number>,
-  maybeHintLine: Option.Option<number>,
-): Option.Option<number> => {
-  if (matches.length === 1 && matches[0] !== undefined) {
-    return Option.some(matches[0])
-  }
-  return Option.match(maybeHintLine, {
-    onNone: () => Option.none(),
-    onSome: (hintLine) => {
-      const target = Math.max(0, hintLine - 1)
-      const byDistance = Order.mapInput(Order.Number, (n: number) => Math.abs(n - target))
-      const sorted = Array.sort(matches, byDistance)
-      const first = sorted[0]
-      const second = sorted[1]
-      if (first === undefined) {
-        return Option.none()
-      }
-      if (second !== undefined && Math.abs(first - target) === Math.abs(second - target)) {
-        return Option.none()
-      }
-      return Option.some(first)
-    },
-  })
 }
 
 export const applyUnifiedDiffEdits = (
@@ -931,55 +1087,27 @@ export const applyUnifiedDiffEdits = (
   }
 
   const initialLines = originalContent.replace(/\r\n/g, "\n").split("\n")
+  const blocks: ReadonlyArray<LineEditBlock> = Array.map(parsed.hunks, (hunk, index) => ({
+    label: `Diff-Hunk ${index + 1}`,
+    searchLines: hunk.searchLines,
+    replaceLines: hunk.replaceLines,
+    maybeHintLine: hunk.maybeHintLine,
+    maybeInsertIndex: Option.map(hunk.maybeHintLine, (line) => Math.max(0, line - 1)),
+    maybeExactText: Option.none(),
+    notFoundText: "konnte in der Datei nicht zugeordnet werden.",
+    missingContextText:
+      "hat keine Kontext- oder Löschzeilen zum Zuordnen. Gib mindestens eine unveränderte Nachbarzeile mit führendem Leerzeichen (' ') an.",
+  }))
 
-  const applyStep = (currentLines: ReadonlyArray<string>, index: number): EditApplyResult => {
-    if (index >= parsed.hunks.length) {
-      return EditApplyResult.Ok({
-        content: currentLines.join("\n"),
-        appliedCount: parsed.hunks.length,
-        updatedSnippet: "",
-      })
-    }
-
-    const hunk = parsed.hunks[index]
-    if (!hunk) {
-      return EditApplyResult.Error({ message: "Interner Fehler beim Lesen des Diffs." })
-    }
-
-    if (Array.isReadonlyArrayEmpty(hunk.searchLines)) {
-      if (currentLines.length === 1 && currentLines[0] === "") {
-        return applyStep(hunk.replaceLines, index + 1)
-      }
-      return EditApplyResult.Error({
-        message: `Diff-Hunk ${index + 1} hat keine Kontext- oder Löschzeilen zum Zuordnen.`,
-      })
-    }
-
-    const matches = findLineSliceMatches(currentLines, hunk.searchLines)
-    if (Array.isReadonlyArrayEmpty(matches)) {
-      return EditApplyResult.Error({
-        message: `Diff-Hunk ${index + 1} konnte nicht zugeordnet werden.`,
-      })
-    }
-
-    const maybeMatchIndex = pickUniqueClosestMatch(matches, hunk.maybeHintLine)
-    return Option.match(maybeMatchIndex, {
-      onNone: () =>
-        EditApplyResult.Error({
-          message: `Diff-Hunk ${index + 1} ist mehrdeutig (${matches.length} Treffer) – bitte mehr Kontextzeilen angeben.`,
-        }),
-      onSome: (matchIndex) => {
-        const nextLines = [
-          ...currentLines.slice(0, matchIndex),
-          ...hunk.replaceLines,
-          ...currentLines.slice(matchIndex + hunk.searchLines.length),
-        ]
-        return applyStep(nextLines, index + 1)
-      },
-    })
+  const result = applyLineEditBlocks(initialLines, blocks)
+  if (result._tag === "Error") {
+    return EditApplyResult.Error({ message: result.errors.join("\n") })
   }
-
-  return applyStep(initialLines, 0)
+  return EditApplyResult.Ok({
+    content: result.lines.join("\n"),
+    appliedCount: result.appliedCount,
+    updatedSnippet: "",
+  })
 }
 
 export const applyEditsForFormat = (
