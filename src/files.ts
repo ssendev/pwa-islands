@@ -701,6 +701,7 @@ const runtimeBridge: {
   savedFsaHandle: Option.Option<FileSystemDirectoryHandle>
   savedTauriFolder: Option.Option<string>
   maybeActivePreviewObjectUrl: Option.Option<string>
+  maybeActiveHistoryPreviewObjectUrl: Option.Option<string>
   deferredInstallPrompt: Option.Option<BeforeInstallPromptEvent>
   pendingImportFiles: ReadonlyArray<globalThis.File>
 } = {
@@ -709,6 +710,7 @@ const runtimeBridge: {
   savedFsaHandle: Option.none(),
   savedTauriFolder: Option.none(),
   maybeActivePreviewObjectUrl: Option.none(),
+  maybeActiveHistoryPreviewObjectUrl: Option.none(),
   deferredInstallPrompt: Option.none(),
   pendingImportFiles: [],
 }
@@ -765,6 +767,19 @@ export const revokeActivePreviewUrl = (): void => {
 export const setActivePreviewUrl = (url: string): void => {
   revokeActivePreviewUrl()
   runtimeBridge.maybeActivePreviewObjectUrl = Option.some(url)
+}
+
+export const revokeActiveHistoryPreviewUrl = (): void => {
+  Option.match(runtimeBridge.maybeActiveHistoryPreviewObjectUrl, {
+    onNone: () => undefined,
+    onSome: (url) => URL.revokeObjectURL(url),
+  })
+  runtimeBridge.maybeActiveHistoryPreviewObjectUrl = Option.none()
+}
+
+export const setActiveHistoryPreviewUrl = (url: string): void => {
+  revokeActiveHistoryPreviewUrl()
+  runtimeBridge.maybeActiveHistoryPreviewObjectUrl = Option.some(url)
 }
 
 export const getDeferredInstallPrompt = (): Option.Option<BeforeInstallPromptEvent> =>

@@ -1571,7 +1571,9 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolve(
         Editor.LoadHistoryPreviewAt,
         Editor.Message.SucceededLoadHistoryPreviewAt({
-          maybeContent: Option.some("<h1>Alte Vorschau</h1>"),
+          maybeContent: Option.some(
+            Editor.HistoryPreview.Text({ content: "<h1>Alte Vorschau</h1>" }),
+          ),
         }),
       ),
       sceneExpect(selector("#editor-preview-overlay")).toExist(),
@@ -1889,6 +1891,74 @@ describe("PWA Islands Scene Tests", () => {
         }),
       ),
       sceneExpect(selector("#editor-history-overlay")).toExist(),
+      sceneExpect(selector(".editor-history-preview-btn")).toExist(),
+      sceneExpect(selector(".editor-history-restore-btn")).toExist(),
+      click(selector(".editor-history-preview-btn")),
+      Command.resolve(
+        Editor.LoadHistoryPreviewAt,
+        Editor.Message.SucceededLoadHistoryPreviewAt({
+          maybeContent: Option.some(
+            Editor.HistoryPreview.Image({ objectUrl: "blob:history-logo" }),
+          ),
+        }),
+      ),
+      sceneExpect(selector("#editor-preview-overlay")).toExist(),
+      sceneExpect(selector("#editor-preview-image")).toHaveAttr("src", "blob:history-logo"),
+    )
+
+    const nonPreviewableBinaryModel: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "archive.bin",
+          name: "archive.bin",
+          fileMode: EditorFileMode.Binary({
+            preview: PreviewContent.None(),
+            edit: BinaryEdit.Disabled(),
+          }),
+          maybeValidationError: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          isLlmModeMenuOpen: false,
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: readyModel.editorSplitPercent,
+          editorSplitDrag: Option.none(),
+          canUndo: false,
+          canRedo: false,
+          historyState: Editor.HistoryState.Closed(),
+          isHistoryEnabled: true,
+          hasHistoryEntries: true,
+          isConfirmingDelete: false,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(nonPreviewableBinaryModel),
+      click(selector("#modal-btn-history")),
+      Command.resolve(
+        Editor.LoadFullHistory,
+        Editor.Message.SucceededLoadFullHistory({
+          entries: [
+            {
+              offset: 0,
+              endOffset: 32,
+              timestampMs: 1_700_000_000_000,
+              byteLength: 16,
+              contentHash: 0x1234abcd,
+            },
+          ],
+          isHistoryEnabled: true,
+        }),
+      ),
+      sceneExpect(selector("#editor-history-overlay")).toExist(),
       sceneExpect(selector(".editor-history-preview-btn")).toBeAbsent(),
       sceneExpect(selector(".editor-history-restore-btn")).toExist(),
     )
@@ -1997,7 +2067,9 @@ describe("PWA Islands Scene Tests", () => {
       Command.resolve(
         Editor.LoadHistoryPreviewAt,
         Editor.Message.SucceededLoadHistoryPreviewAt({
-          maybeContent: Option.some("<h1>Gelöschte Vorschau</h1>"),
+          maybeContent: Option.some(
+            Editor.HistoryPreview.Text({ content: "<h1>Gelöschte Vorschau</h1>" }),
+          ),
         }),
       ),
       sceneExpect(selector("#editor-preview-overlay")).toExist(),

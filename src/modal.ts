@@ -19,6 +19,7 @@ import {
   getPendingImportFiles,
   loadEditorFileModeForEntry,
   requireActiveStorage,
+  revokeActiveHistoryPreviewUrl,
   revokeActivePreviewUrl,
   setPendingImportFiles,
 } from "./files"
@@ -725,6 +726,7 @@ export const RevokeActivePreviewUrl = Command.define("RevokeActivePreviewUrl", {
   messages: [Message.CompletedRevokeActivePreviewUrl],
   execute: Effect.sync(() => {
     revokeActivePreviewUrl()
+    revokeActiveHistoryPreviewUrl()
     return Message.CompletedRevokeActivePreviewUrl()
   }),
 })

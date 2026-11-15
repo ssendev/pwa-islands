@@ -16,9 +16,12 @@ import {
   PreviewContent,
   arrayBufferToBase64,
   base64ToUint8Array,
+  getPreviewType,
   loadEditorFileModeForEntry,
   requireActiveStorage,
+  revokeActiveHistoryPreviewUrl,
   revokeActivePreviewUrl,
+  setActiveHistoryPreviewUrl,
 } from "./files"
 import {
   EditApplyResult,
@@ -43,7 +46,7 @@ import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { monacoEditorElement, triggerMonacoHistoryAction } from "./monaco-element"
 import { buildEditUrl, buildNewUrl } from "./route"
-import { checkTextBytes } from "./storage"
+import { checkTextBytes, getMimeType } from "./storage"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
   clampEditorSplitPercent,
@@ -147,6 +150,19 @@ export const HistoryEntry = Schema.Struct({
 })
 export type HistoryEntry = typeof HistoryEntry.Type
 
+export const HistoryPreview = defineTaggedUnion({
+  Text: {
+    content: Schema.String,
+  },
+  Image: {
+    objectUrl: Schema.String,
+  },
+  Pdf: {
+    objectUrl: Schema.String,
+  },
+})
+export type HistoryPreview = typeof HistoryPreview.Type
+
 export const HistoryState = defineTaggedUnion({
   Closed: {},
   Loading: {},
@@ -155,7 +171,7 @@ export const HistoryState = defineTaggedUnion({
     isConfirmingClear: Schema.Boolean,
     isConfirmingDeleteLatest: Schema.optionalKey(Schema.Boolean),
     isHistoryEnabled: Schema.Boolean,
-    maybePreviewContent: Schema.Option(Schema.String),
+    maybePreviewContent: Schema.Option(HistoryPreview),
   },
 })
 export type HistoryState = typeof HistoryState.Type
@@ -445,6 +461,14 @@ export const applyLlmChatFailure = (model: Model, message: string): Model => {
     ConfirmOverwrite: () => model,
   })
 }
+
+const hasHistoryPreviewObjectUrl = (model: Model): boolean =>
+  model._tag === "EditFile" &&
+  model.historyState._tag === "Open" &&
+  Option.exists(
+    model.historyState.maybePreviewContent,
+    (preview) => preview._tag === "Image" || preview._tag === "Pdf",
+  )
 
 export const isPreviewOpen = (model: Model): boolean =>
   Model.match(model, {
@@ -882,11 +906,12 @@ export const Message = defineMessageUnion({
     endOffset: Schema.Number,
   },
   SucceededLoadHistoryPreviewAt: {
-    maybeContent: Schema.Option(Schema.String),
+    maybeContent: Schema.Option(HistoryPreview),
   },
   FailedLoadHistoryPreviewAt: {
     message: Schema.String,
   },
+  CompletedRevokeActiveHistoryPreviewUrl: {},
   ClickedRequestClearHistory: {},
   ClickedCancelClearHistory: {},
   ClickedConfirmClearHistory: {},
@@ -1639,12 +1664,35 @@ export const LoadHistoryPreviewAt = Command.define("LoadHistoryPreviewAt", {
         }
         const check = checkTextBytes(maybeRecord.value.bytes)
         if (check.kind === "binary") {
-          return Message.FailedLoadHistoryPreviewAt({
-            message: "Für Binärdateien ist keine Vorschau verfügbar.",
+          return Option.match(getPreviewType(args.fileName), {
+            onNone: () =>
+              Message.FailedLoadHistoryPreviewAt({
+                message: "Für Binärdateien ist keine Vorschau verfügbar.",
+              }),
+            onSome: (previewKind) => {
+              const mimeType =
+                previewKind === "pdf" ? "application/pdf" : getMimeType(args.fileName)
+              const blob = new Blob([new Uint8Array(maybeRecord.value.bytes)], {
+                type: mimeType,
+              })
+              const objectUrl = URL.createObjectURL(blob)
+              setActiveHistoryPreviewUrl(objectUrl)
+              return Message.SucceededLoadHistoryPreviewAt({
+                maybeContent: Option.some(
+                  previewKind === "image"
+                    ? HistoryPreview.Image({ objectUrl })
+                    : HistoryPreview.Pdf({ objectUrl }),
+                ),
+              })
+            },
           })
         }
         return Message.SucceededLoadHistoryPreviewAt({
-          maybeContent: Option.some(check.kind === "text" ? check.text : ""),
+          maybeContent: Option.some(
+            HistoryPreview.Text({
+              content: check.kind === "text" ? check.text : "",
+            }),
+          ),
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -1657,6 +1705,14 @@ export const LoadHistoryPreviewAt = Command.define("LoadHistoryPreviewAt", {
         ),
       ),
     ),
+})
+
+export const RevokeActiveHistoryPreviewUrl = Command.define("RevokeActiveHistoryPreviewUrl", {
+  messages: [Message.CompletedRevokeActiveHistoryPreviewUrl],
+  execute: Effect.sync(() => {
+    revokeActiveHistoryPreviewUrl()
+    return Message.CompletedRevokeActiveHistoryPreviewUrl()
+  }),
 })
 
 export const DeleteLatestFileHistoryEntry = Command.define("DeleteLatestFileHistoryEntry", {
@@ -2840,6 +2896,7 @@ export const update = (
 
     ClickedClosePreview: () => ({
       model: closePreview(model),
+      ...(hasHistoryPreviewObjectUrl(model) ? { commands: [RevokeActiveHistoryPreviewUrl()] } : {}),
       outMessage: isEditorPreviewOpen(model) ? OutMessage.NavigateBack() : OutMessage.None(),
     }),
 
@@ -3091,14 +3148,19 @@ export const update = (
     },
 
     ClickedCloseHistory: () => {
+      const revokeCommands = hasHistoryPreviewObjectUrl(model)
+        ? { commands: [RevokeActiveHistoryPreviewUrl()] }
+        : {}
       if (model._tag === "EditFile" && model.isHistoryOnly) {
         return {
           model: closeHistory(model),
+          ...revokeCommands,
           outMessage: OutMessage.CloseModal({ replaceUrl: true }),
         }
       }
       return {
         model: closeHistory(model),
+        ...revokeCommands,
         outMessage: OutMessage.None(),
       }
     },
@@ -3321,7 +3383,7 @@ export const update = (
     ClickedPreviewHistoryEntry: ({ endOffset }) => {
       if (
         model._tag !== "EditFile" ||
-        (model.fileMode._tag !== "Text" && model.isDeletedHistory !== true)
+        !canPreviewHistoryEntry(model.originalName, model.fileMode, model.isDeletedHistory)
       ) {
         return { model, outMessage: OutMessage.None() }
       }
@@ -3386,6 +3448,11 @@ export const update = (
         }),
       }
     },
+
+    CompletedRevokeActiveHistoryPreviewUrl: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
 
     ClickedRequestClearHistory: () => {
       if (model._tag !== "EditFile" || model.historyState._tag !== "Open") {
@@ -4729,17 +4796,49 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
 const PREVIEW_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
 
-const viewPreviewOverlay = (content: string, h: Html.HtmlBuilder<Message>): Html.Html =>
+const canPreviewHistoryEntry = (
+  fileName: string,
+  fileMode: EditorFileMode,
+  isDeletedHistory: boolean | undefined,
+): boolean =>
+  fileMode._tag === "Text" || isDeletedHistory === true || Option.isSome(getPreviewType(fileName))
+
+const viewHistoryPreviewOverlay = (
+  preview: HistoryPreview,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
   h.div(
     [h.Id("editor-preview-overlay"), h.Class("editor-preview-overlay")],
     [
-      h.iframe([
-        h.Id("editor-preview-iframe"),
-        h.Class("editor-preview-iframe"),
-        h.Srcdoc(content),
-        h.Sandbox(PREVIEW_IFRAME_SANDBOX),
-        h.Title("Vorschau"),
-      ]),
+      HistoryPreview.match(preview, {
+        Text: ({ content }) =>
+          h.iframe([
+            h.Id("editor-preview-iframe"),
+            h.Class("editor-preview-iframe"),
+            h.Srcdoc(content),
+            h.Sandbox(PREVIEW_IFRAME_SANDBOX),
+            h.Title("Vorschau"),
+          ]),
+        Image: ({ objectUrl }) =>
+          h.div(
+            [h.Class("editor-preview-image-wrap")],
+            [
+              h.img([
+                h.Id("editor-preview-image"),
+                h.Class("editor-preview-image"),
+                h.Src(objectUrl),
+                h.Alt("Vorschau der Version"),
+              ]),
+            ],
+          ),
+        Pdf: ({ objectUrl }) =>
+          h.iframe([
+            h.Id("editor-preview-iframe"),
+            h.Class("editor-preview-iframe"),
+            h.Src(objectUrl),
+            h.Title("Vorschau"),
+          ]),
+      }),
       h.button(
         [
           h.Type("button"),
@@ -4753,6 +4852,9 @@ const viewPreviewOverlay = (content: string, h: Html.HtmlBuilder<Message>): Html
       ),
     ],
   )
+
+const viewPreviewOverlay = (content: string, h: Html.HtmlBuilder<Message>): Html.Html =>
+  viewHistoryPreviewOverlay(HistoryPreview.Text({ content }), h)
 
 const formatHistoryTimestamp = (timestampMs: number): string =>
   new Date(timestampMs).toLocaleString("de-DE", {
@@ -5148,7 +5250,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         isDeletedHistory,
         isConfirmingDelete,
       }) => {
-        const isBinaryHistory = fileMode._tag === "Binary" && isDeletedHistory !== true
+        const isBinaryHistory = !canPreviewHistoryEntry(originalName, fileMode, isDeletedHistory)
         if (isHistoryOnly) {
           return h.div(
             [h.Class("editor-modal-host")],
@@ -5162,7 +5264,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 h,
               ),
               historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
-                ? viewPreviewOverlay(historyState.maybePreviewContent.value, h)
+                ? viewHistoryPreviewOverlay(historyState.maybePreviewContent.value, h)
                 : h.empty,
             ],
           )
@@ -5219,7 +5321,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               h,
             ),
             historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
-              ? viewPreviewOverlay(historyState.maybePreviewContent.value, h)
+              ? viewHistoryPreviewOverlay(historyState.maybePreviewContent.value, h)
               : h.empty,
             isConfirmingDelete ? viewConfirmDeleteModal(originalName, "file", h) : h.empty,
           ],

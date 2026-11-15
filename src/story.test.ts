@@ -1326,7 +1326,9 @@ describe("PWA Islands Story Tests", () => {
               entries: [],
               isConfirmingClear: false,
               isHistoryEnabled: true,
-              maybePreviewContent: Option.some("<p>Old</p>"),
+              maybePreviewContent: Option.some(
+                Editor.HistoryPreview.Text({ content: "<p>Old</p>" }),
+              ),
             }),
             isConfirmingDelete: false,
           }),
