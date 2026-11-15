@@ -1078,7 +1078,12 @@ export const update = (
         return { model: modalState, outMessage: OutMessage.None() }
       }
 
-      const reservedNames = new Set<string>(Array.map(context.existingEntries, (e) => e.name))
+      const reservedNames = new Set<string>(
+        Array.map(
+          Array.filter(context.existingEntries, (e) => e.isDeleted !== true),
+          (e) => e.name,
+        ),
+      )
 
       const { collisions, resolved } = pipe(
         files,
@@ -1153,7 +1158,10 @@ export const update = (
           ]
 
           const reservedNames = new Set<string>([
-            ...Array.map(context.existingEntries, (e) => e.name),
+            ...Array.map(
+              Array.filter(context.existingEntries, (e) => e.isDeleted !== true),
+              (e) => e.name,
+            ),
             ...Array.map(updatedResolved, (r) => r.targetName),
           ])
 

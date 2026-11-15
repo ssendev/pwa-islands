@@ -1838,7 +1838,12 @@ const handleSaveAction = (
     return Option.none()
   }
 
-  const existingNames = new Set(Array.map(context.existingEntries, (e) => e.name))
+  const existingNames = new Set(
+    Array.map(
+      Array.filter(context.existingEntries, (e) => e.isDeleted !== true),
+      (e) => e.name,
+    ),
+  )
 
   return Model.match(model, {
     CreateFolder: (createFolder) => {

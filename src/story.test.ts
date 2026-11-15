@@ -60,7 +60,7 @@ import {
   RevokeActivePreviewUrl,
   WritePendingImportFiles,
 } from "./modal"
-import type { FileEntry } from "./files"
+import { BinaryEdit, PreviewContent, type FileEntry } from "./files"
 import { AppRoute } from "./route"
 import { OPFS_APP_FOLDER } from "./storage"
 
@@ -1060,6 +1060,83 @@ describe("PWA Islands Story Tests", () => {
             }),
           )
         }),
+      )
+    })
+
+    it("ignores deleted entries with version history when checking duplicate names", () => {
+      const editorModel = Editor.Model.EditFile({
+        originalName: "other.jpg",
+        name: "himbermaus (1).jpg",
+        fileMode: EditorFileMode.Binary({
+          preview: PreviewContent.None(),
+          edit: BinaryEdit.Disabled(),
+        }),
+        maybeValidationError: Option.none(),
+        maybePasteError: Option.none(),
+        llmBarMode: "Closed",
+        isLlmModeMenuOpen: false,
+        llmChatInput: "",
+        llmChatMessages: [],
+        llmChatDisplay: [],
+        llmChatState: Editor.LlmChatState.Idle(),
+        isMaximized: false,
+        isEditingName: true,
+        isPreviewOpen: false,
+        editorSplitPercent: 62,
+        editorSplitDrag: Option.none(),
+        canUndo: false,
+        canRedo: false,
+        historyState: Editor.HistoryState.Closed(),
+        isConfirmingDelete: false,
+      })
+      const modelWithDeletedHistoryEntry: Model = {
+        ...readyModel,
+        storageState: StorageState.Ready({
+          rootName: "Projekte",
+          storageType: "opfs",
+          subPath: [],
+          otherBackend: SavedBackend.NoFolderSelected(),
+          entriesState: EntriesState.Loaded({
+            entries: [
+              {
+                id: "file:himbermaus (1).jpg",
+                name: "himbermaus (1).jpg",
+                kind: "file",
+                maybeSize: Option.none(),
+                maybeLastModified: Option.none(),
+                isDeleted: true,
+                hasHistory: true,
+              },
+              {
+                id: "file:other.jpg",
+                name: "other.jpg",
+                kind: "file",
+                maybeSize: Option.none(),
+                maybeLastModified: Option.none(),
+              },
+            ],
+          }),
+        }),
+        modalState: ModalState.Editor({
+          editor: editorModel,
+        }),
+      }
+
+      story(
+        update,
+        given(modelWithDeletedHistoryEntry),
+        message(editorMsg(Editor.Message.ClickedSave())),
+        Command.expectExact(
+          SaveChanges({
+            model: editorModel,
+            subPath: [],
+          }),
+        ),
+        Command.resolve(
+          SaveChanges,
+          Editor.Message.SucceededSaveChanges({ entries: sampleEntries }),
+        ),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
       )
     })
 
