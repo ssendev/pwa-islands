@@ -2843,6 +2843,40 @@ describe("PWA Islands Story Tests", () => {
         message(Editor.Message.EndedResizeEditorSplit()),
       )
 
+      story(
+        (m: Editor.Model, msg: Editor.Message) =>
+          Editor.update(m, msg, {
+            subPath: [],
+            existingEntries: [],
+            llmEnabled: true,
+            llmEditFormat: "hashline",
+          }),
+        given(editorModel),
+        message(
+          Editor.Message.StartedResizeEditorSplit({
+            startScreenX: 100,
+            startScreenY: 620,
+            pointerId: 2,
+          }),
+        ),
+        Command.resolve(
+          Editor.StartEditorSplitDrag,
+          Editor.Message.MeasuredEditorSplitDrag({
+            axis: "vertical",
+            startWidthPx: 620,
+            containerWidthPx: 1000,
+          }),
+        ),
+        message(Editor.Message.MovedResizeEditorSplit({ screenX: 100, screenY: 450 })),
+        model((m) => {
+          expect(m._tag).toBe("CreateFile")
+          if (m._tag === "CreateFile") {
+            expect(m.editorSplitPercent).toBe(45)
+          }
+        }),
+        message(Editor.Message.EndedResizeEditorSplit()),
+      )
+
       const modelWithResizedEditor = modifyFields(readyModel, {
         modalState: () =>
           ModalState.Editor({

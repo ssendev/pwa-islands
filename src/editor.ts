@@ -150,7 +150,9 @@ export const OverwriteSource = defineTaggedUnion({
 export type OverwriteSource = typeof OverwriteSource.Type
 
 export const EditorSplitDrag = Schema.Struct({
+  axis: Schema.Literals(["horizontal", "vertical"]),
   startScreenX: Schema.Number,
+  startScreenY: Schema.Number,
   startWidthPx: Schema.Number,
   containerWidthPx: Schema.Number,
 })
@@ -896,14 +898,17 @@ export const Message = defineMessageUnion({
   CompletedClearClipboardAfterPaste: {},
   StartedResizeEditorSplit: {
     startScreenX: Schema.Number,
+    startScreenY: Schema.optionalKey(Schema.Number),
     pointerId: Schema.Number,
   },
   MeasuredEditorSplitDrag: {
+    axis: Schema.optionalKey(Schema.Literals(["horizontal", "vertical"])),
     startWidthPx: Schema.Number,
     containerWidthPx: Schema.Number,
   },
   MovedResizeEditorSplit: {
     screenX: Schema.Number,
+    screenY: Schema.optionalKey(Schema.Number),
   },
   EndedResizeEditorSplit: {},
   ClickedToggleEditName: {},
@@ -1514,9 +1519,19 @@ export const StartEditorSplitDrag = Command.define("StartEditorSplitDrag", {
       }
       const form = document.getElementById("modal-form")
       const body = form?.querySelector(".modal-body")
-      const containerWidthPx = form ? form.getBoundingClientRect().width : 0
-      const startWidthPx = body ? body.getBoundingClientRect().width : 0
-      return Message.MeasuredEditorSplitDrag({ startWidthPx, containerWidthPx })
+      const axis =
+        splitter && getComputedStyle(splitter).cursor === "row-resize" ? "vertical" : "horizontal"
+      const containerWidthPx = form
+        ? axis === "vertical"
+          ? form.getBoundingClientRect().height
+          : form.getBoundingClientRect().width
+        : 0
+      const startWidthPx = body
+        ? axis === "vertical"
+          ? body.getBoundingClientRect().height
+          : body.getBoundingClientRect().width
+        : 0
+      return Message.MeasuredEditorSplitDrag({ axis, startWidthPx, containerWidthPx })
     }),
 })
 
@@ -2613,9 +2628,11 @@ export const update = (
           }
     },
 
-    StartedResizeEditorSplit: ({ startScreenX, pointerId }) => {
+    StartedResizeEditorSplit: ({ startScreenX, startScreenY, pointerId }) => {
       const drag = Option.some({
+        axis: "horizontal" as const,
         startScreenX,
+        startScreenY: startScreenY ?? startScreenX,
         startWidthPx: 0,
         containerWidthPx: 0,
       })
@@ -2633,9 +2650,11 @@ export const update = (
       }
     },
 
-    MeasuredEditorSplitDrag: ({ startWidthPx, containerWidthPx }) => {
+    MeasuredEditorSplitDrag: ({ axis, startWidthPx, containerWidthPx }) => {
       const updateDrag = (drag: EditorSplitDrag) => ({
+        axis: axis ?? "horizontal",
         startScreenX: drag.startScreenX,
+        startScreenY: drag.startScreenY,
         startWidthPx,
         containerWidthPx,
       })
@@ -2652,7 +2671,7 @@ export const update = (
       }
     },
 
-    MovedResizeEditorSplit: ({ screenX }) => {
+    MovedResizeEditorSplit: ({ screenX, screenY }) => {
       const computeNextPercent = (
         currentPercent: number,
         maybeDrag: Option.Option<EditorSplitDrag>,
@@ -2663,11 +2682,16 @@ export const update = (
             if (drag.containerWidthPx <= 0) {
               return currentPercent
             }
-            const minWidthPx = 280
-            const maxWidthPx = Math.max(minWidthPx, drag.containerWidthPx - 268)
-            const targetWidthPx = drag.startWidthPx + (screenX - drag.startScreenX)
-            const clampedWidthPx = Math.min(maxWidthPx, Math.max(minWidthPx, targetWidthPx))
-            return clampEditorSplitPercent((clampedWidthPx / drag.containerWidthPx) * 100)
+            const isVertical = drag.axis === "vertical"
+            const minSizePx = isVertical ? 180 : 280
+            const minOtherPanePx = isVertical ? 220 : 268
+            const maxSizePx = Math.max(minSizePx, drag.containerWidthPx - minOtherPanePx)
+            const deltaPx = isVertical
+              ? (screenY ?? drag.startScreenY) - drag.startScreenY
+              : screenX - drag.startScreenX
+            const targetSizePx = drag.startWidthPx + deltaPx
+            const clampedSizePx = Math.min(maxSizePx, Math.max(minSizePx, targetSizePx))
+            return clampEditorSplitPercent((clampedSizePx / drag.containerWidthPx) * 100)
           },
         })
       const nextModel = Model.match(model, {
@@ -4552,16 +4576,24 @@ const viewEditorSplitter = (isDragging: boolean, h: Html.HtmlBuilder<Message>): 
     h.Class(isDragging ? "modal-editor-splitter is-dragging" : "modal-editor-splitter"),
     h.Role("separator"),
     h.AriaOrientation("vertical"),
-    h.AriaLabel("Editor-Breite anpassen"),
+    h.AriaLabel("Editor-Größe anpassen"),
     h.OnPointerDown(
-      (_pointerType, button, screenX, _screenY, _timeStamp, _clientX, _clientY, pointerId) =>
+      (_pointerType, button, screenX, screenY, _timeStamp, _clientX, _clientY, pointerId) =>
         button === 0 || button === -1
-          ? Option.some(Message.StartedResizeEditorSplit({ startScreenX: screenX, pointerId }))
+          ? Option.some(
+              Message.StartedResizeEditorSplit({
+                startScreenX: screenX,
+                startScreenY: screenY,
+                pointerId,
+              }),
+            )
           : Option.none(),
     ),
     ...(isDragging
       ? [
-          h.OnPointerMove((screenX) => Option.some(Message.MovedResizeEditorSplit({ screenX }))),
+          h.OnPointerMove((screenX, screenY) =>
+            Option.some(Message.MovedResizeEditorSplit({ screenX, screenY })),
+          ),
           h.OnPointerUp(() => Option.some(Message.EndedResizeEditorSplit())),
         ]
       : []),
