@@ -621,6 +621,7 @@ describe("runEditorChatTurn", () => {
       config: {
         ...emptyLlmSettings,
         ...emptyLlmSelection,
+        editFormat: "hashline",
         baseUrl: "https://api.example.com/v1",
         model: "gpt-4o-mini",
         streaming: false,
@@ -719,6 +720,7 @@ describe("runEditorChatTurn", () => {
       config: {
         ...emptyLlmSettings,
         ...emptyLlmSelection,
+        editFormat: "hashline",
         baseUrl: "https://api.example.com/v1",
         model: "gpt-4o-mini",
         streaming: false,
@@ -931,6 +933,7 @@ describe("LanguageModel-API", () => {
       config: {
         ...emptyLlmSettings,
         ...emptyLlmSelection,
+        editFormat: "hashline",
         enabled: true,
         provider: "language-model",
         streaming: false,
@@ -964,6 +967,7 @@ describe("LanguageModel-API", () => {
       config: {
         ...emptyLlmSettings,
         ...emptyLlmSelection,
+        editFormat: "hashline",
         enabled: true,
         provider: "language-model",
         streaming: false,

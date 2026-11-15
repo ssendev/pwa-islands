@@ -14,7 +14,7 @@ import {
 export const EditFormat = Schema.Literals(["hashline", "search-replace", "unified-diff"])
 export type EditFormat = typeof EditFormat.Type
 
-export const DEFAULT_EDIT_FORMAT: EditFormat = "hashline"
+export const DEFAULT_EDIT_FORMAT: EditFormat = "unified-diff"
 
 export const parseEditFormat = (value: string): EditFormat =>
   Match.value(value).pipe(
