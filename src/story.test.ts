@@ -108,6 +108,7 @@ const readyModel: Model = {
   showFileInfo: true,
   isSettingsOpen: false,
   isSettingsDialogOpen: false,
+  isEditingLlmSettings: false,
   llmEnabled: false,
   llmEditFormat: "hashline",
   llmBaseUrl: "",

@@ -2572,6 +2572,19 @@ code {
   align-items: center;
 }
 
+.llm-settings-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.llm-summary-item {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+  word-break: break-all;
+}
+
 .llm-test-status {
   display: inline-flex;
   align-items: center;

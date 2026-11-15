@@ -337,6 +337,7 @@ export const Model = Schema.Struct({
   showFileInfo: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
+  isEditingLlmSettings: Schema.Boolean,
   llmEnabled: Schema.Boolean,
   llmEditFormat: EditFormat,
   llmBaseUrl: Schema.String,
@@ -524,6 +525,7 @@ export const Message = defineMessageUnion({
   ClickedOpenSettingsDialog: {},
   ClickedCloseSettingsDialog: {},
   ClickedSaveSettingsDialog: {},
+  ClickedEditLlmSettings: {},
   ClickedRequestClearAllHistory: {},
   ClickedCancelClearAllHistory: {},
   ClickedConfirmClearAllHistory: {},
@@ -1902,6 +1904,7 @@ export const init = (
         showFileInfo: true,
         isSettingsOpen: false,
         isSettingsDialogOpen: isInitialSettingsOpen,
+        isEditingLlmSettings: false,
         llmEnabled: false,
         llmEditFormat: DEFAULT_EDIT_FORMAT,
         llmBaseUrl: "",
@@ -1969,6 +1972,7 @@ export const init = (
       showFileInfo: true,
       isSettingsOpen: false,
       isSettingsDialogOpen: isInitialSettingsOpen,
+      isEditingLlmSettings: false,
       llmEnabled: false,
       llmEditFormat: DEFAULT_EDIT_FORMAT,
       llmBaseUrl: "",
@@ -2117,6 +2121,7 @@ const openSettingsDialogModel = (model: Model): Model =>
   modifyFields(model, {
     isSettingsOpen: () => false,
     isSettingsDialogOpen: () => true,
+    isEditingLlmSettings: () => false,
     llmDraftEnabled: () => model.llmEnabled,
     llmDraftEditFormat: () => model.llmEditFormat,
     llmDraftBaseUrl: () => model.llmBaseUrl,
@@ -3002,6 +3007,7 @@ export const update = (
       return {
         model: modifyFields(model, {
           isSettingsDialogOpen: () => false,
+          isEditingLlmSettings: () => false,
           llmTestState: () => LlmTestState.Idle(),
           clearAllHistoryState: () => ClearAllHistoryState.Idle(),
         }),
@@ -3072,6 +3078,7 @@ export const update = (
       return {
         model: modifyFields(model, {
           isSettingsDialogOpen: () => false,
+          isEditingLlmSettings: () => false,
           llmEnabled: () => model.llmDraftEnabled,
           llmEditFormat: () => model.llmDraftEditFormat,
           llmBaseUrl: () => model.llmDraftBaseUrl,
@@ -3111,9 +3118,16 @@ export const update = (
       }
     },
 
+    ClickedEditLlmSettings: () => ({
+      model: modifyFields(model, {
+        isEditingLlmSettings: () => true,
+      }),
+    }),
+
     ToggledLlmEnabled: ({ isChecked }) => ({
       model: modifyFields(model, {
         llmDraftEnabled: () => isChecked,
+        isEditingLlmSettings: (current) => (isChecked ? true : current),
         llmTestState: () => LlmTestState.Idle(),
       }),
     }),
@@ -5131,7 +5145,40 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             : h.empty,
                         ],
                       ),
-                      ...(model.llmDraftEnabled
+                      ...(model.llmDraftEnabled && !model.isEditingLlmSettings
+                        ? [
+                            h.div(
+                              [h.Class("llm-settings-summary")],
+                              [
+                                h.p(
+                                  [h.Id("llm-summary-url"), h.Class("llm-summary-item")],
+                                  [
+                                    `URL: ${
+                                      model.llmDraftBaseUrl.trim() !== ""
+                                        ? model.llmDraftBaseUrl.trim()
+                                        : "Nicht festgelegt"
+                                    }`,
+                                  ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("settings-group-actions")],
+                              [
+                                h.button(
+                                  [
+                                    h.Type("button"),
+                                    h.Id("btn-edit-llm-settings"),
+                                    h.Class("btn btn-secondary"),
+                                    h.OnClick(Message.ClickedEditLlmSettings()),
+                                  ],
+                                  [viewIcon("edit", h), " Bearbeiten"],
+                                ),
+                              ],
+                            ),
+                          ]
+                        : []),
+                      ...(model.llmDraftEnabled && model.isEditingLlmSettings
                         ? [
                             h.div(
                               [h.Class("form-group")],

@@ -91,6 +91,7 @@ const readyModel: Model = {
   showFileInfo: true,
   isSettingsOpen: false,
   isSettingsDialogOpen: false,
+  isEditingLlmSettings: false,
   llmEnabled: false,
   llmEditFormat: "hashline",
   llmBaseUrl: "",
@@ -1259,6 +1260,7 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#llm-edit-format")).toExist(),
       sceneExpect(selector("#llm-edit-format")).toHaveValue("hashline"),
       sceneExpect(selector("#llm-enabled")).toExist(),
+      sceneExpect(selector("#btn-edit-llm-settings")).toBeAbsent(),
       sceneExpect(selector("#llm-base-url")).toBeAbsent(),
       change(selector("#llm-edit-format"), "search-replace"),
       sceneExpect(selector("#llm-edit-format")).toHaveValue("search-replace"),
@@ -1371,6 +1373,7 @@ describe("PWA Islands Scene Tests", () => {
         ...readyModel,
         hasLanguageModel: true,
         isSettingsDialogOpen: true,
+        isEditingLlmSettings: true,
         llmDraftEnabled: true,
         llmDraftBaseUrl: "",
         llmDraftModels: "gpt-4o-mini",
@@ -1392,6 +1395,7 @@ describe("PWA Islands Scene Tests", () => {
       given({
         ...readyModel,
         isSettingsDialogOpen: true,
+        isEditingLlmSettings: true,
         llmDraftEnabled: true,
         llmDraftBaseUrl: "https://api.example.com/v1",
         llmDraftModels: "gpt-4o-mini",
@@ -1403,12 +1407,37 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
+  it("zeigt in den KI-Einstellungen zunächst Bearbeitungsformat, Chat-API aktivieren und URL und öffnet den Rest per Bearbeiten-Button", () => {
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        llmEnabled: true,
+        llmBaseUrl: "https://api.example.com/v1",
+      }),
+      click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
+      Command.resolve(PushUrl, Message.CompletedPushUrl()),
+      sceneExpect(selector("#llm-edit-format")).toExist(),
+      sceneExpect(selector("#llm-enabled")).toBeChecked(),
+      sceneExpect(selector("#llm-summary-url")).toHaveText("URL: https://api.example.com/v1"),
+      sceneExpect(selector("#llm-base-url")).toBeAbsent(),
+      sceneExpect(selector("#llm-api-key")).toBeAbsent(),
+      sceneExpect(selector("#llm-models")).toBeAbsent(),
+      click(selector("#btn-edit-llm-settings")),
+      sceneExpect(selector("#llm-api-key")).toExist(),
+      sceneExpect(selector("#llm-models")).toExist(),
+      sceneExpect(selector("#llm-base-url")).toHaveValue("https://api.example.com/v1"),
+    )
+  })
+
   it("zeigt Human-Names für Modelle im Dropdown an und übergibt die Modell-ID als Wert", () => {
     scene(
       { update, view },
       given({
         ...readyModel,
         isSettingsDialogOpen: true,
+        isEditingLlmSettings: true,
         llmDraftEnabled: true,
         llmDraftBaseUrl: "https://api.example.com/v1",
         llmDraftModels: "Schnell=gpt-4o-mini, Lokal=qwen3",
