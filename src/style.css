@@ -1497,8 +1497,13 @@ code {
 
 .modal-llm-select {
   width: auto;
+  field-sizing: content;
+  min-width: 0;
   max-width: 220px;
   flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-llm-send-btn {
@@ -2685,6 +2690,66 @@ code {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.llm-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-provider-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--code-bg);
+}
+
+.llm-provider-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.llm-provider-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.llm-provider-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-h);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-provider-url {
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.llm-provider-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.llm-provider-actions .is-danger {
+  color: var(--danger, #c0392b);
 }
 
 .llm-summary-item {

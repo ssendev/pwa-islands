@@ -77,18 +77,25 @@ import {
 import {
   type EditorChatMessage,
   LANGUAGE_MODEL_OPTION_VALUE,
+  OpenAiProviderConfig,
+  ProviderEditFormat,
   THINKING_PRESETS,
+  decodeProviderModelValue,
   detectLanguageModelAvailability,
   emptyLlmSettings,
+  getProviderDisplayName,
   isLanguageModelSelection,
   listModels,
   parseModelList,
   parseThinkingLevels,
+  resolveAllProviderModelOptions,
   resolveModelOptions,
+  resolveProviderForModelSelection,
   resolveTestModel,
   runEditorChatTurn,
   streamChatParts,
   streamToolCallParts,
+  stripProviderPrefixFromModelSelection,
   testLlmConnection,
 } from "./agent"
 import {
@@ -348,6 +355,10 @@ export const Model = Schema.Struct({
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
   isEditingLlmSettings: Schema.Boolean,
+  isConfirmingDeleteLlmProvider: Schema.Boolean,
+  editingLlmProviderId: Schema.Option(Schema.String),
+  llmProviders: Schema.Array(OpenAiProviderConfig),
+  llmActiveProviderId: Schema.String,
   llmEnabled: Schema.Boolean,
   llmEditFormat: EditFormat,
   llmBaseUrl: Schema.String,
@@ -366,6 +377,9 @@ export const Model = Schema.Struct({
   editorLlmBarMode: Editor.LlmBarMode,
   editorSplitPercent: Schema.Number,
   llmDraftEnabled: Schema.Boolean,
+  llmDraftName: Schema.String,
+  llmDraftProviderEnabled: Schema.Boolean,
+  llmDraftProviderEditFormat: ProviderEditFormat,
   llmDraftEditFormat: EditFormat,
   llmDraftBaseUrl: Schema.String,
   llmDraftApiKey: Schema.String,
@@ -575,6 +589,16 @@ export const Message = defineMessageUnion({
     models: Schema.Array(Schema.String),
   },
   FailedTestLlm: { message: Schema.String },
+  ClickedAddLlmProvider: {},
+  ClickedEditLlmProvider: { id: Schema.String },
+  ClickedDeleteLlmProvider: { id: Schema.String },
+  ClickedConfirmDeleteLlmProvider: {},
+  ClickedCancelDeleteLlmProvider: {},
+  ClickedCancelLlmProviderEdit: {},
+  UpdatedLlmProviderName: { value: Schema.String },
+  ToggledLlmProviderEnabled: { id: Schema.String, isChecked: Schema.Boolean },
+  ToggledLlmDraftProviderEnabled: { isChecked: Schema.Boolean },
+  UpdatedLlmDraftProviderEditFormat: { value: Schema.String },
   ToggledLlmEnabled: { isChecked: Schema.Boolean },
   UpdatedLlmEditFormat: { value: Schema.String },
   UpdatedLlmBaseUrl: { value: Schema.String },
@@ -591,6 +615,8 @@ export const Message = defineMessageUnion({
   CompletedDetectLanguageModel: { isAvailable: Schema.Boolean },
   CompletedLoadLlmSettings: {
     enabled: Schema.Boolean,
+    providers: Schema.Array(OpenAiProviderConfig),
+    activeProviderId: Schema.String,
     editFormat: EditFormat,
     baseUrl: Schema.String,
     apiKey: Schema.String,
@@ -615,6 +641,7 @@ export const Message = defineMessageUnion({
   },
   CompletedSaveEditorPreferences: {},
   SucceededLoadEditorLlmModels: {
+    providerId: Schema.optional(Schema.String),
     models: Schema.Array(Schema.String),
   },
   FailedLoadEditorLlmModels: {},
@@ -902,6 +929,8 @@ export const LoadLlmSettings = Command.define("LoadLlmSettings", {
     Effect.map((settings) =>
       Message.CompletedLoadLlmSettings({
         enabled: settings.enabled,
+        providers: [...(settings.providers ?? [])],
+        activeProviderId: settings.activeProviderId ?? "",
         editFormat: settings.editFormat,
         baseUrl: settings.baseUrl,
         apiKey: settings.apiKey,
@@ -919,6 +948,8 @@ export const LoadLlmSettings = Command.define("LoadLlmSettings", {
 export const SaveLlmSettings = Command.define("SaveLlmSettings", {
   args: {
     enabled: Schema.Boolean,
+    providers: Schema.Array(OpenAiProviderConfig),
+    activeProviderId: Schema.String,
     editFormat: EditFormat,
     baseUrl: Schema.String,
     apiKey: Schema.String,
@@ -935,6 +966,8 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
       try: () =>
         storeLlmSettings({
           enabled: args.enabled,
+          providers: args.providers,
+          activeProviderId: args.activeProviderId,
           editFormat: args.editFormat,
           baseUrl: args.baseUrl,
           apiKey: args.apiKey,
@@ -1078,6 +1111,7 @@ export const SaveEditorPreferences = Command.define("SaveEditorPreferences", {
 
 export const LoadEditorLlmModels = Command.define("LoadEditorLlmModels", {
   args: {
+    providerId: Schema.optional(Schema.String),
     enabled: Schema.Boolean,
     editFormat: EditFormat,
     baseUrl: Schema.String,
@@ -1094,7 +1128,10 @@ export const LoadEditorLlmModels = Command.define("LoadEditorLlmModels", {
     Effect.tryPromise({
       try: async () => {
         const models = await listModels(args)
-        return Message.SucceededLoadEditorLlmModels({ models })
+        return Message.SucceededLoadEditorLlmModels({
+          ...(args.providerId !== undefined ? { providerId: args.providerId } : {}),
+          models,
+        })
       },
       catch: () => new Error("Failed to load editor LLM models"),
     }).pipe(Effect.catch(() => Effect.succeed(Message.FailedLoadEditorLlmModels()))),
@@ -2011,6 +2048,10 @@ export const init = (
         isSettingsOpen: false,
         isSettingsDialogOpen: isInitialSettingsOpen,
         isEditingLlmSettings: false,
+        isConfirmingDeleteLlmProvider: false,
+        editingLlmProviderId: Option.none(),
+        llmProviders: [],
+        llmActiveProviderId: "",
         llmEnabled: false,
         llmEditFormat: DEFAULT_EDIT_FORMAT,
         llmBaseUrl: "",
@@ -2029,6 +2070,9 @@ export const init = (
         editorLlmBarMode: "Closed",
         editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
         llmDraftEnabled: false,
+        llmDraftName: "",
+        llmDraftProviderEnabled: true,
+        llmDraftProviderEditFormat: "",
         llmDraftEditFormat: DEFAULT_EDIT_FORMAT,
         llmDraftBaseUrl: "",
         llmDraftApiKey: "",
@@ -2087,6 +2131,10 @@ export const init = (
       isSettingsOpen: false,
       isSettingsDialogOpen: isInitialSettingsOpen,
       isEditingLlmSettings: false,
+      isConfirmingDeleteLlmProvider: false,
+      editingLlmProviderId: Option.none(),
+      llmProviders: [],
+      llmActiveProviderId: "",
       llmEnabled: false,
       llmEditFormat: DEFAULT_EDIT_FORMAT,
       llmBaseUrl: "",
@@ -2105,6 +2153,9 @@ export const init = (
       editorLlmBarMode: "Closed",
       editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
       llmDraftEnabled: false,
+      llmDraftName: "",
+      llmDraftProviderEnabled: true,
+      llmDraftProviderEditFormat: "",
       llmDraftEditFormat: DEFAULT_EDIT_FORMAT,
       llmDraftBaseUrl: "",
       llmDraftApiKey: "",
@@ -2172,11 +2223,9 @@ const syncOpenEditor = (
       : { model }
   }
 
-  const editorModelsLoad = maybeLoadEditorLlmModels(model)
-  const commands = [...extraCommands, ...(editorModelsLoad.commands ?? [])]
-  return Array.isReadonlyArrayNonEmpty(commands)
-    ? { model: editorModelsLoad.model, commands }
-    : { model: editorModelsLoad.model }
+  return Array.isReadonlyArrayNonEmpty(extraCommands)
+    ? { model, commands: extraCommands }
+    : { model }
 }
 
 const enqueueToast = (
@@ -2472,13 +2521,50 @@ const handleUseFsa = (
 
 const isChatAvailable = (model: Model): boolean => model.llmEnabled || model.hasLanguageModel
 
-const resolveEffectiveLlmModel = (model: Model): string => {
-  const modelOptions = resolveModelOptions(
+const resolveModelOptionsForModel = (model: Model, activeModel: string) => {
+  if (model.llmEnabled && model.llmProviders.length > 0) {
+    const discoveredByProvider: Record<string, ReadonlyArray<string>> = model.llmDiscoveredModels
+      .length > 0 && model.llmProviders[0] !== undefined
+      ? { [model.llmProviders[0].id]: model.llmDiscoveredModels }
+      : {}
+    return resolveAllProviderModelOptions(
+      model.llmProviders,
+      discoveredByProvider,
+      activeModel,
+      model.hasLanguageModel,
+    )
+  }
+  return resolveModelOptions(
     model.llmEnabled ? model.llmModels : "",
     model.llmEnabled ? model.llmDiscoveredModels : [],
-    model.llmEnabled ? model.llmModel : "",
+    model.llmEnabled ? activeModel : "",
     model.hasLanguageModel,
   )
+}
+
+const resolveValidThinkingLevel = (
+  model: Model,
+  selectedModel: string,
+  currentLevel: string,
+): string => {
+  if (isLanguageModelSelection(selectedModel) || currentLevel === "") {
+    return ""
+  }
+  const provider =
+    model.llmProviders.length > 0
+      ? resolveProviderForModelSelection(model.llmProviders, selectedModel)
+      : undefined
+  const thinkingParam = provider?.thinkingParam ?? model.llmThinkingParam
+  const thinkingLevelsRaw = provider?.thinkingLevels ?? model.llmThinkingLevels
+  if (thinkingParam.trim() === "") {
+    return ""
+  }
+  const validLevels = parseThinkingLevels(thinkingLevelsRaw)
+  return validLevels.some((item) => item.value === currentLevel) ? currentLevel : ""
+}
+
+const resolveEffectiveLlmModel = (model: Model): string => {
+  const modelOptions = resolveModelOptionsForModel(model, model.llmModel)
   if (model.llmEnabled && model.llmModel.trim() !== "") {
     return model.llmModel.trim()
   }
@@ -2488,12 +2574,45 @@ const resolveEffectiveLlmModel = (model: Model): string => {
 const maybeLoadEditorLlmModels = (
   model: Model,
 ): { readonly model: Model; readonly commands?: ReadonlyArray<Command.Command<Message>> } => {
-  const shouldLoad =
-    model.llmEnabled &&
-    !model.hasLoadedEditorLlmModels &&
-    model.llmBaseUrl.trim() !== "" &&
-    Array.isReadonlyArrayEmpty(parseModelList(model.llmModels)) &&
-    Array.isReadonlyArrayEmpty(model.llmDiscoveredModels)
+  if (!model.llmEnabled || model.hasLoadedEditorLlmModels) {
+    return { model }
+  }
+  if (model.llmProviders.length > 0) {
+    const targetProvider = resolveProviderForModelSelection(
+      model.llmProviders,
+      resolveEffectiveLlmModel(model),
+    )
+    if (
+      targetProvider === undefined ||
+      !targetProvider.enabled ||
+      targetProvider.baseUrl.trim() === ""
+    ) {
+      return { model }
+    }
+    return {
+      model: modifyFields(model, {
+        hasLoadedEditorLlmModels: () => true,
+      }),
+      commands: [
+        LoadEditorLlmModels({
+          providerId: targetProvider.id,
+          enabled: targetProvider.enabled,
+          editFormat:
+            targetProvider.editFormat !== "" ? targetProvider.editFormat : model.llmEditFormat,
+          baseUrl: targetProvider.baseUrl,
+          apiKey: targetProvider.apiKey,
+          models: targetProvider.models,
+          streaming: targetProvider.streaming,
+          toolCalls: targetProvider.toolCalls,
+          thinkingParam: targetProvider.thinkingParam,
+          thinkingLevels: targetProvider.thinkingLevels,
+          extraArgs: targetProvider.extraArgs,
+        }),
+      ],
+    }
+  }
+
+  const shouldLoad = model.llmBaseUrl.trim() !== ""
 
   if (!shouldLoad) {
     return { model }
@@ -3058,15 +3177,11 @@ export const update = (
               }
             }
 
-            const editorModelsLoad = maybeLoadEditorLlmModels(modelWithRoute)
             return {
-              model: modifyFields(editorModelsLoad.model, {
+              model: modifyFields(modelWithRoute, {
                 isSettingsOpen: () => false,
               }),
-              commands: [
-                toModalCommand(Modal.InspectFileForEditor({ entryName: name, subPath })),
-                ...(editorModelsLoad.commands ?? []),
-              ],
+              commands: [toModalCommand(Modal.InspectFileForEditor({ entryName: name, subPath }))],
             }
           })
         },
@@ -3330,13 +3445,51 @@ export const update = (
     }),
 
     ClickedSaveSettingsDialog: () => {
-      const subPath = currentSubPathFromStorageState(model.storageState)
-      const isModalOpen = model.modalState._tag !== "Closed"
+      const activeId = Option.match(model.editingLlmProviderId, {
+        onNone: () => {
+          let index = model.llmProviders.length + 1
+          while (model.llmProviders.some((p) => p.id === `provider-${index}`)) {
+            index += 1
+          }
+          return `provider-${index}`
+        },
+        onSome: (id) => id,
+      })
+      const trimmedName = model.llmDraftName.trim()
+      const savedProvider: OpenAiProviderConfig = {
+        id: activeId,
+        name:
+          trimmedName !== ""
+            ? trimmedName
+            : model.llmDraftBaseUrl.trim() !== ""
+              ? model.llmDraftBaseUrl.trim()
+              : "Provider",
+        enabled: model.llmDraftProviderEnabled,
+        baseUrl: model.llmDraftBaseUrl,
+        apiKey: model.llmDraftApiKey,
+        models: model.llmDraftModels,
+        discoveredModels: model.llmDiscoveredModels,
+        editFormat: model.llmDraftProviderEditFormat,
+        streaming: model.llmDraftStreaming,
+        toolCalls: model.llmDraftToolCalls,
+        thinkingParam: model.llmDraftThinkingParam,
+        thinkingLevels: model.llmDraftThinkingLevels,
+        extraArgs: model.llmDraftExtraArgs,
+      }
+      const nextProviders = Option.match(model.editingLlmProviderId, {
+        onNone: () => [...model.llmProviders, savedProvider],
+        onSome: (id) =>
+          model.llmProviders.map((provider) => (provider.id === id ? savedProvider : provider)),
+      })
+      const nextEnabled = nextProviders.some((p) => p.enabled)
       return {
         model: modifyFields(model, {
-          isSettingsDialogOpen: () => false,
           isEditingLlmSettings: () => false,
-          llmEnabled: () => model.llmDraftEnabled,
+          editingLlmProviderId: () => Option.none(),
+          llmProviders: () => nextProviders,
+          llmActiveProviderId: () => activeId,
+          llmEnabled: () => nextEnabled,
+          llmDraftEnabled: () => nextEnabled,
           llmEditFormat: () => model.llmDraftEditFormat,
           llmBaseUrl: () => model.llmDraftBaseUrl,
           llmApiKey: () => model.llmDraftApiKey,
@@ -3346,13 +3499,13 @@ export const update = (
           llmThinkingParam: () => model.llmDraftThinkingParam,
           llmThinkingLevels: () => model.llmDraftThinkingLevels,
           llmExtraArgs: () => model.llmDraftExtraArgs,
-          llmModel: () => model.llmDraftModel,
-          llmThinkingLevel: () => model.llmDraftThinkingLevel,
           hasLoadedEditorLlmModels: () => false,
         }),
         commands: [
           SaveLlmSettings({
-            enabled: model.llmDraftEnabled,
+            enabled: nextEnabled,
+            providers: nextProviders,
+            activeProviderId: activeId,
             editFormat: model.llmDraftEditFormat,
             baseUrl: model.llmDraftBaseUrl,
             apiKey: model.llmDraftApiKey,
@@ -3363,17 +3516,214 @@ export const update = (
             thinkingLevels: model.llmDraftThinkingLevels,
             extraArgs: model.llmDraftExtraArgs,
           }),
-          SaveEditorPreferences({
-            isMaximized: model.editorIsMaximized,
-            llmBarMode: model.editorLlmBarMode,
-            llmModel: model.llmDraftModel,
-            llmThinkingLevel: model.llmDraftThinkingLevel,
-            editorSplitPercent: model.editorSplitPercent,
-          }),
-          ...(isModalOpen ? [] : [ReplaceUrl({ url: buildFolderUrl(subPath) })]),
         ],
       }
     },
+
+    ClickedCancelLlmProviderEdit: () => ({
+      model: modifyFields(model, {
+        isEditingLlmSettings: () => false,
+        editingLlmProviderId: () => Option.none(),
+        llmDraftName: () => "",
+        llmDraftEditFormat: () => model.llmEditFormat,
+        llmDraftBaseUrl: () => model.llmBaseUrl,
+        llmDraftApiKey: () => model.llmApiKey,
+        llmDraftModels: () => model.llmModels,
+        llmDraftStreaming: () => model.llmStreaming,
+        llmDraftToolCalls: () => model.llmToolCalls,
+        llmDraftThinkingParam: () => model.llmThinkingParam,
+        llmDraftThinkingLevels: () => model.llmThinkingLevels,
+        llmDraftExtraArgs: () => model.llmExtraArgs,
+        llmTestState: () => LlmTestState.Idle(),
+      }),
+    }),
+
+    ClickedAddLlmProvider: () => ({
+      model: modifyFields(model, {
+        isEditingLlmSettings: () => true,
+        editingLlmProviderId: () => Option.none(),
+        llmDraftName: () => "",
+        llmDraftProviderEnabled: () => true,
+        llmDraftProviderEditFormat: () => "",
+        llmDraftEditFormat: () => model.llmEditFormat,
+        llmDraftBaseUrl: () => "",
+        llmDraftApiKey: () => "",
+        llmDraftModels: () => "",
+        llmDiscoveredModels: () => [],
+        llmDraftModel: () => "",
+        llmDraftStreaming: () => true,
+        llmDraftToolCalls: () => true,
+        llmDraftThinkingParam: () => emptyLlmSettings.thinkingParam,
+        llmDraftThinkingLevels: () => emptyLlmSettings.thinkingLevels,
+        llmDraftExtraArgs: () => "",
+        llmTestState: () => LlmTestState.Idle(),
+      }),
+    }),
+
+    ClickedEditLlmProvider: ({ id }) => {
+      const provider = model.llmProviders.find((p) => p.id === id)
+      if (provider === undefined) {
+        return { model }
+      }
+      const providerModelIds = [
+        ...parseModelList(provider.models),
+        ...(provider.discoveredModels ?? []),
+      ]
+      const decodedSelected = decodeProviderModelValue(model.llmModel)
+      const matchingDraftModel =
+        decodedSelected !== null && decodedSelected.providerId === id
+          ? decodedSelected.modelId
+          : providerModelIds.includes(model.llmModel.trim())
+            ? model.llmModel.trim()
+            : (providerModelIds[0] ?? "")
+      return {
+        model: modifyFields(model, {
+          isEditingLlmSettings: () => true,
+          editingLlmProviderId: () => Option.some(id),
+          llmDraftName: () => provider.name,
+          llmDraftProviderEnabled: () => provider.enabled,
+          llmDraftProviderEditFormat: () => provider.editFormat,
+          llmDraftEditFormat: () => model.llmEditFormat,
+          llmDraftBaseUrl: () => provider.baseUrl,
+          llmDraftApiKey: () => provider.apiKey,
+          llmDraftModels: () => provider.models,
+          llmDiscoveredModels: () => provider.discoveredModels ?? [],
+          llmDraftModel: () => matchingDraftModel,
+          llmDraftStreaming: () => provider.streaming,
+          llmDraftToolCalls: () => provider.toolCalls,
+          llmDraftThinkingParam: () => provider.thinkingParam,
+          llmDraftThinkingLevels: () => provider.thinkingLevels,
+          llmDraftExtraArgs: () => provider.extraArgs,
+          llmTestState: () => LlmTestState.Idle(),
+        }),
+      }
+    },
+
+    ToggledLlmProviderEnabled: ({ id, isChecked }) => {
+      const nextProviders = model.llmProviders.map((provider) =>
+        provider.id === id ? { ...provider, enabled: isChecked } : provider,
+      )
+      const nextEnabled = nextProviders.some((p) => p.enabled)
+      return {
+        model: modifyFields(model, {
+          llmProviders: () => nextProviders,
+          llmEnabled: () => nextEnabled,
+          llmDraftEnabled: () => nextEnabled,
+          hasLoadedEditorLlmModels: () => false,
+        }),
+        commands: [
+          SaveLlmSettings({
+            enabled: nextEnabled,
+            providers: nextProviders,
+            activeProviderId: model.llmActiveProviderId,
+            editFormat: model.llmEditFormat,
+            baseUrl: model.llmBaseUrl,
+            apiKey: model.llmApiKey,
+            models: model.llmModels,
+            streaming: model.llmStreaming,
+            toolCalls: model.llmToolCalls,
+            thinkingParam: model.llmThinkingParam,
+            thinkingLevels: model.llmThinkingLevels,
+            extraArgs: model.llmExtraArgs,
+          }),
+        ],
+      }
+    },
+
+    ToggledLlmDraftProviderEnabled: ({ isChecked }) => ({
+      model: modifyFields(model, {
+        llmDraftProviderEnabled: () => isChecked,
+      }),
+    }),
+
+    UpdatedLlmDraftProviderEditFormat: ({ value }) => ({
+      model: modifyFields(model, {
+        llmDraftProviderEditFormat: () => (value === "" ? "" : parseEditFormat(value)),
+        llmTestState: () => LlmTestState.Idle(),
+      }),
+    }),
+
+    ClickedDeleteLlmProvider: () => ({
+      model: modifyFields(model, {
+        isConfirmingDeleteLlmProvider: () => true,
+      }),
+    }),
+
+    ClickedCancelDeleteLlmProvider: () => ({
+      model: modifyFields(model, {
+        isConfirmingDeleteLlmProvider: () => false,
+      }),
+    }),
+
+    ClickedConfirmDeleteLlmProvider: () => {
+      const id = Option.getOrElse(model.editingLlmProviderId, () => "")
+      const remaining = model.llmProviders.filter((p) => p.id !== id)
+      const nextActive =
+        model.llmActiveProviderId === id
+          ? (remaining[0] ?? undefined)
+          : remaining.find((p) => p.id === model.llmActiveProviderId)
+      const nextActiveId = nextActive?.id ?? ""
+      const nextBaseUrl = nextActive?.baseUrl ?? ""
+      const nextApiKey = nextActive?.apiKey ?? ""
+      const nextModels = nextActive?.models ?? ""
+      const nextStreaming = nextActive?.streaming ?? true
+      const nextToolCalls = nextActive?.toolCalls ?? true
+      const nextThinkingParam = nextActive?.thinkingParam ?? emptyLlmSettings.thinkingParam
+      const nextThinkingLevels = nextActive?.thinkingLevels ?? emptyLlmSettings.thinkingLevels
+      const nextExtraArgs = nextActive?.extraArgs ?? ""
+      const nextEnabled = remaining.length > 0 ? remaining.some((p) => p.enabled) : model.llmEnabled
+      return {
+        model: modifyFields(model, {
+          isConfirmingDeleteLlmProvider: () => false,
+          isEditingLlmSettings: () => false,
+          editingLlmProviderId: () => Option.none(),
+          llmTestState: () => LlmTestState.Idle(),
+          llmProviders: () => remaining,
+          llmEnabled: () => nextEnabled,
+          llmDraftEnabled: () => nextEnabled,
+          llmActiveProviderId: () => nextActiveId,
+          llmBaseUrl: () => nextBaseUrl,
+          llmApiKey: () => nextApiKey,
+          llmModels: () => nextModels,
+          llmStreaming: () => nextStreaming,
+          llmToolCalls: () => nextToolCalls,
+          llmThinkingParam: () => nextThinkingParam,
+          llmThinkingLevels: () => nextThinkingLevels,
+          llmExtraArgs: () => nextExtraArgs,
+          llmDraftBaseUrl: () => nextBaseUrl,
+          llmDraftApiKey: () => nextApiKey,
+          llmDraftModels: () => nextModels,
+          llmDraftStreaming: () => nextStreaming,
+          llmDraftToolCalls: () => nextToolCalls,
+          llmDraftThinkingParam: () => nextThinkingParam,
+          llmDraftThinkingLevels: () => nextThinkingLevels,
+          llmDraftExtraArgs: () => nextExtraArgs,
+          hasLoadedEditorLlmModels: () => false,
+        }),
+        commands: [
+          SaveLlmSettings({
+            enabled: nextEnabled,
+            providers: remaining,
+            activeProviderId: nextActiveId,
+            editFormat: model.llmEditFormat,
+            baseUrl: nextBaseUrl,
+            apiKey: nextApiKey,
+            models: nextModels,
+            streaming: nextStreaming,
+            toolCalls: nextToolCalls,
+            thinkingParam: nextThinkingParam,
+            thinkingLevels: nextThinkingLevels,
+            extraArgs: nextExtraArgs,
+          }),
+        ],
+      }
+    },
+
+    UpdatedLlmProviderName: ({ value }) => ({
+      model: modifyFields(model, {
+        llmDraftName: () => value,
+      }),
+    }),
 
     ClickedEditLlmSettings: () => ({
       model: modifyFields(model, {
@@ -3383,18 +3733,56 @@ export const update = (
 
     ToggledLlmEnabled: ({ isChecked }) => ({
       model: modifyFields(model, {
+        llmEnabled: () => isChecked,
         llmDraftEnabled: () => isChecked,
-        isEditingLlmSettings: (current) => (isChecked ? true : current),
+        isEditingLlmSettings: (current) => (isChecked ? current : false),
+        editingLlmProviderId: (current) => (isChecked ? current : Option.none()),
         llmTestState: () => LlmTestState.Idle(),
       }),
+      commands: [
+        SaveLlmSettings({
+          enabled: isChecked,
+          providers: model.llmProviders,
+          activeProviderId: model.llmActiveProviderId,
+          editFormat: model.llmEditFormat,
+          baseUrl: model.llmBaseUrl,
+          apiKey: model.llmApiKey,
+          models: model.llmModels,
+          streaming: model.llmStreaming,
+          toolCalls: model.llmToolCalls,
+          thinkingParam: model.llmThinkingParam,
+          thinkingLevels: model.llmThinkingLevels,
+          extraArgs: model.llmExtraArgs,
+        }),
+      ],
     }),
 
-    UpdatedLlmEditFormat: ({ value }) => ({
-      model: modifyFields(model, {
-        llmDraftEditFormat: () => parseEditFormat(value),
-        llmTestState: () => LlmTestState.Idle(),
-      }),
-    }),
+    UpdatedLlmEditFormat: ({ value }) => {
+      const nextEditFormat = parseEditFormat(value)
+      return {
+        model: modifyFields(model, {
+          llmEditFormat: () => nextEditFormat,
+          llmDraftEditFormat: () => nextEditFormat,
+          llmTestState: () => LlmTestState.Idle(),
+        }),
+        commands: [
+          SaveLlmSettings({
+            enabled: model.llmEnabled,
+            providers: model.llmProviders,
+            activeProviderId: model.llmActiveProviderId,
+            editFormat: nextEditFormat,
+            baseUrl: model.llmBaseUrl,
+            apiKey: model.llmApiKey,
+            models: model.llmModels,
+            streaming: model.llmStreaming,
+            toolCalls: model.llmToolCalls,
+            thinkingParam: model.llmThinkingParam,
+            thinkingLevels: model.llmThinkingLevels,
+            extraArgs: model.llmExtraArgs,
+          }),
+        ],
+      }
+    },
 
     UpdatedLlmBaseUrl: ({ value }) => ({
       model: modifyFields(model, {
@@ -3498,8 +3886,11 @@ export const update = (
             model.llmDiscoveredModels[0] ??
             (model.hasLanguageModel ? LANGUAGE_MODEL_OPTION_VALUE : ""))
       const config = {
-        enabled: model.llmDraftEnabled,
-        editFormat: model.llmDraftEditFormat,
+        enabled: model.llmDraftProviderEnabled,
+        editFormat:
+          model.llmDraftProviderEditFormat !== ""
+            ? model.llmDraftProviderEditFormat
+            : model.llmEditFormat,
         baseUrl: model.llmDraftBaseUrl,
         apiKey: model.llmDraftApiKey,
         models: model.llmDraftModels,
@@ -3542,14 +3933,45 @@ export const update = (
       }),
     }),
 
-    SucceededTestLlm: ({ content, reasoning, models }) => ({
-      model: modifyFields(model, {
-        llmTestState: () => LlmTestState.Succeeded({ content, reasoning, models }),
-        llmDiscoveredModels: (current) => (models.length > 0 ? models : current),
-        llmDraftModel: (current) =>
-          current.trim() === "" && models.length > 0 ? (models[0] ?? current) : current,
-      }),
-    }),
+    SucceededTestLlm: ({ content, reasoning, models }) => {
+      const editingId = Option.getOrElse(model.editingLlmProviderId, () => "")
+      const nextProviders =
+        models.length > 0 && editingId !== ""
+          ? model.llmProviders.map((p) =>
+              p.id === editingId ? { ...p, discoveredModels: models } : p,
+            )
+          : model.llmProviders
+      const shouldPersist = models.length > 0 && editingId !== ""
+      return {
+        model: modifyFields(model, {
+          llmTestState: () => LlmTestState.Succeeded({ content, reasoning, models }),
+          llmDiscoveredModels: (current) => (models.length > 0 ? models : current),
+          llmProviders: () => nextProviders,
+          llmDraftModel: (current) =>
+            current.trim() === "" && models.length > 0 ? (models[0] ?? current) : current,
+        }),
+        ...(shouldPersist
+          ? {
+              commands: [
+                SaveLlmSettings({
+                  enabled: model.llmEnabled,
+                  providers: nextProviders,
+                  activeProviderId: model.llmActiveProviderId,
+                  editFormat: model.llmEditFormat,
+                  baseUrl: model.llmBaseUrl,
+                  apiKey: model.llmApiKey,
+                  models: model.llmModels,
+                  streaming: model.llmStreaming,
+                  toolCalls: model.llmToolCalls,
+                  thinkingParam: model.llmThinkingParam,
+                  thinkingLevels: model.llmThinkingLevels,
+                  extraArgs: model.llmExtraArgs,
+                }),
+              ],
+            }
+          : {}),
+      }
+    },
 
     FailedTestLlm: ({ message }) => ({
       model: modifyFields(model, { llmTestState: () => LlmTestState.Failed({ message }) }),
@@ -3563,6 +3985,8 @@ export const update = (
 
     CompletedLoadLlmSettings: ({
       enabled,
+      providers,
+      activeProviderId,
       editFormat,
       baseUrl,
       apiKey,
@@ -3574,6 +3998,8 @@ export const update = (
       extraArgs,
     }) => {
       const nextModel = modifyFields(model, {
+        llmProviders: () => providers,
+        llmActiveProviderId: () => activeProviderId,
         llmEnabled: () => enabled,
         llmDraftEnabled: () => enabled,
         llmEditFormat: () => editFormat,
@@ -3648,13 +4074,43 @@ export const update = (
 
     CompletedSaveEditorPreferences: () => ({ model }),
 
-    SucceededLoadEditorLlmModels: ({ models }) => ({
-      model: modifyFields(model, {
-        llmDiscoveredModels: (current) => (models.length > 0 ? models : current),
-        llmModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
-        llmDraftModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
-      }),
-    }),
+    SucceededLoadEditorLlmModels: ({ providerId, models }) => {
+      const nextProviders =
+        providerId !== undefined && providerId !== "" && models.length > 0
+          ? model.llmProviders.map((p) =>
+              p.id === providerId ? { ...p, discoveredModels: models } : p,
+            )
+          : model.llmProviders
+      const shouldPersist = providerId !== undefined && providerId !== "" && models.length > 0
+      return {
+        model: modifyFields(model, {
+          llmDiscoveredModels: (current) => (models.length > 0 ? models : current),
+          llmProviders: () => nextProviders,
+          llmModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
+          llmDraftModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
+        }),
+        ...(shouldPersist
+          ? {
+              commands: [
+                SaveLlmSettings({
+                  enabled: model.llmEnabled,
+                  providers: nextProviders,
+                  activeProviderId: model.llmActiveProviderId,
+                  editFormat: model.llmEditFormat,
+                  baseUrl: model.llmBaseUrl,
+                  apiKey: model.llmApiKey,
+                  models: model.llmModels,
+                  streaming: model.llmStreaming,
+                  toolCalls: model.llmToolCalls,
+                  thinkingParam: model.llmThinkingParam,
+                  thinkingLevels: model.llmThinkingLevels,
+                  extraArgs: model.llmExtraArgs,
+                }),
+              ],
+            }
+          : {}),
+      }
+    },
 
     FailedLoadEditorLlmModels: () => ({ model }),
 
@@ -3957,6 +4413,22 @@ export const update = (
             }),
           }
         }
+        if (model.isConfirmingDeleteLlmProvider) {
+          return {
+            model: modifyFields(model, {
+              isConfirmingDeleteLlmProvider: () => false,
+            }),
+          }
+        }
+        if (model.isEditingLlmSettings) {
+          return {
+            model: modifyFields(model, {
+              isEditingLlmSettings: () => false,
+              editingLlmProviderId: () => Option.none(),
+              llmTestState: () => LlmTestState.Idle(),
+            }),
+          }
+        }
         const subPath = currentSubPathFromStorageState(model.storageState)
         return {
           model: modifyFields(model, {
@@ -4104,14 +4576,26 @@ export const update = (
             : model.historyEnabled
 
       return Modal.OutMessage.match(modalResult.outMessage, {
-        None: () =>
-          syncOpenEditor(
-            modifyFields(model, {
-              modalState: () => modalResult.model,
-              historyEnabled: () => nextHistoryEnabled,
-            }),
-            mappedCommands,
-          ),
+        None: () => {
+          const isModalChatSending = (state: Model["modalState"]): boolean =>
+            state._tag === "Editor" &&
+            (state.editor._tag === "CreateFile" || state.editor._tag === "EditFile") &&
+            state.editor.llmChatState._tag === "Sending"
+          const nextModel = modifyFields(model, {
+            modalState: () => modalResult.model,
+            historyEnabled: () => nextHistoryEnabled,
+          })
+          const startedChat =
+            !isModalChatSending(model.modalState) && isModalChatSending(modalResult.model)
+          if (startedChat) {
+            const editorModelsLoad = maybeLoadEditorLlmModels(nextModel)
+            const commands = [...mappedCommands, ...(editorModelsLoad.commands ?? [])]
+            return Array.isReadonlyArrayNonEmpty(commands)
+              ? { model: editorModelsLoad.model, commands }
+              : { model: editorModelsLoad.model }
+          }
+          return syncOpenEditor(nextModel, mappedCommands)
+        },
 
         PushUrl: ({ url }) => ({
           model: modifyFields(model, {
@@ -4204,23 +4688,28 @@ export const update = (
           }
         },
 
-        SelectedLlmModel: ({ value }) => ({
-          model: modifyFields(model, {
-            modalState: () => modalResult.model,
-            llmModel: () => value,
-            llmDraftModel: () => value,
-          }),
-          commands: [
-            ...mappedCommands,
-            SaveEditorPreferences({
-              isMaximized: model.editorIsMaximized,
-              llmBarMode: model.editorLlmBarMode,
-              llmModel: value,
-              llmThinkingLevel: model.llmThinkingLevel,
-              editorSplitPercent: model.editorSplitPercent,
+        SelectedLlmModel: ({ value }) => {
+          const nextThinkingLevel = resolveValidThinkingLevel(model, value, model.llmThinkingLevel)
+          return {
+            model: modifyFields(model, {
+              modalState: () => modalResult.model,
+              llmModel: () => value,
+              llmDraftModel: () => value,
+              llmThinkingLevel: () => nextThinkingLevel,
+              llmDraftThinkingLevel: () => nextThinkingLevel,
             }),
-          ],
-        }),
+            commands: [
+              ...mappedCommands,
+              SaveEditorPreferences({
+                isMaximized: model.editorIsMaximized,
+                llmBarMode: model.editorLlmBarMode,
+                llmModel: value,
+                llmThinkingLevel: nextThinkingLevel,
+                editorSplitPercent: model.editorSplitPercent,
+              }),
+            ],
+          }
+        },
 
         SelectedLlmThinkingLevel: ({ value }) => ({
           model: modifyFields(model, {
@@ -4716,6 +5205,10 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
         })()
 
         const effectiveModel = resolveEffectiveLlmModel(model)
+        const selectedProvider =
+          model.llmProviders.length > 0
+            ? resolveProviderForModelSelection(model.llmProviders, effectiveModel)
+            : undefined
 
         return {
           isSending: sending !== undefined,
@@ -4724,16 +5217,19 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           content: sending?.content ?? "",
           messages: sending?.messages ?? [],
           enabled: isChatAvailable(model),
-          editFormat: model.llmEditFormat,
-          baseUrl: model.llmBaseUrl,
-          apiKey: model.llmApiKey,
-          models: model.llmModels,
-          streaming: model.llmStreaming,
-          toolCalls: model.llmToolCalls,
-          thinkingParam: model.llmThinkingParam,
-          thinkingLevels: model.llmThinkingLevels,
-          extraArgs: model.llmExtraArgs,
-          model: effectiveModel,
+          editFormat:
+            selectedProvider !== undefined && selectedProvider.editFormat !== ""
+              ? selectedProvider.editFormat
+              : model.llmEditFormat,
+          baseUrl: selectedProvider?.baseUrl ?? model.llmBaseUrl,
+          apiKey: selectedProvider?.apiKey ?? model.llmApiKey,
+          models: selectedProvider?.models ?? model.llmModels,
+          streaming: selectedProvider?.streaming ?? model.llmStreaming,
+          toolCalls: selectedProvider?.toolCalls ?? model.llmToolCalls,
+          thinkingParam: selectedProvider?.thinkingParam ?? model.llmThinkingParam,
+          thinkingLevels: selectedProvider?.thinkingLevels ?? model.llmThinkingLevels,
+          extraArgs: selectedProvider?.extraArgs ?? model.llmExtraArgs,
+          model: stripProviderPrefixFromModelSelection(effectiveModel),
           thinkingLevel: model.llmThinkingLevel,
         }
       },
@@ -5630,7 +6126,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-edit-format")], ["Bearbeitungsformat"]),
+                          h.label([h.For("llm-edit-format")], ["Bearbeitungsformat (Standard)"]),
                           h.select(
                             [
                               h.Id("llm-edit-format"),
@@ -5648,27 +6144,6 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               ),
                             ),
                           ),
-                        ],
-                      ),
-                      h.div(
-                        [h.Class("form-group")],
-                        [
-                          h.label(
-                            [h.Class("form-check")],
-                            [
-                              h.input([
-                                h.Type("checkbox"),
-                                h.Id("llm-enabled"),
-                                h.Checked(model.llmDraftEnabled),
-                                h.OnChange(() =>
-                                  Message.ToggledLlmEnabled({
-                                    isChecked: !model.llmDraftEnabled,
-                                  }),
-                                ),
-                              ]),
-                              h.span([], ["Chat-API aktivieren"]),
-                            ],
-                          ),
                           model.hasLanguageModel
                             ? h.p(
                                 [h.Id("llm-native-detected-hint"), h.Class("form-hint")],
@@ -5679,466 +6154,86 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             : h.empty,
                         ],
                       ),
-                      ...(model.llmDraftEnabled && !model.isEditingLlmSettings
-                        ? [
-                            h.div(
-                              [h.Class("llm-settings-summary")],
-                              [
-                                h.p(
-                                  [h.Id("llm-summary-url"), h.Class("llm-summary-item")],
-                                  [
-                                    `URL: ${
-                                      model.llmDraftBaseUrl.trim() !== ""
-                                        ? model.llmDraftBaseUrl.trim()
-                                        : "Nicht festgelegt"
-                                    }`,
-                                  ],
-                                ),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("settings-group-actions")],
-                              [
-                                h.button(
-                                  [
-                                    h.Type("button"),
-                                    h.Id("btn-edit-llm-settings"),
-                                    h.Class("btn btn-secondary"),
-                                    h.OnClick(Message.ClickedEditLlmSettings()),
-                                  ],
-                                  [viewIcon("edit", h), " Bearbeiten"],
-                                ),
-                              ],
-                            ),
-                          ]
-                        : []),
-                      ...(model.llmDraftEnabled && model.isEditingLlmSettings
-                        ? [
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label([h.For("llm-base-url")], ["Base-URL (OpenAI-kompatibel)"]),
-                                h.input([
-                                  h.Id("llm-base-url"),
-                                  h.Class("form-input"),
-                                  h.Type("url"),
-                                  h.Placeholder("https://api.openai.com/v1"),
-                                  h.Autocomplete("off"),
-                                  h.Value(model.llmDraftBaseUrl),
-                                  h.OnInput((value) => Message.UpdatedLlmBaseUrl({ value })),
-                                ]),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label([h.For("llm-api-key")], ["API-Key"]),
-                                h.input([
-                                  h.Id("llm-api-key"),
-                                  h.Class("form-input"),
-                                  h.Type("password"),
-                                  h.Placeholder("sk-..."),
-                                  h.Autocomplete("off"),
-                                  h.Value(model.llmDraftApiKey),
-                                  h.OnInput((value) => Message.UpdatedLlmApiKey({ value })),
-                                ]),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label(
-                                  [h.For("llm-models")],
-                                  ["Modellliste (optional, kommagetrennt)"],
-                                ),
-                                h.input([
-                                  h.Id("llm-models"),
-                                  h.Class("form-input"),
-                                  h.Type("text"),
-                                  h.Placeholder("z. B. gpt-4o, Schnell=gpt-4o-mini"),
-                                  h.Autocomplete("off"),
-                                  h.Value(model.llmDraftModels),
-                                  h.OnInput((value) => Message.UpdatedLlmModels({ value })),
-                                ]),
-                                h.p(
-                                  [h.Class("form-hint")],
-                                  [
-                                    "Wird genutzt, wenn die automatische Erkennung nicht funktioniert, um die Modellliste selbst festzulegen (optional Name=Modell-ID).",
-                                  ],
-                                ),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-row")],
-                              [
-                                h.div(
-                                  [h.Class("form-group")],
-                                  [
-                                    h.label(
-                                      [h.Class("form-check")],
-                                      [
-                                        h.input([
-                                          h.Type("checkbox"),
-                                          h.Id("llm-streaming"),
-                                          h.Checked(model.llmDraftStreaming),
-                                          h.OnChange(() =>
-                                            Message.ToggledLlmStreaming({
-                                              isChecked: !model.llmDraftStreaming,
-                                            }),
-                                          ),
-                                        ]),
-                                        h.span([], ["Streaming verwenden"]),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                                h.div(
-                                  [h.Class("form-group")],
-                                  [
-                                    h.label(
-                                      [h.Class("form-check")],
-                                      [
-                                        h.input([
-                                          h.Type("checkbox"),
-                                          h.Id("llm-tool-calls"),
-                                          h.Checked(model.llmDraftToolCalls),
-                                          h.OnChange(() =>
-                                            Message.ToggledLlmToolCalls({
-                                              isChecked: !model.llmDraftToolCalls,
-                                            }),
-                                          ),
-                                        ]),
-                                        h.span([], ["Tool-Calls verwenden"]),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label([h.For("llm-thinking-preset")], ["Thinking-Preset"]),
-                                (() => {
-                                  const matchedPresetId =
-                                    THINKING_PRESETS.find(
-                                      (preset) =>
-                                        preset.param === model.llmDraftThinkingParam.trim() &&
-                                        preset.levels === model.llmDraftThinkingLevels.trim(),
-                                    )?.id ?? "custom"
-                                  return h.select(
-                                    [
-                                      h.Id("llm-thinking-preset"),
-                                      h.Class("form-input"),
-                                      h.Value(matchedPresetId),
-                                      h.OnChange((presetId) =>
-                                        Message.SelectedLlmThinkingPreset({ presetId }),
-                                      ),
-                                    ],
-                                    [
-                                      ...THINKING_PRESETS.map((preset) =>
-                                        h.option(
-                                          [
-                                            h.Value(preset.id),
-                                            h.Selected(matchedPresetId === preset.id),
-                                          ],
-                                          [preset.label],
-                                        ),
-                                      ),
-                                      h.option(
-                                        [
-                                          h.Value("custom"),
-                                          h.Selected(matchedPresetId === "custom"),
-                                        ],
-                                        ["Benutzerdefiniert"],
-                                      ),
-                                    ],
-                                  )
-                                })(),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label([h.For("llm-thinking-param")], ["Thinking-Parameter"]),
-                                h.input([
-                                  h.Id("llm-thinking-param"),
-                                  h.Class("form-input"),
-                                  h.Type("text"),
-                                  h.Placeholder(
-                                    "z. B. reasoning_effort oder chat_template_kwargs.enable_thinking",
-                                  ),
-                                  h.Autocomplete("off"),
-                                  h.Value(model.llmDraftThinkingParam),
-                                  h.OnInput((value) => Message.UpdatedLlmThinkingParam({ value })),
-                                ]),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label(
-                                  [h.For("llm-thinking-levels")],
-                                  ["Verfügbare Thinking-Level (kommagetrennt)"],
-                                ),
-                                h.input([
-                                  h.Id("llm-thinking-levels"),
-                                  h.Class("form-input"),
-                                  h.Type("text"),
-                                  h.Placeholder(
-                                    "z. B. Aus=none, Niedrig=low, Hoch=high oder Aus=false, An=true",
-                                  ),
-                                  h.Autocomplete("off"),
-                                  h.Value(model.llmDraftThinkingLevels),
-                                  h.OnInput((value) => Message.UpdatedLlmThinkingLevels({ value })),
-                                ]),
-                              ],
-                            ),
-                            h.div(
-                              [h.Class("form-group")],
-                              [
-                                h.label(
-                                  [h.For("llm-extra-args")],
-                                  ["Zusätzliche Parameter (JSON, optional)"],
-                                ),
-                                h.textarea([
-                                  h.Id("llm-extra-args"),
-                                  h.Class("form-input form-textarea-mono"),
-                                  h.Rows(2),
-                                  h.Placeholder('z. B. {"temperature": 0.2, "max_tokens": 64}'),
-                                  h.Spellcheck(false),
-                                  h.Value(model.llmDraftExtraArgs),
-                                  h.OnInput((value) => Message.UpdatedLlmExtraArgs({ value })),
-                                ]),
-                                h.p(
-                                  [h.Class("form-hint")],
-                                  ["Werden als JSON-Objekt an /chat/completions übergeben."],
-                                ),
-                              ],
-                            ),
-                            (() => {
-                              const modelOptions = resolveModelOptions(
-                                model.llmDraftModels,
-                                model.llmDiscoveredModels,
-                                model.llmDraftModel,
-                                model.hasLanguageModel,
-                              )
-                              const availableLevels = parseThinkingLevels(
-                                model.llmDraftThinkingLevels,
-                              )
-                              const selectedModel =
-                                model.llmDraftModel.trim() !== ""
-                                  ? model.llmDraftModel.trim()
-                                  : (modelOptions[0]?.value ?? "")
-                              const hasThinking =
-                                model.llmDraftThinkingParam.trim() !== "" &&
-                                availableLevels.length > 0 &&
-                                !isLanguageModelSelection(selectedModel)
-
-                              return h.div(
-                                [h.Class("form-row")],
+                      model.llmProviders.length > 0
+                        ? h.div(
+                            [h.Class("llm-provider-list")],
+                            model.llmProviders.map((provider) => {
+                              const displayName = getProviderDisplayName(provider)
+                              return h.keyed("div")(
+                                provider.id,
+                                [h.Class("llm-provider-item")],
                                 [
-                                  h.div(
-                                    [h.Class("form-group")],
+                                  h.label(
+                                    [h.Class("llm-provider-toggle")],
                                     [
-                                      h.label([h.For("llm-active-model")], ["Modell"]),
-                                      h.select(
-                                        [
-                                          h.Id("llm-active-model"),
-                                          h.Class("form-input"),
-                                          h.Disabled(modelOptions.length === 0),
-                                          h.Value(selectedModel),
-                                          h.OnChange((value) =>
-                                            Message.SelectedLlmModel({ value }),
-                                          ),
-                                        ],
-                                        modelOptions.length > 0
-                                          ? modelOptions.map((item) =>
-                                              h.option(
-                                                [
-                                                  h.Value(item.value),
-                                                  h.Selected(selectedModel === item.value),
-                                                ],
-                                                [item.label],
-                                              ),
-                                            )
-                                          : [
-                                              h.option(
-                                                [h.Value(""), h.Selected(true)],
-                                                ["Noch keine Modelle"],
-                                              ),
-                                            ],
-                                      ),
+                                      h.input([
+                                        h.Type("checkbox"),
+                                        h.Checked(provider.enabled),
+                                        h.AriaLabel(`${displayName} aktivieren`),
+                                        h.OnChange(() =>
+                                          Message.ToggledLlmProviderEnabled({
+                                            id: provider.id,
+                                            isChecked: !provider.enabled,
+                                          }),
+                                        ),
+                                      ]),
                                     ],
                                   ),
                                   h.div(
-                                    [h.Class("form-group")],
+                                    [h.Class("llm-provider-info")],
                                     [
-                                      h.label([h.For("llm-thinking-level")], ["Thinking-Level"]),
-                                      h.select(
+                                      h.span([h.Class("llm-provider-name")], [displayName]),
+                                      provider.baseUrl.trim() !== ""
+                                        ? h.span(
+                                            [h.Class("llm-provider-url")],
+                                            [provider.baseUrl.trim()],
+                                          )
+                                        : h.empty,
+                                    ],
+                                  ),
+                                  h.div(
+                                    [h.Class("llm-provider-actions")],
+                                    [
+                                      h.button(
                                         [
-                                          h.Id("llm-thinking-level"),
-                                          h.Class("form-input"),
-                                          h.Disabled(!hasThinking),
-                                          h.Value(hasThinking ? model.llmDraftThinkingLevel : ""),
-                                          h.OnChange((value) =>
-                                            Message.UpdatedLlmThinkingLevel({ value }),
+                                          h.Type("button"),
+                                          h.Class("btn btn-secondary btn-sm"),
+                                          h.OnClick(
+                                            Message.ClickedEditLlmProvider({
+                                              id: provider.id,
+                                            }),
                                           ),
                                         ],
-                                        hasThinking
-                                          ? [
-                                              h.option(
-                                                [
-                                                  h.Value(""),
-                                                  h.Selected(model.llmDraftThinkingLevel === ""),
-                                                ],
-                                                ["Standard (nicht gesetzt)"],
-                                              ),
-                                              ...availableLevels.map((item) =>
-                                                h.option(
-                                                  [
-                                                    h.Value(item.value),
-                                                    h.Selected(
-                                                      model.llmDraftThinkingLevel === item.value,
-                                                    ),
-                                                  ],
-                                                  [item.label],
-                                                ),
-                                              ),
-                                            ]
-                                          : [
-                                              h.option(
-                                                [h.Value(""), h.Selected(true)],
-                                                ["Standard"],
-                                              ),
-                                            ],
+                                        [viewIcon("edit", h), " Bearbeiten"],
                                       ),
                                     ],
                                   ),
                                 ],
                               )
-                            })(),
-                            h.div(
-                              [h.Class("settings-group-actions llm-test-actions")],
-                              [
-                                ...(["models", "chat", "tools"] as const).map((mode) => {
-                                  const isRunning = LlmTestState.match(model.llmTestState, {
-                                    Idle: () => false,
-                                    Testing: () => true,
-                                    Streaming: () => true,
-                                    Succeeded: () => false,
-                                    Failed: () => false,
-                                  })
-                                  const label =
-                                    mode === "models"
-                                      ? "Liste testen"
-                                      : mode === "chat"
-                                        ? "Chat testen"
-                                        : "Tools testen"
-                                  const isNativeSelected = isLanguageModelSelection(
-                                    model.llmDraftModel,
-                                  )
-                                  const isDisabled =
-                                    isRunning ||
-                                    (mode === "chat"
-                                      ? model.llmDraftBaseUrl.trim() === "" && !isNativeSelected
-                                      : model.llmDraftBaseUrl.trim() === "" || isNativeSelected)
-                                  return h.button(
-                                    [
-                                      h.Type("button"),
-                                      h.Id(`btn-test-llm-${mode}`),
-                                      h.Class("btn btn-secondary"),
-                                      h.Disabled(isDisabled),
-                                      h.OnClick(Message.ClickedTestLlm({ mode })),
-                                    ],
-                                    [label],
-                                  )
-                                }),
-                                LlmTestState.match(model.llmTestState, {
-                                  Idle: () => h.empty,
-                                  Testing: () => h.empty,
-                                  Streaming: () => h.empty,
-                                  Succeeded: () =>
-                                    h.span(
-                                      [
-                                        h.Id("llm-test-status"),
-                                        h.Class("llm-test-status is-ok"),
-                                        h.AriaLabel("OK"),
-                                      ],
-                                      [viewIcon("check", h)],
-                                    ),
-                                  Failed: () =>
-                                    h.span(
-                                      [
-                                        h.Id("llm-test-status"),
-                                        h.Class("llm-test-status is-error"),
-                                        h.AriaLabel("Nicht OK"),
-                                      ],
-                                      [viewIcon("cross", h)],
-                                    ),
-                                }),
-                              ],
-                            ),
-                            LlmTestState.match(model.llmTestState, {
-                              Idle: () => h.empty,
-                              Testing: () => h.empty,
-                              Streaming: ({ content, reasoning }) =>
-                                h.div(
-                                  [h.Id("llm-test-result")],
-                                  [LlmResponse.view({ content, reasoning, isStreaming: true }, h)],
-                                ),
-                              Succeeded: ({ content, reasoning, models }) => {
-                                if (content.trim() === "" && reasoning.trim() === "") {
-                                  return h.p(
-                                    [h.Id("llm-test-result"), h.Class("form-hint")],
-                                    [
-                                      models.length > 0
-                                        ? models.join(", ")
-                                        : "Keine Modelle gefunden.",
-                                    ],
-                                  )
-                                }
-                                return h.div(
-                                  [h.Id("llm-test-result")],
-                                  [LlmResponse.view({ content, reasoning, isStreaming: false }, h)],
-                                )
-                              },
-                              Failed: ({ message }) =>
-                                h.p(
-                                  [h.Id("llm-test-result"), h.Class("form-hint is-danger")],
-                                  [message],
-                                ),
                             }),
-                          ]
-                        : []),
-                    ],
-                  ),
-                ],
-              ),
-              h.footer(
-                [h.Class("modal-footer")],
-                [
-                  h.div([h.Class("modal-footer-left")]),
-                  h.div(
-                    [h.Class("modal-footer-right")],
-                    [
-                      h.button(
+                          )
+                        : h.div(
+                            [h.Class("llm-settings-summary")],
+                            [
+                              h.p(
+                                [h.Id("llm-summary-url"), h.Class("llm-summary-item")],
+                                ["Noch kein OpenAPI-Provider angelegt."],
+                              ),
+                            ],
+                          ),
+                      h.div(
+                        [h.Class("settings-group-actions")],
                         [
-                          h.Type("button"),
-                          h.Id("btn-cancel-settings"),
-                          h.Class("btn btn-secondary"),
-                          h.OnClick(Message.ClickedCloseSettingsDialog()),
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-add-llm-provider"),
+                              h.Class("btn btn-secondary"),
+                              h.OnClick(Message.ClickedAddLlmProvider()),
+                            ],
+                            ["+ Provider hinzufügen"],
+                          ),
                         ],
-                        ["Abbrechen"],
-                      ),
-                      h.button(
-                        [
-                          h.Type("button"),
-                          h.Id("btn-save-settings"),
-                          h.Class("btn btn-primary"),
-                          h.OnClick(Message.ClickedSaveSettingsDialog()),
-                        ],
-                        ["Speichern"],
                       ),
                     ],
                   ),
@@ -6148,6 +6243,557 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
           ),
         ],
       ),
+      model.isEditingLlmSettings
+        ? h.div(
+            [
+              h.Id("llm-provider-modal"),
+              h.Class("modal-overlay"),
+              h.Role("dialog"),
+              h.AriaModal(true),
+              h.AriaLabelledBy("llm-provider-modal-title"),
+            ],
+            [
+              h.div(
+                [h.Class("modal-content settings-dialog")],
+                [
+                  h.header(
+                    [h.Class("modal-header")],
+                    [
+                      h.h3(
+                        [h.Id("llm-provider-modal-title"), h.Class("modal-title")],
+                        [
+                          Option.isSome(model.editingLlmProviderId)
+                            ? "Provider bearbeiten"
+                            : "Provider hinzufügen",
+                        ],
+                      ),
+                      h.button(
+                        [
+                          h.Type("button"),
+                          h.Id("btn-close-llm-provider-modal"),
+                          h.Class("modal-close-btn"),
+                          h.AriaLabel("Schließen"),
+                          h.OnClick(Message.ClickedCancelLlmProviderEdit()),
+                        ],
+                        [viewIcon("close", h)],
+                      ),
+                    ],
+                  ),
+                  h.div(
+                    [h.Class("modal-body settings-groups")],
+                    [
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("llm-provider-enabled"),
+                                h.Checked(model.llmDraftProviderEnabled),
+                                h.OnChange(() =>
+                                  Message.ToggledLlmDraftProviderEnabled({
+                                    isChecked: !model.llmDraftProviderEnabled,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Aktiviert"]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.For("llm-provider-edit-format")],
+                            ["Bearbeitungsformat (optional überschreiben)"],
+                          ),
+                          h.select(
+                            [
+                              h.Id("llm-provider-edit-format"),
+                              h.Class("form-input"),
+                              h.Value(model.llmDraftProviderEditFormat),
+                              h.OnChange((value) =>
+                                Message.UpdatedLlmDraftProviderEditFormat({ value }),
+                              ),
+                            ],
+                            [
+                              h.option(
+                                [h.Value(""), h.Selected(model.llmDraftProviderEditFormat === "")],
+                                ["Standard (global)"],
+                              ),
+                              ...EDIT_FORMAT_OPTIONS.map((item) =>
+                                h.option(
+                                  [
+                                    h.Value(item.value),
+                                    h.Selected(model.llmDraftProviderEditFormat === item.value),
+                                  ],
+                                  [item.label],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("llm-provider-name")], ["Provider-Name"]),
+                          h.input([
+                            h.Id("llm-provider-name"),
+                            h.Class("form-input"),
+                            h.Type("text"),
+                            h.Placeholder("z. B. OpenAI, Ollama, OpenRouter"),
+                            h.Autocomplete("off"),
+                            h.Value(model.llmDraftName),
+                            h.OnInput((value) => Message.UpdatedLlmProviderName({ value })),
+                          ]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("llm-base-url")], ["Base-URL (OpenAI-kompatibel)"]),
+                          h.input([
+                            h.Id("llm-base-url"),
+                            h.Class("form-input"),
+                            h.Type("url"),
+                            h.Placeholder("https://api.openai.com/v1"),
+                            h.Autocomplete("off"),
+                            h.Value(model.llmDraftBaseUrl),
+                            h.OnInput((value) => Message.UpdatedLlmBaseUrl({ value })),
+                          ]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("llm-api-key")], ["API-Key"]),
+                          h.input([
+                            h.Id("llm-api-key"),
+                            h.Class("form-input"),
+                            h.Type("password"),
+                            h.Placeholder("sk-..."),
+                            h.Autocomplete("off"),
+                            h.Value(model.llmDraftApiKey),
+                            h.OnInput((value) => Message.UpdatedLlmApiKey({ value })),
+                          ]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("llm-models")], ["Modellliste (optional, kommagetrennt)"]),
+                          h.input([
+                            h.Id("llm-models"),
+                            h.Class("form-input"),
+                            h.Type("text"),
+                            h.Placeholder("z. B. gpt-4o, Schnell=gpt-4o-mini"),
+                            h.Autocomplete("off"),
+                            h.Value(model.llmDraftModels),
+                            h.OnInput((value) => Message.UpdatedLlmModels({ value })),
+                          ]),
+                          h.p(
+                            [h.Class("form-hint")],
+                            [
+                              "Wird genutzt, wenn die automatische Erkennung nicht funktioniert, um die Modellliste selbst festzulegen (optional Name=Modell-ID).",
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-row")],
+                        [
+                          h.div(
+                            [h.Class("form-group")],
+                            [
+                              h.label(
+                                [h.Class("form-check")],
+                                [
+                                  h.input([
+                                    h.Type("checkbox"),
+                                    h.Id("llm-streaming"),
+                                    h.Checked(model.llmDraftStreaming),
+                                    h.OnChange(() =>
+                                      Message.ToggledLlmStreaming({
+                                        isChecked: !model.llmDraftStreaming,
+                                      }),
+                                    ),
+                                  ]),
+                                  h.span([], ["Streaming verwenden"]),
+                                ],
+                              ),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("form-group")],
+                            [
+                              h.label(
+                                [h.Class("form-check")],
+                                [
+                                  h.input([
+                                    h.Type("checkbox"),
+                                    h.Id("llm-tool-calls"),
+                                    h.Checked(model.llmDraftToolCalls),
+                                    h.OnChange(() =>
+                                      Message.ToggledLlmToolCalls({
+                                        isChecked: !model.llmDraftToolCalls,
+                                      }),
+                                    ),
+                                  ]),
+                                  h.span([], ["Tool-Calls verwenden"]),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("llm-thinking-preset")], ["Thinking-Preset"]),
+                          (() => {
+                            const matchedPresetId =
+                              THINKING_PRESETS.find(
+                                (preset) =>
+                                  preset.param === model.llmDraftThinkingParam.trim() &&
+                                  preset.levels === model.llmDraftThinkingLevels.trim(),
+                              )?.id ?? "custom"
+                            return h.select(
+                              [
+                                h.Id("llm-thinking-preset"),
+                                h.Class("form-input"),
+                                h.Value(matchedPresetId),
+                                h.OnChange((presetId) =>
+                                  Message.SelectedLlmThinkingPreset({ presetId }),
+                                ),
+                              ],
+                              [
+                                ...THINKING_PRESETS.map((preset) =>
+                                  h.option(
+                                    [h.Value(preset.id), h.Selected(matchedPresetId === preset.id)],
+                                    [preset.label],
+                                  ),
+                                ),
+                                h.option(
+                                  [h.Value("custom"), h.Selected(matchedPresetId === "custom")],
+                                  ["Benutzerdefiniert"],
+                                ),
+                              ],
+                            )
+                          })(),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("llm-thinking-param")], ["Thinking-Parameter"]),
+                          h.input([
+                            h.Id("llm-thinking-param"),
+                            h.Class("form-input"),
+                            h.Type("text"),
+                            h.Placeholder(
+                              "z. B. reasoning_effort oder chat_template_kwargs.enable_thinking",
+                            ),
+                            h.Autocomplete("off"),
+                            h.Value(model.llmDraftThinkingParam),
+                            h.OnInput((value) => Message.UpdatedLlmThinkingParam({ value })),
+                          ]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.For("llm-thinking-levels")],
+                            ["Verfügbare Thinking-Level (kommagetrennt)"],
+                          ),
+                          h.input([
+                            h.Id("llm-thinking-levels"),
+                            h.Class("form-input"),
+                            h.Type("text"),
+                            h.Placeholder(
+                              "z. B. Aus=none, Niedrig=low, Hoch=high oder Aus=false, An=true",
+                            ),
+                            h.Autocomplete("off"),
+                            h.Value(model.llmDraftThinkingLevels),
+                            h.OnInput((value) => Message.UpdatedLlmThinkingLevels({ value })),
+                          ]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.For("llm-extra-args")],
+                            ["Zusätzliche Parameter (JSON, optional)"],
+                          ),
+                          h.textarea([
+                            h.Id("llm-extra-args"),
+                            h.Class("form-input form-textarea-mono"),
+                            h.Rows(2),
+                            h.Placeholder('z. B. {"temperature": 0.2, "max_tokens": 64}'),
+                            h.Spellcheck(false),
+                            h.Value(model.llmDraftExtraArgs),
+                            h.OnInput((value) => Message.UpdatedLlmExtraArgs({ value })),
+                          ]),
+                          h.p(
+                            [h.Class("form-hint")],
+                            ["Werden als JSON-Objekt an /chat/completions übergeben."],
+                          ),
+                        ],
+                      ),
+                      (() => {
+                        const modelOptions = resolveModelOptions(
+                          model.llmDraftModels,
+                          model.llmDiscoveredModels,
+                          model.llmDraftModel,
+                          model.hasLanguageModel,
+                        )
+                        const availableLevels = parseThinkingLevels(model.llmDraftThinkingLevels)
+                        const selectedModel =
+                          model.llmDraftModel.trim() !== ""
+                            ? model.llmDraftModel.trim()
+                            : (modelOptions[0]?.value ?? "")
+                        const hasThinking =
+                          model.llmDraftThinkingParam.trim() !== "" &&
+                          availableLevels.length > 0 &&
+                          !isLanguageModelSelection(selectedModel)
+
+                        return h.div(
+                          [h.Class("form-row")],
+                          [
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label([h.For("llm-active-model")], ["Modell"]),
+                                h.select(
+                                  [
+                                    h.Id("llm-active-model"),
+                                    h.Class("form-input"),
+                                    h.Disabled(modelOptions.length === 0),
+                                    h.Value(selectedModel),
+                                    h.OnChange((value) => Message.SelectedLlmModel({ value })),
+                                  ],
+                                  modelOptions.length > 0
+                                    ? modelOptions.map((item) =>
+                                        h.option(
+                                          [
+                                            h.Value(item.value),
+                                            h.Selected(selectedModel === item.value),
+                                          ],
+                                          [item.label],
+                                        ),
+                                      )
+                                    : [
+                                        h.option(
+                                          [h.Value(""), h.Selected(true)],
+                                          ["Noch keine Modelle"],
+                                        ),
+                                      ],
+                                ),
+                              ],
+                            ),
+                            h.div(
+                              [h.Class("form-group")],
+                              [
+                                h.label([h.For("llm-thinking-level")], ["Thinking-Level"]),
+                                h.select(
+                                  [
+                                    h.Id("llm-thinking-level"),
+                                    h.Class("form-input"),
+                                    h.Disabled(!hasThinking),
+                                    h.Value(hasThinking ? model.llmDraftThinkingLevel : ""),
+                                    h.OnChange((value) =>
+                                      Message.UpdatedLlmThinkingLevel({ value }),
+                                    ),
+                                  ],
+                                  hasThinking
+                                    ? [
+                                        h.option(
+                                          [
+                                            h.Value(""),
+                                            h.Selected(model.llmDraftThinkingLevel === ""),
+                                          ],
+                                          ["Standard (nicht gesetzt)"],
+                                        ),
+                                        ...availableLevels.map((item) =>
+                                          h.option(
+                                            [
+                                              h.Value(item.value),
+                                              h.Selected(
+                                                model.llmDraftThinkingLevel === item.value,
+                                              ),
+                                            ],
+                                            [item.label],
+                                          ),
+                                        ),
+                                      ]
+                                    : [h.option([h.Value(""), h.Selected(true)], ["Standard"])],
+                                ),
+                              ],
+                            ),
+                          ],
+                        )
+                      })(),
+                      h.div(
+                        [h.Class("settings-group-actions llm-test-actions")],
+                        [
+                          ...(["models", "chat", "tools"] as const).map((mode) => {
+                            const isRunning = LlmTestState.match(model.llmTestState, {
+                              Idle: () => false,
+                              Testing: () => true,
+                              Streaming: () => true,
+                              Succeeded: () => false,
+                              Failed: () => false,
+                            })
+                            const label =
+                              mode === "models"
+                                ? "Liste testen"
+                                : mode === "chat"
+                                  ? "Chat testen"
+                                  : "Tools testen"
+                            const isNativeSelected = isLanguageModelSelection(model.llmDraftModel)
+                            const isDisabled =
+                              isRunning ||
+                              (mode === "chat"
+                                ? model.llmDraftBaseUrl.trim() === "" && !isNativeSelected
+                                : model.llmDraftBaseUrl.trim() === "" || isNativeSelected)
+                            return h.button(
+                              [
+                                h.Type("button"),
+                                h.Id(`btn-test-llm-${mode}`),
+                                h.Class("btn btn-secondary"),
+                                h.Disabled(isDisabled),
+                                h.OnClick(Message.ClickedTestLlm({ mode })),
+                              ],
+                              [label],
+                            )
+                          }),
+                          LlmTestState.match(model.llmTestState, {
+                            Idle: () => h.empty,
+                            Testing: () => h.empty,
+                            Streaming: () => h.empty,
+                            Succeeded: () =>
+                              h.span(
+                                [
+                                  h.Id("llm-test-status"),
+                                  h.Class("llm-test-status is-ok"),
+                                  h.AriaLabel("OK"),
+                                ],
+                                [viewIcon("check", h)],
+                              ),
+                            Failed: () =>
+                              h.span(
+                                [
+                                  h.Id("llm-test-status"),
+                                  h.Class("llm-test-status is-error"),
+                                  h.AriaLabel("Nicht OK"),
+                                ],
+                                [viewIcon("cross", h)],
+                              ),
+                          }),
+                        ],
+                      ),
+                      LlmTestState.match(model.llmTestState, {
+                        Idle: () => h.empty,
+                        Testing: () => h.empty,
+                        Streaming: ({ content, reasoning }) =>
+                          h.div(
+                            [h.Id("llm-test-result")],
+                            [LlmResponse.view({ content, reasoning, isStreaming: true }, h)],
+                          ),
+                        Succeeded: ({ content, reasoning, models }) => {
+                          if (content.trim() === "" && reasoning.trim() === "") {
+                            return h.p(
+                              [h.Id("llm-test-result"), h.Class("form-hint")],
+                              [models.length > 0 ? models.join(", ") : "Keine Modelle gefunden."],
+                            )
+                          }
+                          return h.div(
+                            [h.Id("llm-test-result")],
+                            [LlmResponse.view({ content, reasoning, isStreaming: false }, h)],
+                          )
+                        },
+                        Failed: ({ message }) =>
+                          h.p([h.Id("llm-test-result"), h.Class("form-hint is-danger")], [message]),
+                      }),
+                    ],
+                  ),
+                  h.footer(
+                    [h.Class("modal-footer")],
+                    [
+                      h.div(
+                        [h.Class("modal-footer-left")],
+                        Option.match(model.editingLlmProviderId, {
+                          onNone: () => [],
+                          onSome: (id) => [
+                            h.button(
+                              [
+                                h.Type("button"),
+                                h.Id("btn-delete-llm-provider"),
+                                h.Class("btn btn-danger"),
+                                h.OnClick(Message.ClickedDeleteLlmProvider({ id })),
+                              ],
+                              [viewIcon("trash", h), " Löschen"],
+                            ),
+                          ],
+                        }),
+                      ),
+                      h.div(
+                        [h.Class("modal-footer-right")],
+                        [
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-cancel-settings"),
+                              h.Class("btn btn-secondary"),
+                              h.OnClick(Message.ClickedCancelLlmProviderEdit()),
+                            ],
+                            ["Abbrechen"],
+                          ),
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-save-settings"),
+                              h.Class("btn btn-primary"),
+                              h.OnClick(Message.ClickedSaveSettingsDialog()),
+                            ],
+                            ["Speichern"],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          )
+        : h.empty,
+      model.isConfirmingDeleteLlmProvider
+        ? (() => {
+            const editingId = Option.getOrElse(model.editingLlmProviderId, () => "")
+            const provider = model.llmProviders.find((p) => p.id === editingId)
+            const providerLabel =
+              provider !== undefined ? getProviderDisplayName(provider) : "Provider"
+            return Editor.viewConfirmDeleteDialog(
+              {
+                overlayId: "delete-llm-provider-confirm",
+                titleId: "delete-llm-provider-confirm-title",
+                title: "Provider löschen",
+                prompt: `Provider „${providerLabel}“ wirklich löschen?`,
+                cancelButtonId: "btn-delete-llm-provider-cancel",
+                onCancel: Message.ClickedCancelDeleteLlmProvider(),
+                confirmButtonId: "btn-delete-llm-provider-confirm",
+                confirmLabel: "Löschen",
+                onConfirm: Message.ClickedConfirmDeleteLlmProvider(),
+              },
+              h,
+            )
+          })()
+        : h.empty,
       model.clearAllHistoryState._tag === "Confirming"
         ? Editor.viewConfirmDeleteDialog(
             {
@@ -6549,16 +7195,17 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
 // VIEW MODALS
 
 const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
-  const llmModelOptions = resolveModelOptions(
-    model.llmEnabled ? model.llmModels : "",
-    model.llmEnabled ? model.llmDiscoveredModels : [],
-    model.llmEnabled ? model.llmModel : "",
-    model.hasLanguageModel,
-  )
   const llmSelectedModel = resolveEffectiveLlmModel(model)
+  const llmModelOptions = resolveModelOptionsForModel(model, model.llmModel)
+  const selectedProvider =
+    model.llmProviders.length > 0
+      ? resolveProviderForModelSelection(model.llmProviders, llmSelectedModel)
+      : undefined
+  const activeThinkingParam = selectedProvider?.thinkingParam ?? model.llmThinkingParam
+  const activeThinkingLevels = selectedProvider?.thinkingLevels ?? model.llmThinkingLevels
   const llmThinkingLevels =
-    model.llmEnabled && model.llmThinkingParam.trim() !== ""
-      ? parseThinkingLevels(model.llmThinkingLevels)
+    model.llmEnabled && activeThinkingParam.trim() !== ""
+      ? parseThinkingLevels(activeThinkingLevels)
       : []
 
   return h.submodel({

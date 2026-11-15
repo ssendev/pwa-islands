@@ -109,6 +109,13 @@ const readyModel: Model = {
   isSettingsOpen: false,
   isSettingsDialogOpen: false,
   isEditingLlmSettings: false,
+  isConfirmingDeleteLlmProvider: false,
+  editingLlmProviderId: Option.none(),
+  llmProviders: [],
+  llmActiveProviderId: "",
+  llmDraftName: "",
+  llmDraftProviderEnabled: true,
+  llmDraftProviderEditFormat: "",
   llmEnabled: false,
   llmEditFormat: "hashline",
   llmBaseUrl: "",
@@ -2295,7 +2302,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
-        Command.expectNone(),
+        Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
         message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
         Command.expectNone(),
         message(Message.UpdatedLlmModels({ value: "gpt-4o-mini" })),
@@ -2354,6 +2361,24 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(
           SaveLlmSettings({
             enabled: true,
+            providers: [
+              {
+                id: "provider-1",
+                name: "https://api.example.com/v1",
+                enabled: true,
+                baseUrl: "https://api.example.com/v1",
+                apiKey: "",
+                models: "gpt-4o-mini",
+                discoveredModels: [],
+                editFormat: "",
+                streaming: false,
+                toolCalls: false,
+                thinkingParam: "chat_template_kwargs.enable_thinking",
+                thinkingLevels: "Aus=false, An=true",
+                extraArgs: '{"temperature": 0.2}',
+              },
+            ],
+            activeProviderId: "provider-1",
             editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
@@ -2364,28 +2389,20 @@ describe("PWA Islands Story Tests", () => {
             thinkingLevels: "Aus=false, An=true",
             extraArgs: '{"temperature": 0.2}',
           }),
-          SaveEditorPreferences({
-            isMaximized: false,
-            llmBarMode: "Closed",
-            llmModel: "gpt-4o-mini",
-            llmThinkingLevel: "false",
-            editorSplitPercent: 62,
-          }),
-          ReplaceUrl({ url: "/?pwaislands" }),
         ),
         Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
-        Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
-        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
           expect(m.llmStreaming).toBe(false)
           expect(m.llmToolCalls).toBe(false)
           expect(m.llmModels).toBe("gpt-4o-mini")
-          expect(m.llmModel).toBe("gpt-4o-mini")
+          expect(m.llmDraftModel).toBe("gpt-4o-mini")
           expect(m.llmThinkingParam).toBe("chat_template_kwargs.enable_thinking")
           expect(m.llmThinkingLevels).toBe("Aus=false, An=true")
-          expect(m.llmThinkingLevel).toBe("false")
+          expect(m.llmDraftThinkingLevel).toBe("false")
           expect(m.llmExtraArgs).toBe('{"temperature": 0.2}')
-          expect(m.isSettingsDialogOpen).toBe(false)
+          expect(m.isSettingsDialogOpen).toBe(true)
+          expect(m.isEditingLlmSettings).toBe(false)
+          expect(m.llmProviders).toHaveLength(1)
         }),
       )
     })
@@ -2398,7 +2415,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
-        Command.expectNone(),
+        Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
         message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
         Command.expectNone(),
         message(Message.UpdatedLlmModels({ value: "gpt-4o-mini" })),
@@ -2437,7 +2454,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
-        Command.expectNone(),
+        Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
         message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
         Command.expectNone(),
         message(Message.ClickedTestLlm({ mode: "models" })),
@@ -2483,7 +2500,7 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
-    it("lädt Modelle einmalig beim ersten Öffnen des Editors, wenn keine fest eingetragen sind", () => {
+    it("lädt Modelle einmalig beim ersten Chat-Request, wenn keine fest eingetragen oder gespeichert sind", () => {
       const modelWithoutFixedModels: Model = {
         ...readyModel,
         llmEnabled: true,
@@ -2500,6 +2517,29 @@ describe("PWA Islands Story Tests", () => {
           PushUrl({ url: "/?pwaislands=new" }),
           Modal.FocusModalNameInput(),
           Modal.LoadEditorUserTemplates,
+        ),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        Command.resolve(Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
+        Command.resolve(
+          Editor.LoadUserTemplates,
+          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
+        ),
+        message(
+          Message.GotModalMessage({
+            message: Modal.Message.GotEditorMessage({
+              message: Editor.Message.UpdatedLlmChatInput({ value: "Hallo" }),
+            }),
+          }),
+        ),
+        message(
+          Message.GotModalMessage({
+            message: Modal.Message.GotEditorMessage({
+              message: Editor.Message.SubmittedLlmChat(),
+            }),
+          }),
+        ),
+        Command.expectExact(
+          Editor.ScrollLlmChatToBottomIfAtBottom,
           LoadEditorLlmModels({
             enabled: true,
             editFormat: "hashline",
@@ -2513,11 +2553,9 @@ describe("PWA Islands Story Tests", () => {
             extraArgs: "",
           }),
         ),
-        Command.resolve(PushUrl, Message.CompletedPushUrl()),
-        Command.resolve(Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
         Command.resolve(
-          Editor.LoadUserTemplates,
-          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
+          Editor.ScrollLlmChatToBottomIfAtBottom,
+          Editor.Message.CompletedScrollLlmChatToBottom(),
         ),
         Command.resolve(
           LoadEditorLlmModels,
@@ -2528,22 +2566,127 @@ describe("PWA Islands Story Tests", () => {
           expect(m.llmDiscoveredModels).toEqual(["qwen3", "gpt-4o"])
           expect(m.llmModel).toBe("qwen3")
         }),
-        message(Message.ClickedNewFile()),
-        Command.expectExact(
-          PushUrl({ url: "/?pwaislands=new" }),
-          Modal.FocusModalNameInput(),
-          Modal.LoadEditorUserTemplates,
-        ),
-        Command.resolve(PushUrl, Message.CompletedPushUrl()),
-        Command.resolve(Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
-        Command.resolve(
-          Editor.LoadUserTemplates,
-          Editor.Message.CompletedLoadUserTemplates({ templates: [] }),
-        ),
       )
     })
 
-    it("lädt Modelle auch wenn CompletedLoadLlmSettings erst nach Öffnen des Editors eintrifft, und übernimmt gespeicherte Editor-Präferenzen", () => {
+    it("aktualisiert die Modellliste beim ersten Chat-Request auch bei gespeicherten Modellen nur für den Provider des gewählten Modells", () => {
+      const multiProviderEditorModel: Model = {
+        ...readyModel,
+        llmEnabled: true,
+        llmProviders: [
+          {
+            id: "provider-1",
+            name: "Provider 1",
+            enabled: true,
+            baseUrl: "https://one.example.com/v1",
+            apiKey: "",
+            models: "",
+            discoveredModels: ["model-a"],
+            editFormat: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          },
+          {
+            id: "provider-2",
+            name: "Provider 2",
+            enabled: true,
+            baseUrl: "https://two.example.com/v1",
+            apiKey: "secret",
+            models: "",
+            discoveredModels: ["model-b"],
+            editFormat: "",
+            streaming: false,
+            toolCalls: false,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          },
+        ],
+        llmModel: "provider-2::model-b",
+        modalState: ModalState.Editor({
+          editor: Editor.makeCreateFile(),
+        }),
+      }
+
+      story(
+        update,
+        given(multiProviderEditorModel),
+        message(
+          Message.GotModalMessage({
+            message: Modal.Message.GotEditorMessage({
+              message: Editor.Message.UpdatedLlmChatInput({ value: "Hallo" }),
+            }),
+          }),
+        ),
+        message(
+          Message.GotModalMessage({
+            message: Modal.Message.GotEditorMessage({
+              message: Editor.Message.SubmittedLlmChat(),
+            }),
+          }),
+        ),
+        Command.expectExact(
+          Editor.ScrollLlmChatToBottomIfAtBottom,
+          LoadEditorLlmModels({
+            providerId: "provider-2",
+            enabled: true,
+            editFormat: "hashline",
+            baseUrl: "https://two.example.com/v1",
+            apiKey: "secret",
+            models: "",
+            streaming: false,
+            toolCalls: false,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          }),
+        ),
+        Command.resolve(
+          Editor.ScrollLlmChatToBottomIfAtBottom,
+          Editor.Message.CompletedScrollLlmChatToBottom(),
+        ),
+        Command.resolve(
+          LoadEditorLlmModels,
+          Message.SucceededLoadEditorLlmModels({
+            providerId: "provider-2",
+            models: ["model-b", "model-c"],
+          }),
+        ),
+        Command.expectExact(
+          SaveLlmSettings({
+            enabled: true,
+            providers: [
+              multiProviderEditorModel.llmProviders[0],
+              {
+                ...multiProviderEditorModel.llmProviders[1],
+                discoveredModels: ["model-b", "model-c"],
+              },
+            ],
+            activeProviderId: "",
+            editFormat: "hashline",
+            baseUrl: "",
+            apiKey: "",
+            models: "",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          }),
+        ),
+        Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
+        model((m) => {
+          expect(m.hasLoadedEditorLlmModels).toBe(true)
+          expect(m.llmProviders[1].discoveredModels).toEqual(["model-b", "model-c"])
+          expect(m.llmProviders[0].discoveredModels).toEqual(["model-a"])
+        }),
+      )
+    })
+
+    it("übernimmt gespeicherte Editor-Präferenzen auch wenn CompletedLoadLlmSettings erst nach Öffnen des Editors eintrifft", () => {
       const modelWithOpenEditor: Model = {
         ...readyModel,
         modalState: ModalState.Editor({
@@ -2572,6 +2715,8 @@ describe("PWA Islands Story Tests", () => {
         message(
           Message.CompletedLoadLlmSettings({
             enabled: true,
+            providers: [],
+            activeProviderId: "",
             editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
@@ -2583,34 +2728,19 @@ describe("PWA Islands Story Tests", () => {
             extraArgs: "",
           }),
         ),
-        Command.expectExact(
-          LoadEditorLlmModels({
-            enabled: true,
-            editFormat: "hashline",
-            baseUrl: "https://api.example.com/v1",
-            apiKey: "",
-            models: "",
-            streaming: true,
-            toolCalls: true,
-            thinkingParam: "reasoning_effort",
-            thinkingLevels: "low, high",
-            extraArgs: "",
-          }),
-        ),
-        Command.resolve(
-          LoadEditorLlmModels,
-          Message.SucceededLoadEditorLlmModels({ models: ["qwen3", "gpt-4o"] }),
-        ),
+        Command.expectNone(),
       )
     })
 
-    it("übernimmt gespeichertes isMaximized und llmBarMode und lädt Modelle auch wenn SucceededInitializeStorage nach CompletedLoadEditorPreferences und CompletedLoadLlmSettings eintrifft", () => {
+    it("übernimmt gespeichertes isMaximized und llmBarMode auch wenn SucceededInitializeStorage nach CompletedLoadEditorPreferences und CompletedLoadLlmSettings eintrifft", () => {
       story(
         update,
         given(readyModel),
         message(
           Message.CompletedLoadLlmSettings({
             enabled: true,
+            providers: [],
+            activeProviderId: "",
             editFormat: "hashline",
             baseUrl: "https://api.example.com/v1",
             apiKey: "",
@@ -2667,24 +2797,6 @@ describe("PWA Islands Story Tests", () => {
           }),
         ),
         Command.resolve(Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()),
-        Command.expectExact(
-          LoadEditorLlmModels({
-            enabled: true,
-            editFormat: "hashline",
-            baseUrl: "https://api.example.com/v1",
-            apiKey: "",
-            models: "",
-            streaming: true,
-            toolCalls: true,
-            thinkingParam: "reasoning_effort",
-            thinkingLevels: "low, high",
-            extraArgs: "",
-          }),
-        ),
-        Command.resolve(
-          LoadEditorLlmModels,
-          Message.SucceededLoadEditorLlmModels({ models: ["qwen3", "gpt-4o"] }),
-        ),
         model((m) => {
           expect(m.modalState._tag).toBe("Editor")
           if (m.modalState._tag === "Editor") {
@@ -2695,7 +2807,6 @@ describe("PWA Islands Story Tests", () => {
               expect(m.modalState.editor.editorSplitPercent).toBe(70)
             }
           }
-          expect(m.llmDiscoveredModels).toEqual(["qwen3", "gpt-4o"])
         }),
       )
     })
@@ -2782,7 +2893,7 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
-        Command.expectNone(),
+        Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
         message(Message.SelectedLlmModel({ value: "__language_model__" })),
         message(Message.ClickedTestLlm({ mode: "chat" })),
         Command.expectNone(),
@@ -2795,6 +2906,24 @@ describe("PWA Islands Story Tests", () => {
         Command.expectExact(
           SaveLlmSettings({
             enabled: true,
+            providers: [
+              {
+                id: "provider-1",
+                name: "Provider",
+                enabled: true,
+                baseUrl: "",
+                apiKey: "",
+                models: "",
+                discoveredModels: [],
+                editFormat: "",
+                streaming: true,
+                toolCalls: true,
+                thinkingParam: "",
+                thinkingLevels: "",
+                extraArgs: "",
+              },
+            ],
+            activeProviderId: "provider-1",
             editFormat: "hashline",
             baseUrl: "",
             apiKey: "",
@@ -2805,20 +2934,10 @@ describe("PWA Islands Story Tests", () => {
             thinkingLevels: "",
             extraArgs: "",
           }),
-          SaveEditorPreferences({
-            isMaximized: false,
-            llmBarMode: "Closed",
-            llmModel: "__language_model__",
-            llmThinkingLevel: "",
-            editorSplitPercent: 62,
-          }),
-          ReplaceUrl({ url: "/?pwaislands" }),
         ),
         Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
-        Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
-        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
-          expect(m.llmModel).toBe("__language_model__")
+          expect(m.llmDraftModel).toBe("__language_model__")
         }),
       )
     })

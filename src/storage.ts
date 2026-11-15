@@ -210,10 +210,51 @@ export const getStoredApiHistoryEnabled = (): Promise<boolean> =>
 export const storeApiHistoryEnabled = (enabled: boolean): Promise<void> =>
   storeBooleanFlag(API_HISTORY_ENABLED_KEY, enabled)
 
-import { emptyLlmSettings, type LlmSettings } from "./agent"
+import {
+  emptyLlmSettings,
+  type LlmSettings,
+  type OpenAiProviderConfig,
+  type ProviderEditFormat,
+} from "./agent"
 import { parseEditFormat } from "./edit-format"
 
 const LLM_SETTINGS_KEY = "llm_settings"
+
+const parseProviderEditFormat = (raw: unknown): ProviderEditFormat =>
+  raw === "" ? "" : typeof raw === "string" ? parseEditFormat(raw) : ""
+
+const parseStoredProvider = (
+  raw: unknown,
+  fallbackEnabled: boolean,
+): OpenAiProviderConfig | null => {
+  if (typeof raw !== "object" || raw === null) {
+    return null
+  }
+  const r = raw as Record<string, unknown>
+  const id = typeof r.id === "string" && r.id.trim() !== "" ? r.id : ""
+  if (id === "") {
+    return null
+  }
+  return {
+    id,
+    name: typeof r.name === "string" ? r.name : "",
+    enabled: typeof r.enabled === "boolean" ? r.enabled : fallbackEnabled,
+    baseUrl: typeof r.baseUrl === "string" ? r.baseUrl : "",
+    apiKey: typeof r.apiKey === "string" ? r.apiKey : "",
+    models: typeof r.models === "string" ? r.models : "",
+    discoveredModels: Array.isArray(r.discoveredModels)
+      ? r.discoveredModels.filter((m): m is string => typeof m === "string")
+      : [],
+    editFormat: parseProviderEditFormat(r.editFormat),
+    streaming: typeof r.streaming === "boolean" ? r.streaming : true,
+    toolCalls: typeof r.toolCalls === "boolean" ? r.toolCalls : true,
+    thinkingParam:
+      typeof r.thinkingParam === "string" ? r.thinkingParam : emptyLlmSettings.thinkingParam,
+    thinkingLevels:
+      typeof r.thinkingLevels === "string" ? r.thinkingLevels : emptyLlmSettings.thinkingLevels,
+    extraArgs: typeof r.extraArgs === "string" ? r.extraArgs : "",
+  }
+}
 
 export async function getStoredLlmSettings(): Promise<LlmSettings> {
   try {
@@ -250,17 +291,54 @@ export async function getStoredLlmSettings(): Promise<LlmSettings> {
             : emptyLlmSettings.thinkingLevels
         const extraArgs =
           "extraArgs" in record && typeof record.extraArgs === "string" ? record.extraArgs : ""
+        const rawProviders =
+          "providers" in record && Array.isArray(record.providers)
+            ? record.providers
+                .map((p) => parseStoredProvider(p, enabled))
+                .filter((p): p is OpenAiProviderConfig => p !== null)
+            : null
+        const providers: ReadonlyArray<OpenAiProviderConfig> =
+          rawProviders !== null
+            ? rawProviders
+            : baseUrl.trim() !== "" || apiKey.trim() !== "" || models.trim() !== ""
+              ? [
+                  {
+                    id: "default",
+                    name: "Standard",
+                    enabled,
+                    baseUrl,
+                    apiKey,
+                    models,
+                    editFormat: "",
+                    streaming,
+                    toolCalls,
+                    thinkingParam,
+                    thinkingLevels,
+                    extraArgs,
+                  },
+                ]
+              : []
+        const rawActiveId =
+          "activeProviderId" in record && typeof record.activeProviderId === "string"
+            ? record.activeProviderId
+            : ""
+        const activeProvider =
+          providers.find((p) => p.id === rawActiveId) ?? providers[0] ?? undefined
+        const activeProviderId = activeProvider?.id ?? ""
+        const effectiveEnabled = providers.length > 0 ? providers.some((p) => p.enabled) : enabled
         resolve({
-          enabled,
+          enabled: effectiveEnabled,
+          providers,
+          activeProviderId,
           editFormat,
-          baseUrl,
-          apiKey,
-          models,
-          streaming,
-          toolCalls,
-          thinkingParam,
-          thinkingLevels,
-          extraArgs,
+          baseUrl: activeProvider?.baseUrl ?? baseUrl,
+          apiKey: activeProvider?.apiKey ?? apiKey,
+          models: activeProvider?.models ?? models,
+          streaming: activeProvider?.streaming ?? streaming,
+          toolCalls: activeProvider?.toolCalls ?? toolCalls,
+          thinkingParam: activeProvider?.thinkingParam ?? thinkingParam,
+          thinkingLevels: activeProvider?.thinkingLevels ?? thinkingLevels,
+          extraArgs: activeProvider?.extraArgs ?? extraArgs,
         })
       }
       req.onerror = () => reject(req.error)

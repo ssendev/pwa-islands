@@ -5,7 +5,7 @@ import { Schema } from "effect"
 import {
   DEFAULT_EDIT_FORMAT,
   EditApplyResult,
-  type EditFormat,
+  EditFormat,
   applyEditsForFormat,
   formatToolResultForFormat,
   getEditorEditToolForFormat,
@@ -20,8 +20,35 @@ export const LANGUAGE_MODEL_OPTION_LABEL = "Browser-KI"
 export const isLanguageModelSelection = (model: string): boolean =>
   model.trim() === LANGUAGE_MODEL_OPTION_VALUE
 
+export const ProviderEditFormat = Schema.Literals([
+  "",
+  "hashline",
+  "search-replace",
+  "unified-diff",
+])
+export type ProviderEditFormat = typeof ProviderEditFormat.Type
+
+export const OpenAiProviderConfig = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  enabled: Schema.Boolean,
+  baseUrl: Schema.String,
+  apiKey: Schema.String,
+  models: Schema.String,
+  discoveredModels: Schema.optional(Schema.Array(Schema.String)),
+  editFormat: ProviderEditFormat,
+  streaming: Schema.Boolean,
+  toolCalls: Schema.Boolean,
+  thinkingParam: Schema.String,
+  thinkingLevels: Schema.String,
+  extraArgs: Schema.String,
+})
+export type OpenAiProviderConfig = typeof OpenAiProviderConfig.Type
+
 export type LlmSettings = {
   enabled: boolean
+  providers?: ReadonlyArray<OpenAiProviderConfig>
+  activeProviderId?: string
   editFormat: EditFormat
   baseUrl: string
   apiKey: string
@@ -104,6 +131,8 @@ export const THINKING_PRESETS: ReadonlyArray<ThinkingPreset> = [
 
 export const emptyLlmSettings: LlmSettings = {
   enabled: false,
+  providers: [],
+  activeProviderId: "",
   editFormat: DEFAULT_EDIT_FORMAT,
   baseUrl: "",
   apiKey: "",
@@ -305,9 +334,131 @@ export type LabeledOption = {
   readonly value: string
 }
 
-export type ModelOption = LabeledOption
+export type ModelOption = LabeledOption & {
+  readonly providerId?: string
+  readonly providerName?: string
+}
 
 export type ThinkingLevelOption = LabeledOption
+
+const PROVIDER_MODEL_SEP = "::"
+
+export const encodeProviderModelValue = (providerId: string, modelId: string): string =>
+  `${providerId}${PROVIDER_MODEL_SEP}${modelId}`
+
+export const decodeProviderModelValue = (
+  value: string,
+): { readonly providerId: string; readonly modelId: string } | null => {
+  const idx = value.indexOf(PROVIDER_MODEL_SEP)
+  if (idx <= 0) {
+    return null
+  }
+  return {
+    providerId: value.slice(0, idx),
+    modelId: value.slice(idx + PROVIDER_MODEL_SEP.length),
+  }
+}
+
+export const stripProviderPrefixFromModelSelection = (selectedModel: string): string =>
+  decodeProviderModelValue(selectedModel)?.modelId ?? selectedModel
+
+export const getProviderDisplayName = (provider: OpenAiProviderConfig): string =>
+  provider.name.trim() !== ""
+    ? provider.name.trim()
+    : provider.baseUrl.trim() !== ""
+      ? provider.baseUrl.trim()
+      : "Provider"
+
+export const resolveProviderForModelSelection = (
+  providers: ReadonlyArray<OpenAiProviderConfig>,
+  selectedModel: string,
+): OpenAiProviderConfig | undefined => {
+  if (isLanguageModelSelection(selectedModel)) {
+    return undefined
+  }
+  const enabledProviders = providers.filter((p) => p.enabled)
+  const decoded = decodeProviderModelValue(selectedModel)
+  if (decoded !== null) {
+    return enabledProviders.find((p) => p.id === decoded.providerId)
+  }
+  const trimmed = selectedModel.trim()
+  if (trimmed !== "") {
+    const matching = enabledProviders.find((p) =>
+      parseModelOptions(p.models).some((m) => m.value === trimmed),
+    )
+    if (matching !== undefined) {
+      return matching
+    }
+  }
+  return enabledProviders[0]
+}
+
+export const resolveAllProviderModelOptions = (
+  providers: ReadonlyArray<OpenAiProviderConfig>,
+  discoveredModelsByProvider: Readonly<Record<string, ReadonlyArray<string>>>,
+  activeModel: string,
+  includeLanguageModel = false,
+): ReadonlyArray<ModelOption> => {
+  const seen = new Set<string>()
+  const providerOptions: Array<ModelOption> = []
+  for (const provider of providers) {
+    if (!provider.enabled) {
+      continue
+    }
+    const providerName = getProviderDisplayName(provider)
+    const manualOptions = parseModelOptions(provider.models)
+    const storedDiscovered = provider.discoveredModels ?? []
+    const liveDiscovered = discoveredModelsByProvider[provider.id] ?? []
+    const combined: ReadonlyArray<LabeledOption> = [
+      ...manualOptions,
+      ...storedDiscovered.map((id) => ({ label: id, value: id })),
+      ...liveDiscovered.map((id) => ({ label: id, value: id })),
+    ]
+    const seenInProvider = new Set<string>()
+    for (const item of combined) {
+      if (seenInProvider.has(item.value)) {
+        continue
+      }
+      seenInProvider.add(item.value)
+      const encodedValue = encodeProviderModelValue(provider.id, item.value)
+      if (!seen.has(encodedValue)) {
+        seen.add(encodedValue)
+        providerOptions.push({
+          label: item.label,
+          value: encodedValue,
+          providerId: provider.id,
+          providerName,
+        })
+      }
+    }
+  }
+  const nativeOptions: ReadonlyArray<ModelOption> = includeLanguageModel
+    ? [{ label: LANGUAGE_MODEL_OPTION_LABEL, value: LANGUAGE_MODEL_OPTION_VALUE }]
+    : []
+  const trimmedActive = activeModel.trim()
+  const activeOptions: ReadonlyArray<ModelOption> =
+    trimmedActive !== "" &&
+    trimmedActive !== LANGUAGE_MODEL_OPTION_VALUE &&
+    !seen.has(trimmedActive)
+      ? [
+          {
+            label: stripProviderPrefixFromModelSelection(trimmedActive),
+            value: trimmedActive,
+          },
+        ]
+      : []
+
+  return [...providerOptions, ...nativeOptions, ...activeOptions].filter((item) => {
+    if (item.providerId !== undefined) {
+      return true
+    }
+    if (seen.has(item.value)) {
+      return false
+    }
+    seen.add(item.value)
+    return true
+  })
+}
 
 const parseLabeledOptions = (raw: string): ReadonlyArray<LabeledOption> => {
   const seen = new Set<string>()

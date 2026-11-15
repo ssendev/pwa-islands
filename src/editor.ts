@@ -4122,6 +4122,56 @@ const viewLlmChatHistory = (
   )
 }
 
+const renderModelOption = (
+  item: ModelOption,
+  llmSelectedModel: string,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
+  h.option([h.Value(item.value), h.Selected(llmSelectedModel === item.value)], [item.label])
+
+const renderModelSelectChildren = (
+  llmModelOptions: ReadonlyArray<ModelOption>,
+  llmSelectedModel: string,
+  h: Html.HtmlBuilder<Message>,
+): ReadonlyArray<Html.Html> => {
+  if (!Array.isReadonlyArrayNonEmpty(llmModelOptions)) {
+    return [h.option([h.Value(""), h.Selected(true)], ["Noch keine Modelle"])]
+  }
+  const children: globalThis.Array<Html.Html> = []
+  let currentGroupName: string | undefined = undefined
+  let currentGroupItems: globalThis.Array<ModelOption> = []
+
+  const flushGroup = () => {
+    if (currentGroupName !== undefined && currentGroupItems.length > 0) {
+      children.push(
+        h.optgroup(
+          [h.Attribute("label", currentGroupName)],
+          currentGroupItems.map((item) => renderModelOption(item, llmSelectedModel, h)),
+        ),
+      )
+    }
+    currentGroupName = undefined
+    currentGroupItems = []
+  }
+
+  for (const item of llmModelOptions) {
+    if (item.providerName !== undefined) {
+      if (currentGroupName === item.providerName) {
+        currentGroupItems.push(item)
+      } else {
+        flushGroup()
+        currentGroupName = item.providerName
+        currentGroupItems = [item]
+      }
+    } else {
+      flushGroup()
+      children.push(renderModelOption(item, llmSelectedModel, h))
+    }
+  }
+  flushGroup()
+  return children
+}
+
 const viewLlmChatModelControls = (
   llmChatState: LlmChatState,
   viewInputs: ViewInputs,
@@ -4143,14 +4193,7 @@ const viewLlmChatModelControls = (
         h.Value(llmSelectedModel),
         h.OnChange((value) => Message.SelectedLlmModel({ value })),
       ],
-      Array.isReadonlyArrayNonEmpty(llmModelOptions)
-        ? Array.map(llmModelOptions, (item) =>
-            h.option(
-              [h.Value(item.value), h.Selected(llmSelectedModel === item.value)],
-              [item.label],
-            ),
-          )
-        : [h.option([h.Value(""), h.Selected(true)], ["Noch keine Modelle"])],
+      renderModelSelectChildren(llmModelOptions, llmSelectedModel, h),
     ),
     hasMultipleThinkingLevels
       ? h.select(
