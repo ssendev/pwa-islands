@@ -1219,7 +1219,8 @@ describe("PWA Islands Scene Tests", () => {
 
     const tauriHelpModel: Model = {
       ...readyModel,
-      hasDirectoryPicker: false,
+      hasDirectoryPicker: true,
+      hasOPFS: true,
       hasTauri: true,
       modalState: ModalState.Help({ help: Help.init(Option.some("fs")) }),
     }
@@ -1232,6 +1233,10 @@ describe("PWA Islands Scene Tests", () => {
         "yes",
       ),
       sceneExpect(selector('[data-support="fsa"] .help-supported')).toHaveAttr(
+        "data-supported",
+        "no",
+      ),
+      sceneExpect(selector('[data-support="opfs"] .help-supported')).toHaveAttr(
         "data-supported",
         "no",
       ),

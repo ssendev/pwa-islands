@@ -213,11 +213,31 @@ export type ViewInputs = {
   readonly hasTauri: boolean
 }
 
+const viewSupportCell = (
+  supportKind: "tauri" | "fsa" | "opfs",
+  isSupported: boolean,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
+  h.td(
+    [h.DataAttribute("support", supportKind)],
+    [
+      h.span(
+        [h.Class("help-supported"), h.DataAttribute("supported", isSupported ? "yes" : "no")],
+        [
+          viewIcon(isSupported ? "check" : "cross", h),
+          isSupported ? " verfügbar" : " nicht verfügbar",
+        ],
+      ),
+    ],
+  )
+
 export const view = Submodel.defineView<Model, Message, ViewInputs>(
   (model, context, h): Html.Html => {
     const isQuickstartOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "quickstart")
     const isApiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "api")
     const isFsOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "fs")
+    const isFsaSupported = !context.hasTauri && context.hasDirectoryPicker
+    const isOpfsSupported = !context.hasTauri && context.hasOPFS
     return h.div(
       [
         h.Class("modal-overlay help-modal-overlay"),
@@ -896,77 +916,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                                               [h.Class("help-supported-row")],
                                               [
                                                 h.td([], ["In dieser Umgebung"]),
-                                                h.td(
-                                                  [h.DataAttribute("support", "tauri")],
-                                                  [
-                                                    h.span(
-                                                      [
-                                                        h.Class("help-supported"),
-                                                        h.DataAttribute(
-                                                          "supported",
-                                                          context.hasTauri ? "yes" : "no",
-                                                        ),
-                                                      ],
-                                                      [
-                                                        viewIcon(
-                                                          context.hasTauri ? "check" : "cross",
-                                                          h,
-                                                        ),
-                                                        context.hasTauri
-                                                          ? " verfügbar"
-                                                          : " nicht verfügbar",
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                                h.td(
-                                                  [h.DataAttribute("support", "fsa")],
-                                                  [
-                                                    h.span(
-                                                      [
-                                                        h.Class("help-supported"),
-                                                        h.DataAttribute(
-                                                          "supported",
-                                                          context.hasDirectoryPicker ? "yes" : "no",
-                                                        ),
-                                                      ],
-                                                      [
-                                                        viewIcon(
-                                                          context.hasDirectoryPicker
-                                                            ? "check"
-                                                            : "cross",
-                                                          h,
-                                                        ),
-                                                        context.hasDirectoryPicker
-                                                          ? " verfügbar"
-                                                          : " nicht verfügbar",
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
-                                                h.td(
-                                                  [h.DataAttribute("support", "opfs")],
-                                                  [
-                                                    h.span(
-                                                      [
-                                                        h.Class("help-supported"),
-                                                        h.DataAttribute(
-                                                          "supported",
-                                                          context.hasOPFS ? "yes" : "no",
-                                                        ),
-                                                      ],
-                                                      [
-                                                        viewIcon(
-                                                          context.hasOPFS ? "check" : "cross",
-                                                          h,
-                                                        ),
-                                                        context.hasOPFS
-                                                          ? " verfügbar"
-                                                          : " nicht verfügbar",
-                                                      ],
-                                                    ),
-                                                  ],
-                                                ),
+                                                viewSupportCell("tauri", context.hasTauri, h),
+                                                viewSupportCell("fsa", isFsaSupported, h),
+                                                viewSupportCell("opfs", isOpfsSupported, h),
                                               ],
                                             ),
                                           ],
