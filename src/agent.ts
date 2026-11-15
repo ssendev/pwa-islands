@@ -1621,14 +1621,6 @@ const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): s
     .filter((entry) => entry !== "")
     .join("\n\n")
 
-const extractEditBlockFromText = (raw: string): string => {
-  const match = raw.match(/```[a-zA-Z0-9_-]*\r?\n([\s\S]*?)```/)
-  if (match && typeof match[1] === "string") {
-    return match[1]
-  }
-  return raw
-}
-
 const hasEditAttemptForFormat = (format: EditFormat, text: string): boolean => {
   if (/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?```/.test(text)) {
     return true
@@ -1833,10 +1825,9 @@ export const runEditorChatTurn = async ({
         }
       }
 
-      const editsText = extractEditBlockFromText(reply.content)
       const feedbackToolCallId = "language-model-edit"
       return EditApplyResult.match(
-        applyEditsForFormat(config.editFormat, currentContent, editsText),
+        applyEditsForFormat(config.editFormat, currentContent, reply.content),
         {
           Ok: ({ content: nextContent, appliedCount, updatedSnippet }) => {
             const toolMsg: EditorChatMessage = {

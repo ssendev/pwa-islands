@@ -459,4 +459,43 @@ describe("edit-format", () => {
       expect(nearMissResult.message).toContain("Datei:    `    <h2>Titel</h2>` (Zeile 2)")
     }
   })
+
+  it("accepts <<<<>>>> REPLACE markers and multi-fence unified diffs with missing opening fence", () => {
+    expect(
+      applySearchReplaceEdits(
+        "<p>Alt</p>",
+        "<<<<<<< SEARCH\n<p>Alt</p>\n=======\n<p>Neu</p>\n<<<<>>>> REPLACE",
+      ),
+    ).toEqual(
+      EditApplyResult.Ok({
+        content: "<p>Neu</p>",
+        appliedCount: 1,
+        updatedSnippet: "",
+      }),
+    )
+
+    const diffOriginal = "hi\nfoo\nbar"
+    const multiFenceDiff = [
+      "@@",
+      " hi",
+      "+ho",
+      "```",
+      "",
+      "ok now teh next edit",
+      "",
+      "```",
+      "@@",
+      " foo",
+      "-bar",
+      "```",
+    ].join("\n")
+
+    expect(applyUnifiedDiffEdits(diffOriginal, multiFenceDiff)).toEqual(
+      EditApplyResult.Ok({
+        content: "hi\nho\nfoo",
+        appliedCount: 2,
+        updatedSnippet: "",
+      }),
+    )
+  })
 })

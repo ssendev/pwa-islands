@@ -698,9 +698,9 @@ interface SearchReplaceBlock {
   readonly replaceLines: ReadonlyArray<string>
 }
 
-const SEARCH_START_PATTERN = /^<{3,}\s*SEARCH\b/i
+const SEARCH_START_PATTERN = /^(?:<{3,}|<{2,}>{2,}|>{3,})\s*SEARCH\b/i
 const SEPARATOR_PATTERN = /^={3,}\s*$/
-const REPLACE_END_PATTERN = /^>{3,}\s*REPLACE\b/i
+const REPLACE_END_PATTERN = /^(?:>{3,}|<{2,}>{2,}|<{3,})\s*REPLACE\b/i
 
 type SearchReplaceParseState =
   | {
@@ -1020,6 +1020,13 @@ const parseUnifiedDiffHunks = (
             }),
           }
         }
+        if (trimmed.startsWith("```")) {
+          return {
+            ...state,
+            hunks: [...state.hunks, hunk],
+            current: Option.none<DiffHunk>(),
+          }
+        }
         return {
           ...state,
           hasError: Option.some(
@@ -1040,12 +1047,7 @@ const parseUnifiedDiffHunks = (
               replaceLines: [],
             })
           }
-          return {
-            ...state,
-            hasError: Option.some(
-              `Zeile ${lineNum} außerhalb eines @@-Blocks: „${previewLine(line)}“. Beginne jeden Diff-Abschnitt mit \`@@\` und präfixe Zeilen mit ' ', '-' oder '+'.`,
-            ),
-          }
+          return state
         },
         onSome: appendToHunk,
       })
