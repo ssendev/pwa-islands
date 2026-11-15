@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
-import { Effect, Option, Stream } from "effect"
+import { Array, Effect, Option, Stream } from "effect"
 import { supportsTauri } from "./files"
+import { getStoredApiHistoryEnabled, normalizePath, splitPath } from "./storage"
 
 export const OPFS_HISTORY_FOLDER = "pwa-islands-history"
 
@@ -366,6 +367,76 @@ export const appendFileHistory = async (
   timestampMs: number,
 ): Promise<void> =>
   appendFileHistoryBytes(subPath, fileName, textEncoder.encode(oldContent), timestampMs)
+
+const splitTauriApiEntryPath = (
+  path: string,
+): Option.Option<{ readonly dirs: ReadonlyArray<string>; readonly name: string }> => {
+  const parts = splitPath(normalizePath(path))
+  if (!Array.isReadonlyArrayNonEmpty(parts)) {
+    return Option.none()
+  }
+  return Option.some({
+    dirs: Array.dropRight(parts, 1),
+    name: Array.lastNonEmpty(parts),
+  })
+}
+
+const recordTauriApiPathVersions = async (
+  cleanPath: string,
+  timestampMs: number,
+): Promise<void> => {
+  const maybeEntry = splitTauriApiEntryPath(cleanPath)
+  if (Option.isNone(maybeEntry)) {
+    return
+  }
+  try {
+    const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", {
+      subPath: cleanPath,
+    })
+    await appendFileHistoryBytes(
+      maybeEntry.value.dirs,
+      maybeEntry.value.name,
+      new Uint8Array(buffer),
+      timestampMs,
+    )
+    return
+  } catch {
+    // Kein Dateilesen möglich – prüfe ob es ein Verzeichnis ist
+  }
+  const entries = await invoke<ReadonlyArray<{ readonly name: string }>>("tauri_fs_list_entries", {
+    subPath: cleanPath,
+  })
+  await entries.reduce<Promise<void>>(async (acc, entry) => {
+    await acc
+    await recordTauriApiPathVersions(`${cleanPath}/${entry.name}`, timestampMs)
+  }, Promise.resolve())
+}
+
+/**
+ * Sichert vor einer mutierenden api.js-Operation in Tauri die bisherige Version
+ * der betroffenen Datei (bzw. rekursiv aller Dateien eines Ordners).
+ */
+export const recordPreviousTauriApiFileVersion = async (
+  path: string,
+  timestampMs: number,
+): Promise<void> => {
+  try {
+    if (!(await getStoredApiHistoryEnabled())) {
+      return
+    }
+    const cleanPath = normalizePath(path)
+    if (!cleanPath) {
+      return
+    }
+    const exists = await invoke<boolean>("tauri_fs_exists", { subPath: cleanPath })
+    if (!exists) {
+      return
+    }
+    await recordTauriApiPathVersions(cleanPath, timestampMs)
+  } catch {
+    // NOTE: Fehlende Quelldatei oder Verlaufsfehler dürfen api.js-Operationen nicht blockieren
+  }
+}
 
 /**
  * Liest genau die nächste ältere Version ab `maybeCursor` (oder ab Dateiende bei `Option.none()`).

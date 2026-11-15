@@ -1,5 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core"
-import { Array, Duration, Effect, Match, Option, Queue, Schema, Stream, pipe } from "effect"
+import { Array, Clock, Duration, Effect, Match, Option, Queue, Schema, Stream, pipe } from "effect"
 import * as Command from "foldkit/command"
 import * as Dom from "foldkit/dom"
 import type * as Html from "foldkit/html"
@@ -11,7 +11,7 @@ import { modifyFields } from "foldkit/struct"
 import * as Subscription from "foldkit/subscription"
 import { Url, toString as urlToString } from "foldkit/url"
 import rootIconUrl from "./assets/pwa-islands.svg"
-import { clearAllFileHistory } from "./history"
+import { clearAllFileHistory, recordPreviousTauriApiFileVersion } from "./history"
 import { type IconId, viewIcon } from "./icons"
 import {
   FileSystemHandleStorage,
@@ -1777,53 +1777,64 @@ export const HandleIslandIpcRequest = Command.define("HandleIslandIpcRequest", {
   },
   messages: [Message.CompletedHandleIslandIpcRequest],
   execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        await IslandIpcAction.match(args.action, {
-          Write: ({ subPath, data }) =>
-            invoke("tauri_fs_write_file", {
-              subPath,
-              data: [...data],
-            }),
-          MakeDir: ({ subPath }) =>
-            invoke("tauri_fs_create_dir", {
-              subPath,
-            }),
-          Rename: ({ from, to }) =>
-            invoke("tauri_fs_rename", {
-              fromSubPath: from,
-              toSubPath: to,
-            }),
-          Remove: ({ subPath, recursive }) =>
-            invoke("tauri_fs_remove_entry", {
-              subPath,
-              isDirectory: recursive,
-            }),
-          Copy: ({ from, to }) =>
-            invoke("tauri_fs_copy", {
-              fromSubPath: from,
-              toSubPath: to,
-            }),
-        })
-        postIslandIpcResponse({
-          requestId: args.requestId,
-          ok: true,
-        })
-        return Message.CompletedHandleIslandIpcRequest()
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
-      Effect.catch((error) =>
-        Effect.sync(() => {
+    Effect.gen(function* () {
+      const timestampMs = yield* Clock.currentTimeMillis
+      return yield* Effect.tryPromise({
+        try: async () => {
+          await IslandIpcAction.match(args.action, {
+            Write: async ({ subPath, data }) => {
+              await recordPreviousTauriApiFileVersion(subPath, timestampMs)
+              await invoke("tauri_fs_write_file", {
+                subPath,
+                data: [...data],
+              })
+            },
+            MakeDir: ({ subPath }) =>
+              invoke("tauri_fs_create_dir", {
+                subPath,
+              }),
+            Rename: async ({ from, to }) => {
+              await recordPreviousTauriApiFileVersion(to, timestampMs)
+              await invoke("tauri_fs_rename", {
+                fromSubPath: from,
+                toSubPath: to,
+              })
+            },
+            Remove: async ({ subPath, recursive }) => {
+              await recordPreviousTauriApiFileVersion(subPath, timestampMs)
+              await invoke("tauri_fs_remove_entry", {
+                subPath,
+                isDirectory: recursive,
+              })
+            },
+            Copy: async ({ from, to }) => {
+              await recordPreviousTauriApiFileVersion(to, timestampMs)
+              await invoke("tauri_fs_copy", {
+                fromSubPath: from,
+                toSubPath: to,
+              })
+            },
+          })
           postIslandIpcResponse({
             requestId: args.requestId,
-            ok: false,
-            error: error.message || String(error),
+            ok: true,
           })
           return Message.CompletedHandleIslandIpcRequest()
-        }),
-      ),
-    ),
+        },
+        catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            postIslandIpcResponse({
+              requestId: args.requestId,
+              ok: false,
+              error: error.message || String(error),
+            })
+            return Message.CompletedHandleIslandIpcRequest()
+          }),
+        ),
+      )
+    }),
 })
 
 export const NavigateHistoryBack = Command.define("NavigateHistoryBack", {

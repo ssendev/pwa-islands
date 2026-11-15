@@ -1,6 +1,6 @@
 import { Array, Clock, Effect, Option, Order } from "effect"
 import { invoke } from "@tauri-apps/api/core"
-import { appendFileHistoryBytes } from "./history"
+import { appendFileHistoryBytes, recordPreviousTauriApiFileVersion } from "./history"
 import {
   checkTextBytes,
   collectDirectoryHandles,
@@ -62,26 +62,6 @@ function splitEntryPath(path: string): { dirs: ReadonlyArray<string>; name: stri
   }
 }
 
-async function recordTauriPathVersions(cleanPath: string, timestampMs: number): Promise<void> {
-  try {
-    const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", {
-      subPath: cleanPath,
-    })
-    const { dirs, name } = splitEntryPath(cleanPath)
-    await appendFileHistoryBytes(dirs, name, new Uint8Array(buffer), timestampMs)
-    return
-  } catch {
-    // Kein Dateilesen möglich – prüfe ob es ein Verzeichnis ist
-  }
-  const entries = await invoke<ReadonlyArray<{ readonly name: string }>>("tauri_fs_list_entries", {
-    subPath: cleanPath,
-  })
-  await entries.reduce<Promise<void>>(async (acc, entry) => {
-    await acc
-    await recordTauriPathVersions(`${cleanPath}/${entry.name}`, timestampMs)
-  }, Promise.resolve())
-}
-
 async function recordBrowserPathVersions(cleanPath: string, timestampMs: number): Promise<void> {
   try {
     const file = await (await resolveFile(cleanPath)).getFile()
@@ -122,11 +102,7 @@ async function recordPreviousApiFileVersion(path: string): Promise<void> {
     }
     const timestampMs = Effect.runSync(Clock.currentTimeMillis)
     if (await isTauriActive()) {
-      const exists = await invoke<boolean>("tauri_fs_exists", { subPath: cleanPath })
-      if (!exists) {
-        return
-      }
-      await recordTauriPathVersions(cleanPath, timestampMs)
+      await recordPreviousTauriApiFileVersion(cleanPath, timestampMs)
       return
     }
     await recordBrowserPathVersions(cleanPath, timestampMs)

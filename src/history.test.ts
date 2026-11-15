@@ -12,11 +12,22 @@ import {
   loadPreviousFileHistoryEntry,
   readAllHistoryMeta,
   readHistoryRecordAt,
+  recordPreviousTauriApiFileVersion,
   truncateLatestFileHistoryEntry,
   type SliceReader,
 } from "./history"
 
 const tauriFiles = new Map<string, Uint8Array>()
+const tauriFsFiles = new Map<string, Uint8Array>()
+let apiHistoryEnabledMock = true
+
+vi.mock("./storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./storage")>()
+  return {
+    ...actual,
+    getStoredApiHistoryEnabled: async () => apiHistoryEnabledMock,
+  }
+})
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args?: Record<string, unknown>) => {
@@ -67,6 +78,37 @@ vi.mock("@tauri-apps/api/core", () => ({
     if (cmd === "tauri_history_read_index") {
       const bytes = tauriFiles.get(key) ?? new Uint8Array(0)
       return readAllHistoryMeta(makeSliceReader(bytes), bytes.byteLength)
+    }
+    if (cmd === "tauri_fs_exists") {
+      const subPathArg = (args?.subPath as string | undefined) ?? ""
+      if (tauriFsFiles.has(subPathArg)) {
+        return true
+      }
+      const prefix = `${subPathArg}/`
+      return Array.from(tauriFsFiles.keys()).some((k) => k.startsWith(prefix))
+    }
+    if (cmd === "tauri_fs_read_file") {
+      const subPathArg = (args?.subPath as string | undefined) ?? ""
+      const bytes = tauriFsFiles.get(subPathArg)
+      if (!bytes) {
+        throw new Error(`Not a file: ${subPathArg}`)
+      }
+      return bytes.slice().buffer
+    }
+    if (cmd === "tauri_fs_list_entries") {
+      const subPathArg = (args?.subPath as string | undefined) ?? ""
+      const prefix = subPathArg ? `${subPathArg}/` : ""
+      const names = new Set<string>()
+      for (const path of tauriFsFiles.keys()) {
+        if (path.startsWith(prefix)) {
+          const rest = path.slice(prefix.length)
+          const firstSegment = rest.split("/")[0]
+          if (firstSegment) {
+            names.add(firstSegment)
+          }
+        }
+      }
+      return Array.from(names).map((name) => ({ name }))
     }
     throw new Error(`Unexpected invoke command: ${cmd}`)
   }),
@@ -199,6 +241,8 @@ describe("history binary format", () => {
 describe("tauri history backend", () => {
   beforeEach(() => {
     tauriFiles.clear()
+    tauriFsFiles.clear()
+    apiHistoryEnabledMock = true
     ;(window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = {}
   })
 
@@ -251,5 +295,41 @@ describe("tauri history backend", () => {
     await clearAllFileHistory()
     expect(await loadFileHistoryIndex(["a"], "one.html")).toEqual([])
     expect(await loadFileHistoryIndex(["b"], "two.html")).toEqual([])
+  })
+
+  it("records previous versions for Tauri api.js file and directory mutations", async () => {
+    const encoder = new TextEncoder()
+    tauriFsFiles.set("apps/demo/index.html", encoder.encode("alt"))
+    tauriFsFiles.set("apps/demo/nested/data.json", encoder.encode('{"v":1}'))
+
+    await recordPreviousTauriApiFileVersion("/apps/demo/index.html", 5000)
+
+    const fileHistory = await loadPreviousFileHistoryEntry(
+      ["apps", "demo"],
+      "index.html",
+      Option.none(),
+    )
+    expect(Option.isSome(fileHistory)).toBe(true)
+    if (Option.isSome(fileHistory)) {
+      expect(fileHistory.value.content).toBe("alt")
+      expect(fileHistory.value.timestampMs).toBe(5000)
+    }
+
+    await recordPreviousTauriApiFileVersion("apps/demo/nested", 6000)
+    const nestedHistory = await loadPreviousFileHistoryEntry(
+      ["apps", "demo", "nested"],
+      "data.json",
+      Option.none(),
+    )
+    expect(Option.isSome(nestedHistory)).toBe(true)
+    if (Option.isSome(nestedHistory)) {
+      expect(nestedHistory.value.content).toBe('{"v":1}')
+      expect(nestedHistory.value.timestampMs).toBe(6000)
+    }
+
+    apiHistoryEnabledMock = false
+    await recordPreviousTauriApiFileVersion("apps/demo/index.html", 7000)
+    const indexAfterDisabled = await loadFileHistoryIndex(["apps", "demo"], "index.html")
+    expect(indexAfterDisabled.map((entry) => entry.timestampMs)).toEqual([5000])
   })
 })
