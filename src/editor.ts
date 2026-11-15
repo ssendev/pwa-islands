@@ -44,6 +44,7 @@ import {
 } from "./history"
 import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
+import { viewMarkdown, viewUserMarkdown } from "./markdown"
 import { monacoEditorElement, triggerMonacoHistoryAction } from "./monaco-element"
 import { buildEditUrl, buildNewUrl } from "./route"
 import { checkTextBytes, getMimeType } from "./storage"
@@ -92,10 +93,20 @@ export const LlmChatMessage = defineTaggedUnion({
 })
 export type LlmChatMessage = typeof LlmChatMessage.Type
 
+export const LlmChatToolDetailSchema = Schema.Struct({
+  summary: Schema.String,
+  name: Schema.String,
+  arguments: Schema.String,
+  result: Schema.String,
+})
+export type LlmChatToolDetail = typeof LlmChatToolDetailSchema.Type
+
 export const LlmChatTurnBlock = Schema.Struct({
   content: Schema.String,
   reasoning: Schema.String,
   isError: Schema.Boolean,
+  assistantContent: Schema.optionalKey(Schema.String),
+  toolDetails: Schema.optionalKey(Schema.Array(LlmChatToolDetailSchema)),
 })
 export type LlmChatTurnBlock = typeof LlmChatTurnBlock.Type
 
@@ -105,6 +116,8 @@ export const LlmChatDisplayEntry = defineTaggedUnion({
     content: Schema.String,
     reasoning: Schema.String,
     isError: Schema.Boolean,
+    assistantContent: Schema.optionalKey(Schema.String),
+    toolDetails: Schema.optionalKey(Schema.Array(LlmChatToolDetailSchema)),
   },
 })
 export type LlmChatDisplayEntry = typeof LlmChatDisplayEntry.Type
@@ -195,6 +208,9 @@ export const Model = defineTaggedUnion({
     llmChatMessages: Schema.Array(LlmChatMessage),
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
     llmChatState: LlmChatState,
+    isLlmThinkingMarkdown: Schema.optionalKey(Schema.Boolean),
+    isLlmContentMarkdown: Schema.optionalKey(Schema.Boolean),
+    isLlmUserMarkdown: Schema.optionalKey(Schema.Boolean),
     isMaximized: Schema.Boolean,
     isPreviewOpen: Schema.Boolean,
     editorSplitPercent: Schema.Number,
@@ -222,6 +238,9 @@ export const Model = defineTaggedUnion({
     llmChatMessages: Schema.Array(LlmChatMessage),
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
     llmChatState: LlmChatState,
+    isLlmThinkingMarkdown: Schema.optionalKey(Schema.Boolean),
+    isLlmContentMarkdown: Schema.optionalKey(Schema.Boolean),
+    isLlmUserMarkdown: Schema.optionalKey(Schema.Boolean),
     isMaximized: Schema.Boolean,
     isEditingName: Schema.Boolean,
     isPreviewOpen: Schema.Boolean,
@@ -271,6 +290,9 @@ export const makeCreateFile = (
   llmChatMessages: [],
   llmChatDisplay: [],
   llmChatState: LlmChatState.Idle(),
+  isLlmThinkingMarkdown: true,
+  isLlmContentMarkdown: true,
+  isLlmUserMarkdown: true,
   isMaximized: defaults?.isMaximized ?? false,
   isPreviewOpen: false,
   editorSplitPercent: defaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -312,6 +334,8 @@ const sendingEntriesToDisplay = (chatState: LlmChatState): ReadonlyArray<LlmChat
       content: turn.content,
       reasoning: turn.reasoning,
       isError: turn.isError,
+      ...(turn.assistantContent !== undefined ? { assistantContent: turn.assistantContent } : {}),
+      ...(turn.toolDetails !== undefined ? { toolDetails: turn.toolDetails } : {}),
     }),
   )
   const hasActive = chatState.streamContent !== "" || chatState.streamReasoning !== ""
@@ -388,6 +412,8 @@ export const applyLlmChatSuccess = (
       content: turn.content,
       reasoning: turn.reasoning,
       isError: turn.isError,
+      ...(turn.assistantContent !== undefined ? { assistantContent: turn.assistantContent } : {}),
+      ...(turn.toolDetails !== undefined ? { toolDetails: turn.toolDetails } : {}),
     }),
   )
   const appliedEntries: ReadonlyArray<LlmChatDisplayEntry> = Option.match(maybeUpdatedContent, {
@@ -604,6 +630,9 @@ export const cancelOverwrite = (model: Model): Model =>
             llmChatMessages: [],
             llmChatDisplay: [],
             llmChatState: LlmChatState.Idle(),
+            isLlmThinkingMarkdown: true,
+            isLlmContentMarkdown: true,
+            isLlmUserMarkdown: true,
             isMaximized: false,
             isPreviewOpen: false,
             editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -622,6 +651,9 @@ export const cancelOverwrite = (model: Model): Model =>
             llmChatMessages: [],
             llmChatDisplay: [],
             llmChatState: LlmChatState.Idle(),
+            isLlmThinkingMarkdown: true,
+            isLlmContentMarkdown: true,
+            isLlmUserMarkdown: true,
             isMaximized: false,
             isEditingName: false,
             isPreviewOpen: false,
@@ -831,6 +863,13 @@ export const Message = defineMessageUnion({
     message: Schema.String,
   },
   CompletedCopyPasteErrorToClipboard: {},
+  ToggledLlmThinkingMarkdown: {},
+  ToggledLlmContentMarkdown: {},
+  ToggledLlmUserMarkdown: {},
+  ClickedCopyLlmCode: {
+    code: Schema.String,
+  },
+  CompletedCopyLlmCode: {},
   RequestedSettings: {},
   ClickedSave: {},
   ClickedOpenPreview: {},
@@ -1432,6 +1471,21 @@ export const CopyPasteErrorToClipboard = Command.define("CopyPasteErrorToClipboa
       },
       catch: () => undefined,
     }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedCopyPasteErrorToClipboard()))),
+})
+
+export const CopyLlmCodeToClipboard = Command.define("CopyLlmCodeToClipboard", {
+  args: {
+    code: Schema.String,
+  },
+  messages: [Message.CompletedCopyLlmCode],
+  execute: ({ code }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await navigator.clipboard.writeText(code)
+        return Message.CompletedCopyLlmCode()
+      },
+      catch: () => undefined,
+    }).pipe(Effect.catch(() => Effect.succeed(Message.CompletedCopyLlmCode()))),
 })
 
 export const ClearClipboardAfterPaste = Command.define("ClearClipboardAfterPaste", {
@@ -2881,6 +2935,80 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
+    ToggledLlmThinkingMarkdown: () => ({
+      model: Model.match(model, {
+        CreateFile: (state) =>
+          state.isLlmThinkingMarkdown !== undefined
+            ? modifyFields(state, {
+                isLlmThinkingMarkdown: (current) => !(current ?? true),
+              })
+            : Model.CreateFile({ ...state, isLlmThinkingMarkdown: false }),
+        EditFile: (state) =>
+          state.isLlmThinkingMarkdown !== undefined
+            ? modifyFields(state, {
+                isLlmThinkingMarkdown: (current) => !(current ?? true),
+              })
+            : Model.EditFile({ ...state, isLlmThinkingMarkdown: false }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmOverwrite: () => model,
+      }),
+      outMessage: OutMessage.None(),
+    }),
+
+    ToggledLlmContentMarkdown: () => ({
+      model: Model.match(model, {
+        CreateFile: (state) =>
+          state.isLlmContentMarkdown !== undefined
+            ? modifyFields(state, {
+                isLlmContentMarkdown: (current) => !(current ?? true),
+              })
+            : Model.CreateFile({ ...state, isLlmContentMarkdown: false }),
+        EditFile: (state) =>
+          state.isLlmContentMarkdown !== undefined
+            ? modifyFields(state, {
+                isLlmContentMarkdown: (current) => !(current ?? true),
+              })
+            : Model.EditFile({ ...state, isLlmContentMarkdown: false }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmOverwrite: () => model,
+      }),
+      outMessage: OutMessage.None(),
+    }),
+
+    ToggledLlmUserMarkdown: () => ({
+      model: Model.match(model, {
+        CreateFile: (state) =>
+          state.isLlmUserMarkdown !== undefined
+            ? modifyFields(state, {
+                isLlmUserMarkdown: (current) => !(current ?? true),
+              })
+            : Model.CreateFile({ ...state, isLlmUserMarkdown: false }),
+        EditFile: (state) =>
+          state.isLlmUserMarkdown !== undefined
+            ? modifyFields(state, {
+                isLlmUserMarkdown: (current) => !(current ?? true),
+              })
+            : Model.EditFile({ ...state, isLlmUserMarkdown: false }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmOverwrite: () => model,
+      }),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedCopyLlmCode: ({ code }) => ({
+      model,
+      commands: [CopyLlmCodeToClipboard({ code })],
+      outMessage: OutMessage.None(),
+    }),
+
+    CompletedCopyLlmCode: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
     RequestedSettings: () => ({
       model,
       outMessage: OutMessage.RequestedSettings(),
@@ -3022,6 +3150,9 @@ export const update = (
             llmChatMessages: model.llmChatMessages,
             llmChatDisplay: model.llmChatDisplay,
             llmChatState: model.llmChatState,
+            isLlmThinkingMarkdown: model.isLlmThinkingMarkdown ?? true,
+            isLlmContentMarkdown: model.isLlmContentMarkdown ?? true,
+            isLlmUserMarkdown: model.isLlmUserMarkdown ?? true,
             isMaximized: true,
             isEditingName: false,
             isPreviewOpen: model.isPreviewOpen,
@@ -4034,14 +4165,75 @@ export type ViewInputs = {
 }
 
 const viewLlmChatHistory = (
+  llmChatMessages: ReadonlyArray<LlmChatMessage>,
   llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>,
   llmChatState: LlmChatState,
+  isThinkingMarkdown: boolean,
+  isContentMarkdown: boolean,
+  isUserMarkdown: boolean,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
-  if (Array.isReadonlyArrayEmpty(llmChatDisplay) && !isSending) {
+  const systemMessages = Array.filter(llmChatMessages, (msg) => msg._tag === "System")
+  const autoUserMessages =
+    llmChatMessages.length >= 4 &&
+    llmChatMessages[0]?._tag === "System" &&
+    llmChatMessages[1]?._tag === "User" &&
+    llmChatMessages[2]?._tag === "User"
+      ? [llmChatMessages[1], llmChatMessages[2]]
+      : []
+
+  if (
+    Array.isReadonlyArrayEmpty(llmChatDisplay) &&
+    Array.isReadonlyArrayEmpty(systemMessages) &&
+    !isSending
+  ) {
     return h.empty
   }
+
+  const onCopyCode = (code: string) => Message.ClickedCopyLlmCode({ code })
+
+  const systemNodes =
+    Array.isReadonlyArrayNonEmpty(systemMessages) || Array.isReadonlyArrayNonEmpty(autoUserMessages)
+      ? [
+          h.details(
+            [h.Class("modal-llm-chat-details is-system")],
+            [
+              h.summary(
+                [h.Class("modal-llm-chat-details-summary")],
+                [
+                  Array.isReadonlyArrayNonEmpty(autoUserMessages)
+                    ? "System-Nachricht & Kontext"
+                    : "System-Nachricht",
+                ],
+              ),
+              h.div(
+                [h.Class("modal-llm-chat-details-body")],
+                [
+                  ...Array.map(systemMessages, (msg) =>
+                    h.div(
+                      [h.Class("modal-llm-chat-context-block")],
+                      [
+                        h.span([h.Class("llm-response-label")], ["System"]),
+                        viewMarkdown(msg.content, { onCopyCode }, h),
+                      ],
+                    ),
+                  ),
+                  ...Array.map(autoUserMessages, (msg) =>
+                    h.div(
+                      [h.Class("modal-llm-chat-context-block")],
+                      [
+                        h.span([h.Class("llm-response-label")], ["Kontext (Auto-Nachricht)"]),
+                        viewUserMarkdown(msg.content, { onCopyCode }, h),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ]
+      : []
 
   const renderAnswerNode = (
     {
@@ -4049,11 +4241,15 @@ const viewLlmChatHistory = (
       reasoning,
       isError,
       isStreaming,
+      assistantContent,
+      toolDetails,
     }: {
       readonly content: string
       readonly reasoning: string
       readonly isError: boolean
       readonly isStreaming: boolean
+      readonly assistantContent?: string
+      readonly toolDetails?: ReadonlyArray<LlmChatToolDetail>
     },
     hBuilder: Html.HtmlBuilder<Message>,
   ): Html.Html =>
@@ -4069,7 +4265,21 @@ const viewLlmChatHistory = (
       ],
       [
         hBuilder.span([hBuilder.Class("modal-llm-chat-role")], [isError ? "Fehler" : "KI"]),
-        LlmResponse.view({ content, reasoning, isStreaming }, hBuilder),
+        LlmResponse.view(
+          {
+            content,
+            reasoning,
+            isStreaming,
+            isThinkingMarkdown,
+            isContentMarkdown,
+            onToggleThinkingMarkdown: Message.ToggledLlmThinkingMarkdown(),
+            onToggleContentMarkdown: Message.ToggledLlmContentMarkdown(),
+            onCopyCode: (code) => Message.ClickedCopyLlmCode({ code }),
+            ...(assistantContent !== undefined ? { assistantContent } : {}),
+            ...(toolDetails !== undefined ? { toolDetails } : {}),
+          },
+          hBuilder,
+        ),
       ],
     )
 
@@ -4079,12 +4289,44 @@ const viewLlmChatHistory = (
         h.div(
           [h.Class("modal-llm-chat-msg is-user")],
           [
-            h.span([h.Class("modal-llm-chat-role")], ["Du"]),
-            h.div([h.Class("modal-llm-chat-question")], [content]),
+            h.div(
+              [h.Class("llm-response-section-header modal-llm-chat-user-header")],
+              [
+                h.span([h.Class("modal-llm-chat-role")], ["Du"]),
+                h.button(
+                  [
+                    h.Type("button"),
+                    h.Class("llm-markdown-toggle-btn"),
+                    h.AriaPressed(isUserMarkdown ? "true" : "false"),
+                    h.AriaLabel("Nutzer-Markdown umschalten"),
+                    h.OnClick(Message.ToggledLlmUserMarkdown()),
+                  ],
+                  [isUserMarkdown ? "md" : "txt"],
+                ),
+              ],
+            ),
+            h.div(
+              [h.Class("modal-llm-chat-question")],
+              [
+                isUserMarkdown
+                  ? viewUserMarkdown(content, { onCopyCode }, h)
+                  : h.p([h.Class("llm-response-text")], [content]),
+              ],
+            ),
           ],
         ),
-      Answer: ({ content, reasoning, isError }) =>
-        renderAnswerNode({ content, reasoning, isError, isStreaming: false }, h),
+      Answer: ({ content, reasoning, isError, assistantContent, toolDetails }) =>
+        renderAnswerNode(
+          {
+            content,
+            reasoning,
+            isError,
+            isStreaming: false,
+            ...(assistantContent !== undefined ? { assistantContent } : {}),
+            ...(toolDetails !== undefined ? { toolDetails } : {}),
+          },
+          h,
+        ),
     }),
   )
 
@@ -4097,6 +4339,10 @@ const viewLlmChatHistory = (
               reasoning: turn.reasoning,
               isError: turn.isError,
               isStreaming: false,
+              ...(turn.assistantContent !== undefined
+                ? { assistantContent: turn.assistantContent }
+                : {}),
+              ...(turn.toolDetails !== undefined ? { toolDetails: turn.toolDetails } : {}),
             },
             h,
           ),
@@ -4118,7 +4364,7 @@ const viewLlmChatHistory = (
 
   return h.div(
     [h.Id("modal-llm-chat-history"), h.Class("modal-llm-chat-history")],
-    [...historyNodes, ...completedStreamNodes, streamingNode],
+    [...systemNodes, ...historyNodes, ...completedStreamNodes, streamingNode],
   )
 }
 
@@ -4222,7 +4468,11 @@ const viewLlmChatModelControls = (
 const viewLlmChatBar = (
   llmChatInput: string,
   llmChatState: LlmChatState,
+  llmChatMessages: ReadonlyArray<LlmChatMessage>,
   llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>,
+  isThinkingMarkdown: boolean,
+  isContentMarkdown: boolean,
+  isUserMarkdown: boolean,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
@@ -4230,7 +4480,15 @@ const viewLlmChatBar = (
   return h.div(
     [h.Id("modal-llm-chat-bar"), h.Class("modal-llm-chat-bar")],
     [
-      viewLlmChatHistory(llmChatDisplay, llmChatState, h),
+      viewLlmChatHistory(
+        llmChatMessages,
+        llmChatDisplay,
+        llmChatState,
+        isThinkingMarkdown,
+        isContentMarkdown,
+        isUserMarkdown,
+        h,
+      ),
       h.div(
         [h.Class("modal-llm-chat-input-row")],
         [
@@ -4319,7 +4577,11 @@ const viewEditorModal = (
     isLlmModeMenuOpen: isLlmModeMenuOpenProp = false,
     llmChatInput,
     llmChatState,
+    llmChatMessages,
     llmChatDisplay,
+    isLlmThinkingMarkdown = true,
+    isLlmContentMarkdown = true,
+    isLlmUserMarkdown = true,
     llmViewInputs,
     isMaximized,
     isNameToggleable,
@@ -4341,7 +4603,11 @@ const viewEditorModal = (
     readonly isLlmModeMenuOpen?: boolean
     readonly llmChatInput: string
     readonly llmChatState: LlmChatState
+    readonly llmChatMessages: ReadonlyArray<LlmChatMessage>
     readonly llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>
+    readonly isLlmThinkingMarkdown?: boolean
+    readonly isLlmContentMarkdown?: boolean
+    readonly isLlmUserMarkdown?: boolean
     readonly llmViewInputs: ViewInputs
     readonly isMaximized: boolean
     readonly isNameToggleable: boolean
@@ -4543,7 +4809,16 @@ const viewEditorModal = (
               ),
               effectiveLlmBarMode === "Chat" ? viewEditorSplitter(isDraggingSplit, h) : h.empty,
               effectiveLlmBarMode === "Chat"
-                ? viewLlmChatBar(llmChatInput, llmChatState, llmChatDisplay, h)
+                ? viewLlmChatBar(
+                    llmChatInput,
+                    llmChatState,
+                    llmChatMessages,
+                    llmChatDisplay,
+                    isLlmThinkingMarkdown,
+                    isLlmContentMarkdown,
+                    isLlmUserMarkdown,
+                    h,
+                  )
                 : h.empty,
               h.footer(
                 [h.Class("modal-footer")],
@@ -5214,7 +5489,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 isLlmModeMenuOpen: state.isLlmModeMenuOpen ?? false,
                 llmChatInput: state.llmChatInput,
                 llmChatState: state.llmChatState,
+                llmChatMessages: state.llmChatMessages,
                 llmChatDisplay: state.llmChatDisplay,
+                isLlmThinkingMarkdown: state.isLlmThinkingMarkdown ?? true,
+                isLlmContentMarkdown: state.isLlmContentMarkdown ?? true,
+                isLlmUserMarkdown: state.isLlmUserMarkdown ?? true,
                 llmViewInputs: context,
                 isMaximized: state.isMaximized,
                 isNameToggleable: false,
@@ -5275,6 +5554,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             llmBarMode: "Closed",
             llmChatInput: "",
             llmChatState: LlmChatState.Idle(),
+            isLlmThinkingMarkdown: true,
+            isLlmContentMarkdown: true,
+            isLlmUserMarkdown: true,
+            llmChatMessages: [],
             llmChatDisplay: [],
             llmViewInputs: context,
             isMaximized: false,
@@ -5305,6 +5588,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 isLlmModeMenuOpen: false,
                 llmChatInput: "",
                 llmChatState: LlmChatState.Idle(),
+                isLlmThinkingMarkdown: true,
+                isLlmContentMarkdown: true,
+                isLlmUserMarkdown: true,
+                llmChatMessages: [],
                 llmChatDisplay: [],
                 llmViewInputs: context,
                 isMaximized: false,
@@ -5334,7 +5621,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         isLlmModeMenuOpen: isLlmModeMenuOpenFlag,
         llmChatInput,
         llmChatState,
+        llmChatMessages,
         llmChatDisplay,
+        isLlmThinkingMarkdown,
+        isLlmContentMarkdown,
+        isLlmUserMarkdown,
         isMaximized,
         isEditingName,
         isPreviewOpen: previewOpen,
@@ -5379,7 +5670,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 isLlmModeMenuOpen: isLlmModeMenuOpenFlag ?? false,
                 llmChatInput,
                 llmChatState,
+                llmChatMessages,
                 llmChatDisplay,
+                isLlmThinkingMarkdown: isLlmThinkingMarkdown ?? true,
+                isLlmContentMarkdown: isLlmContentMarkdown ?? true,
+                isLlmUserMarkdown: isLlmUserMarkdown ?? true,
                 llmViewInputs: context,
                 isMaximized,
                 isNameToggleable: true,

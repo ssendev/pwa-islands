@@ -13,6 +13,7 @@ import {
   toggleFullscreenWindow,
 } from "./files"
 import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
+import { initMarkdown } from "./markdown"
 import { registerMonacoEditorElement } from "./monaco-element"
 
 registerMonacoEditorElement()
@@ -81,16 +82,22 @@ const application = Runtime.makeApplication({
   },
 })
 
-Runtime.run(application, {
-  flags: Effect.sync(() => ({
-    hasDirectoryPicker: supportsDirectoryPicker(),
-    hasOPFS: supportsOPFS(),
-    hasTauri: supportsTauri(),
-    isWindowsOrLinux: isWindowsOrLinux(),
-    isWindows: isWindows(),
-    origin: window.location.origin,
-  })),
-})
+void initMarkdown()
+  .catch((error) => {
+    console.error("Markdown-Parser konnte nicht initialisiert werden:", error)
+  })
+  .finally(() => {
+    Runtime.run(application, {
+      flags: Effect.sync(() => ({
+        hasDirectoryPicker: supportsDirectoryPicker(),
+        hasOPFS: supportsOPFS(),
+        hasTauri: supportsTauri(),
+        isWindowsOrLinux: isWindowsOrLinux(),
+        isWindows: isWindows(),
+        origin: window.location.origin,
+      })),
+    })
+  })
 
 if (supportsTauri()) {
   import("@tauri-apps/api/window")

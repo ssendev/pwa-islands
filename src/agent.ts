@@ -1471,10 +1471,19 @@ export const requestEditorChatCompletion = async (
   }
 }
 
+export type EditorChatToolDetail = {
+  readonly summary: string
+  readonly name: string
+  readonly arguments: string
+  readonly result: string
+}
+
 export type EditorChatTurnBlock = {
   readonly content: string
   readonly reasoning: string
   readonly isError: boolean
+  readonly assistantContent?: string
+  readonly toolDetails?: ReadonlyArray<EditorChatToolDetail>
 }
 
 export type EditorChatStreamUpdate = {
@@ -1510,43 +1519,45 @@ const parseToolArgsRecord = (rawArguments: string): Record<string, unknown> | un
   }
 }
 
+const formatSingleToolCallSummary = (call: EditorChatToolCall): string => {
+  const name = call.name.trim()
+  if (name === "edit") {
+    const args = extractEditorToolArgs(call.arguments).trim()
+    return args !== "" ? `Tool-Aufruf: edit\n${args}` : "Tool-Aufruf: edit"
+  }
+  if (name === "search") {
+    const parsed = parseToolArgsRecord(call.arguments)
+    const query = parsed && typeof parsed.query === "string" ? parsed.query.trim() : ""
+    return query !== "" ? `Tool-Aufruf: search ("${query}")` : "Tool-Aufruf: search"
+  }
+  if (name === "read") {
+    const parsed = parseToolArgsRecord(call.arguments)
+    const start =
+      parsed && typeof parsed.startLine === "number" ? Math.floor(parsed.startLine) : undefined
+    const end =
+      parsed && typeof parsed.endLine === "number" ? Math.floor(parsed.endLine) : undefined
+    if (start !== undefined && end !== undefined) {
+      return `Tool-Aufruf: read (Zeilen ${start}–${end})`
+    }
+    if (start !== undefined) {
+      return `Tool-Aufruf: read (ab Zeile ${start})`
+    }
+    return "Tool-Aufruf: read"
+  }
+  if (name === "write") {
+    const parsed = parseToolArgsRecord(call.arguments)
+    if (parsed && typeof parsed.content === "string") {
+      const lineCount = parsed.content.replace(/\r\n/g, "\n").split("\n").length
+      return `Tool-Aufruf: write (${lineCount} Zeilen)`
+    }
+    return "Tool-Aufruf: write"
+  }
+  return name !== "" ? `Tool-Aufruf: ${name}` : ""
+}
+
 const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): string =>
   toolCalls
-    .map((call) => {
-      const name = call.name.trim()
-      if (name === "edit") {
-        const args = extractEditorToolArgs(call.arguments).trim()
-        return args !== "" ? `Tool-Aufruf: edit\n${args}` : "Tool-Aufruf: edit"
-      }
-      if (name === "search") {
-        const parsed = parseToolArgsRecord(call.arguments)
-        const query = parsed && typeof parsed.query === "string" ? parsed.query.trim() : ""
-        return query !== "" ? `Tool-Aufruf: search ("${query}")` : "Tool-Aufruf: search"
-      }
-      if (name === "read") {
-        const parsed = parseToolArgsRecord(call.arguments)
-        const start =
-          parsed && typeof parsed.startLine === "number" ? Math.floor(parsed.startLine) : undefined
-        const end =
-          parsed && typeof parsed.endLine === "number" ? Math.floor(parsed.endLine) : undefined
-        if (start !== undefined && end !== undefined) {
-          return `Tool-Aufruf: read (Zeilen ${start}–${end})`
-        }
-        if (start !== undefined) {
-          return `Tool-Aufruf: read (ab Zeile ${start})`
-        }
-        return "Tool-Aufruf: read"
-      }
-      if (name === "write") {
-        const parsed = parseToolArgsRecord(call.arguments)
-        if (parsed && typeof parsed.content === "string") {
-          const lineCount = parsed.content.replace(/\r\n/g, "\n").split("\n").length
-          return `Tool-Aufruf: write (${lineCount} Zeilen)`
-        }
-        return "Tool-Aufruf: write"
-      }
-      return name !== "" ? `Tool-Aufruf: ${name}` : ""
-    })
+    .map(formatSingleToolCallSummary)
     .filter((entry) => entry !== "")
     .join("\n\n")
 
@@ -1834,6 +1845,24 @@ export const runEditorChatTurn = async ({
       executeToolCall,
     )
     const nextMessages = [...messages, assistantMsg, ...batch.toolMessages]
+    const toolDetails: ReadonlyArray<EditorChatToolDetail> = reply.toolCalls.map((call) => {
+      const toolMsg = batch.toolMessages.find(
+        (msg) => msg._tag === "Tool" && msg.toolCallId === call.id,
+      )
+      const name = call.name.trim()
+      const summary = name === "edit" ? "Tool-Aufruf: edit" : formatSingleToolCallSummary(call)
+      return {
+        summary: summary !== "" ? summary : "Tool-Aufruf",
+        name,
+        arguments: call.arguments,
+        result: toolMsg?.content ?? "",
+      }
+    })
+    const enrichedReplyTurns: ReadonlyArray<EditorChatTurnBlock> = replyTurns.map((turn) => ({
+      ...turn,
+      assistantContent: reply.content.trim(),
+      toolDetails,
+    }))
 
     if (EffectArray.isReadonlyArrayNonEmpty(batch.errorMessages)) {
       const combinedError = batch.errorMessages.join("\n")
@@ -1844,7 +1873,7 @@ export const runEditorChatTurn = async ({
       }
       const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
         ...completedTurns,
-        ...replyTurns,
+        ...enrichedReplyTurns,
         errorTurn,
       ]
       if (errorRetriesLeft <= 0) {
@@ -1869,7 +1898,7 @@ export const runEditorChatTurn = async ({
 
     const nextCompletedTurns: ReadonlyArray<EditorChatTurnBlock> = [
       ...completedTurns,
-      ...replyTurns,
+      ...enrichedReplyTurns,
     ]
     if (batch.hasModifiedFile) {
       return {

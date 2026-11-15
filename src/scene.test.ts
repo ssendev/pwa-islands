@@ -532,6 +532,18 @@ describe("PWA Islands Scene Tests", () => {
         Message.CompletedScrollEditorLlmChatToBottom(),
       ),
       sceneExpect(selector("#modal-file-content")).toHaveValue("<h1>Hallo</h1>"),
+      sceneExpect(
+        selector("#modal-llm-chat-history .modal-llm-chat-details.is-system summary"),
+      ).toContainText("System-Nachricht"),
+      sceneExpect(
+        selector("#modal-llm-chat-history .modal-llm-chat-details.is-system"),
+      ).toContainText("sys"),
+      sceneExpect(
+        selector("#modal-llm-chat-history .modal-llm-chat-details.is-system"),
+      ).toContainText("dts"),
+      sceneExpect(
+        selector("#modal-llm-chat-history .modal-llm-chat-details.is-system"),
+      ).toContainText("file"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText(
         "1 Bearbeitung(en) angewendet",
       ),
