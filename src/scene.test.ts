@@ -467,6 +467,25 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-btn-send-llm.btn-danger")).toExist(),
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
+          completedTurns: [],
+          activeTurn: { content: "", reasoning: "" },
+          initialMessages: [
+            { _tag: "System", content: "sys" },
+            { _tag: "User", content: "dts" },
+            { _tag: "User", content: "file" },
+            { _tag: "User", content: "Füge <h1>Hallo</h1> ein" },
+          ],
+        }),
+      ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
+      ),
+      sceneExpect(
+        selector("#modal-llm-chat-history .modal-llm-chat-details.is-system summary"),
+      ).toContainText("System-Nachricht"),
+      Subscription.emit(
+        Message.UpdatedEditorLlmChatStream({
           completedTurns: [
             {
               content: "Tool-Aufruf: edit",
@@ -583,6 +602,25 @@ describe("PWA Islands Scene Tests", () => {
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
           completedTurns: [],
+          activeTurn: { content: "", reasoning: "" },
+          initialMessages: [
+            { _tag: "System", content: "sys" },
+            { _tag: "User", content: "dts" },
+            { _tag: "User", content: "file" },
+            { _tag: "User", content: "Füge <h1>Hallo</h1> ein" },
+          ],
+        }),
+      ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
+      ),
+      sceneExpect(
+        selector("#modal-llm-chat-history .modal-llm-chat-details.is-system summary"),
+      ).toContainText("System-Nachricht"),
+      Subscription.emit(
+        Message.UpdatedEditorLlmChatStream({
+          completedTurns: [],
           activeTurn: {
             content: "Teilantwort",
             reasoning: "",
@@ -634,6 +672,25 @@ describe("PWA Islands Scene Tests", () => {
         [LoadEditorLlmModels, Message.SucceededLoadEditorLlmModels({ models: ["gpt-4o"] })],
       ),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
+      Subscription.emit(
+        Message.UpdatedEditorLlmChatStream({
+          completedTurns: [],
+          activeTurn: { content: "", reasoning: "" },
+          initialMessages: [
+            { _tag: "System", content: "sys" },
+            { _tag: "User", content: "dts" },
+            { _tag: "User", content: "file" },
+            { _tag: "User", content: "Füge <h1>Hallo</h1> ein" },
+          ],
+        }),
+      ),
+      Command.resolve(
+        ScrollEditorLlmChatToBottomIfAtBottom,
+        Message.CompletedScrollEditorLlmChatToBottom(),
+      ),
+      sceneExpect(
+        selector("#modal-llm-chat-history .modal-llm-chat-details.is-system summary"),
+      ).toContainText("System-Nachricht"),
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
           completedTurns: [],

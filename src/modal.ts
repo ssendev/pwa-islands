@@ -292,6 +292,7 @@ export const applyEditorLlmChatStream = (
       readonly assistantContent?: string
       readonly toolDetails?: ReadonlyArray<Editor.LlmChatToolDetail>
     }
+    readonly initialMessages?: ReadonlyArray<Editor.LlmChatMessage>
   },
 ): ModalState =>
   Match.value(modalState).pipe(

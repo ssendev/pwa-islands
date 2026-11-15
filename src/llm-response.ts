@@ -224,7 +224,7 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                 [
                   h.Class(props.isStreaming ? "llm-tool-details is-streaming" : "llm-tool-details"),
                   h.DataAttribute("tool-key", toolKey),
-                  ...(props.isStreaming ? [h.Open(true)] : []),
+                  ...(props.isStreaming ? [h.Attribute("open", "")] : []),
                 ],
                 [
                   h.summary([h.Class("llm-tool-summary")], [detail.summary]),

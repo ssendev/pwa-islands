@@ -364,6 +364,7 @@ export const applyLlmChatStream = (
   {
     completedTurns,
     activeTurn,
+    initialMessages,
   }: {
     readonly completedTurns: ReadonlyArray<LlmChatTurnBlock>
     readonly activeTurn: {
@@ -372,6 +373,7 @@ export const applyLlmChatStream = (
       readonly assistantContent?: string
       readonly toolDetails?: ReadonlyArray<LlmChatToolDetail>
     }
+    readonly initialMessages?: ReadonlyArray<LlmChatMessage>
   },
 ): Model =>
   Model.match(model, {
@@ -380,6 +382,10 @@ export const applyLlmChatStream = (
         Idle: () => state,
         Sending: (sending) =>
           modifyFields(state, {
+            llmChatMessages: (current) =>
+              initialMessages !== undefined && Array.isReadonlyArrayEmpty(current)
+                ? initialMessages
+                : current,
             llmChatState: () =>
               modifyFields(sending, {
                 streamTurns: () => completedTurns,
@@ -395,6 +401,10 @@ export const applyLlmChatStream = (
         Idle: () => state,
         Sending: (sending) =>
           modifyFields(state, {
+            llmChatMessages: (current) =>
+              initialMessages !== undefined && Array.isReadonlyArrayEmpty(current)
+                ? initialMessages
+                : current,
             llmChatState: () =>
               modifyFields(sending, {
                 streamTurns: () => completedTurns,
@@ -4243,7 +4253,6 @@ const viewLlmChatHistory = (
   editFormat: EditFormat,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
-  const isSending = llmChatState._tag === "Sending"
   const systemMessages = Array.filter(llmChatMessages, (msg) => msg._tag === "System")
   const autoUserMessages =
     llmChatMessages.length >= 4 &&
@@ -4252,14 +4261,6 @@ const viewLlmChatHistory = (
     llmChatMessages[2]?._tag === "User"
       ? [llmChatMessages[1], llmChatMessages[2]]
       : []
-
-  if (
-    Array.isReadonlyArrayEmpty(llmChatDisplay) &&
-    Array.isReadonlyArrayEmpty(systemMessages) &&
-    !isSending
-  ) {
-    return h.empty
-  }
 
   const onCopyCode = (code: string) => Message.ClickedCopyLlmCode({ code })
   const toolsMarkdown = `\`\`\`json tools\n${JSON.stringify(getEditorToolsForFormat(editFormat), null, 2)}\n\`\`\``

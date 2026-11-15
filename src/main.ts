@@ -671,6 +671,7 @@ export const Message = defineMessageUnion({
       assistantContent: Schema.optionalKey(Schema.String),
       toolDetails: Schema.optionalKey(Schema.Array(Editor.LlmChatToolDetailSchema)),
     }),
+    initialMessages: Schema.optionalKey(Schema.Array(Editor.LlmChatMessage)),
   },
   SucceededEditorLlmChat: {
     messages: Schema.Array(Editor.LlmChatMessage),
@@ -4222,10 +4223,14 @@ export const update = (
 
     FailedLoadEditorLlmModels: () => ({ model }),
 
-    UpdatedEditorLlmChatStream: ({ completedTurns, activeTurn }) => ({
+    UpdatedEditorLlmChatStream: ({ completedTurns, activeTurn, initialMessages }) => ({
       model: modifyFields(model, {
         modalState: (current) =>
-          Modal.applyEditorLlmChatStream(current, { completedTurns, activeTurn }),
+          Modal.applyEditorLlmChatStream(current, {
+            completedTurns,
+            activeTurn,
+            ...(initialMessages !== undefined ? { initialMessages } : {}),
+          }),
       }),
       commands: [ScrollEditorLlmChatToBottomIfAtBottom()],
     }),
@@ -5386,6 +5391,17 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                         ...toAgentEditorMessages(deps.messages),
                         { _tag: "User" as const, content: deps.prompt },
                       ]
+
+                if (Array.isReadonlyArrayEmpty(deps.messages) && !controller.signal.aborted) {
+                  Queue.offerUnsafe(
+                    queue,
+                    Message.UpdatedEditorLlmChatStream({
+                      completedTurns: [],
+                      activeTurn: { content: "", reasoning: "" },
+                      initialMessages: toEditorSchemaMessages(initialMessages),
+                    }),
+                  )
+                }
 
                 return runEditorChatTurn({
                   config: {

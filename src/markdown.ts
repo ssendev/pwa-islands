@@ -182,7 +182,10 @@ const renderNode = <Message>(
             )
           : h.empty
       return h.details(
-        [h.Class("llm-markdown-codeblock"), h.Open(opts.codeblocksOpen ?? true)],
+        [
+          h.Class("llm-markdown-codeblock"),
+          ...((opts.codeblocksOpen ?? true) ? [h.Attribute("open", "")] : []),
+        ],
         [
           h.summary(
             [h.Class("llm-markdown-codeblock-header")],
