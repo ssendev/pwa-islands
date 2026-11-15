@@ -1,7 +1,13 @@
 import { Option, Schema } from "effect"
 import { CustomElement } from "foldkit"
 import type * as Monaco from "monaco-editor"
-import { defaultMonacoSettings, type MonacoTheme, MonacoThemeSchema } from "./storage"
+import {
+  type AppTheme,
+  AppThemeSchema,
+  defaultMonacoSettings,
+  type MonacoTheme,
+  MonacoThemeSchema,
+} from "./storage"
 
 export const MONACO_EDITOR_TAG = "monaco-editor"
 
@@ -15,6 +21,9 @@ export const monacoEditorElement = CustomElement.define({
     wordWrap: Schema.Boolean,
     scrollBeyondLastLine: Schema.Boolean,
     theme: MonacoThemeSchema,
+    appTheme: AppThemeSchema,
+    lineDecorationsWidth: Schema.Number,
+    lineNumbersMinChars: Schema.Number,
   },
   events: {
     "content-changed": Schema.Struct({ value: Schema.String }),
@@ -63,8 +72,41 @@ export const languageFromFilename = (filename: string): string => {
   return LANGUAGE_BY_EXTENSION[ext] ?? "plaintext"
 }
 
-export const resolveMonacoTheme = (theme: MonacoTheme, isSystemDark: boolean): string =>
-  theme === "system" ? (isSystemDark ? "vs-dark" : "vs") : theme
+export const resolveMonacoTheme = (
+  theme: MonacoTheme,
+  appTheme: AppTheme,
+  isSystemDark: boolean,
+): string => {
+  if (theme !== "system") {
+    return theme
+  }
+  if (appTheme === "dark") {
+    return "vs-dark"
+  }
+  if (appTheme === "light") {
+    return "vs"
+  }
+  return isSystemDark ? "vs-dark" : "vs"
+}
+
+export const computeGutterOptions = (
+  lineNumbers: boolean,
+  folding: boolean,
+  lineDecorationsWidth: number,
+  lineNumbersMinChars: number,
+): {
+  readonly lineNumbers: "on" | "off"
+  readonly folding: boolean
+  readonly glyphMargin: false
+  readonly lineDecorationsWidth: number
+  readonly lineNumbersMinChars: number
+} => ({
+  lineNumbers: lineNumbers ? "on" : "off",
+  folding,
+  glyphMargin: false,
+  lineDecorationsWidth,
+  lineNumbersMinChars: lineNumbers ? lineNumbersMinChars : 0,
+})
 
 export const computeChangedSpan = (
   oldText: string,
@@ -170,6 +212,9 @@ export const registerMonacoEditorElement = (): void => {
     private currentWordWrap = defaultMonacoSettings.wordWrap
     private currentScrollBeyondLastLine = defaultMonacoSettings.scrollBeyondLastLine
     private currentTheme: MonacoTheme = defaultMonacoSettings.theme
+    private currentAppTheme: AppTheme = "system"
+    private currentLineDecorationsWidth = defaultMonacoSettings.lineDecorationsWidth
+    private currentLineNumbersMinChars = defaultMonacoSettings.lineNumbersMinChars
     private isApplyingExternalValue = false
     private isDisconnected = false
     private lastCanUndo = false
@@ -186,13 +231,15 @@ export const registerMonacoEditorElement = (): void => {
       })
     }
     private readonly handleThemeChange = (event: MediaQueryListEvent): void => {
-      if (this.currentTheme !== "system") {
+      if (this.currentTheme !== "system" || this.currentAppTheme !== "system") {
         return
       }
       Option.match(this.maybeMonaco, {
         onNone: () => {},
         onSome: (monacoApi) => {
-          monacoApi.editor.setTheme(resolveMonacoTheme(this.currentTheme, event.matches))
+          monacoApi.editor.setTheme(
+            resolveMonacoTheme(this.currentTheme, this.currentAppTheme, event.matches),
+          )
         },
       })
     }
@@ -296,7 +343,14 @@ export const registerMonacoEditorElement = (): void => {
       Option.match(this.maybeEditor, {
         onNone: () => {},
         onSome: (editor) => {
-          editor.updateOptions({ lineNumbers: nextLineNumbers ? "on" : "off" })
+          editor.updateOptions(
+            computeGutterOptions(
+              nextLineNumbers,
+              this.currentFolding,
+              this.currentLineDecorationsWidth,
+              this.currentLineNumbersMinChars,
+            ),
+          )
         },
       })
     }
@@ -313,7 +367,62 @@ export const registerMonacoEditorElement = (): void => {
       Option.match(this.maybeEditor, {
         onNone: () => {},
         onSome: (editor) => {
-          editor.updateOptions({ folding: nextFolding })
+          editor.updateOptions(
+            computeGutterOptions(
+              this.currentLineNumbers,
+              nextFolding,
+              this.currentLineDecorationsWidth,
+              this.currentLineNumbersMinChars,
+            ),
+          )
+        },
+      })
+    }
+
+    get lineDecorationsWidth(): number {
+      return this.currentLineDecorationsWidth
+    }
+
+    set lineDecorationsWidth(nextWidth: number) {
+      if (this.currentLineDecorationsWidth === nextWidth) {
+        return
+      }
+      this.currentLineDecorationsWidth = nextWidth
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.updateOptions(
+            computeGutterOptions(
+              this.currentLineNumbers,
+              this.currentFolding,
+              nextWidth,
+              this.currentLineNumbersMinChars,
+            ),
+          )
+        },
+      })
+    }
+
+    get lineNumbersMinChars(): number {
+      return this.currentLineNumbersMinChars
+    }
+
+    set lineNumbersMinChars(nextMinChars: number) {
+      if (this.currentLineNumbersMinChars === nextMinChars) {
+        return
+      }
+      this.currentLineNumbersMinChars = nextMinChars
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.updateOptions(
+            computeGutterOptions(
+              this.currentLineNumbers,
+              this.currentFolding,
+              this.currentLineDecorationsWidth,
+              nextMinChars,
+            ),
+          )
         },
       })
     }
@@ -364,7 +473,28 @@ export const registerMonacoEditorElement = (): void => {
       Option.match(this.maybeMonaco, {
         onNone: () => {},
         onSome: (monacoApi) => {
-          monacoApi.editor.setTheme(resolveMonacoTheme(nextTheme, this.isSystemDark()))
+          monacoApi.editor.setTheme(
+            resolveMonacoTheme(nextTheme, this.currentAppTheme, this.isSystemDark()),
+          )
+        },
+      })
+    }
+
+    get appTheme(): AppTheme {
+      return this.currentAppTheme
+    }
+
+    set appTheme(nextAppTheme: AppTheme) {
+      if (this.currentAppTheme === nextAppTheme) {
+        return
+      }
+      this.currentAppTheme = nextAppTheme
+      Option.match(this.maybeMonaco, {
+        onNone: () => {},
+        onSome: (monacoApi) => {
+          monacoApi.editor.setTheme(
+            resolveMonacoTheme(this.currentTheme, nextAppTheme, this.isSystemDark()),
+          )
         },
       })
     }
@@ -430,11 +560,15 @@ export const registerMonacoEditorElement = (): void => {
       const editor = monacoApi.editor.create(container, {
         value: this.currentValue,
         language: languageFromFilename(this.currentFilename),
-        theme: resolveMonacoTheme(this.currentTheme, this.isSystemDark()),
+        theme: resolveMonacoTheme(this.currentTheme, this.currentAppTheme, this.isSystemDark()),
         automaticLayout: true,
         minimap: { enabled: false },
-        lineNumbers: this.currentLineNumbers ? "on" : "off",
-        folding: this.currentFolding,
+        ...computeGutterOptions(
+          this.currentLineNumbers,
+          this.currentFolding,
+          this.currentLineDecorationsWidth,
+          this.currentLineNumbersMinChars,
+        ),
         wordWrap: this.currentWordWrap ? "on" : "off",
         fontSize: 13,
         tabSize: 2,

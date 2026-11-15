@@ -103,6 +103,8 @@ import { formatApiDtsMessage } from "./hashline"
 import * as Editor from "./editor"
 import * as LlmResponse from "./llm-response"
 import {
+  type AppTheme,
+  AppThemeSchema,
   DEFAULT_EDITOR_SPLIT_PERCENT,
   type MonacoTheme,
   MonacoSettingsSchema,
@@ -111,11 +113,13 @@ import {
   defaultMonacoSettings,
   getFileExtension,
   getStoredApiHistoryEnabled,
+  getStoredAppTheme,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
   getStoredLlmSettings,
   getStoredMonacoSettings,
   storeApiHistoryEnabled,
+  storeAppTheme,
   storeEditorPreferences,
   storeHistoryEnabled,
   storeLlmSettings,
@@ -376,11 +380,14 @@ export const Model = Schema.Struct({
   llmTestState: LlmTestState,
   historyEnabled: Schema.Boolean,
   apiHistoryEnabled: Schema.Boolean,
+  appTheme: AppThemeSchema,
   editorLineNumbers: Schema.Boolean,
   editorFolding: Schema.Boolean,
   editorWordWrap: Schema.Boolean,
   editorScrollBeyondLastLine: Schema.Boolean,
   editorTheme: MonacoThemeSchema,
+  editorLineDecorationsWidth: Schema.Number,
+  editorLineNumbersMinChars: Schema.Number,
   clearAllHistoryState: ClearAllHistoryState,
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
@@ -551,7 +558,12 @@ export const Message = defineMessageUnion({
   ToggledSettingsEditorWordWrap: { isEnabled: Schema.Boolean },
   ToggledSettingsEditorScrollBeyondLastLine: { isEnabled: Schema.Boolean },
   SelectedSettingsEditorTheme: { theme: MonacoThemeSchema },
+  UpdatedSettingsEditorLineDecorationsWidth: { value: Schema.Number },
+  UpdatedSettingsEditorLineNumbersMinChars: { value: Schema.Number },
   CompletedSaveMonacoSettings: {},
+  SelectedSettingsAppTheme: { theme: AppThemeSchema },
+  CompletedSaveAppTheme: {},
+  CompletedApplyAppTheme: {},
   ClickedTestLlm: { mode: LlmTestMode },
   UpdatedTestLlmStream: {
     content: Schema.String,
@@ -599,6 +611,7 @@ export const Message = defineMessageUnion({
     historyEnabled: Schema.optionalKey(Schema.Boolean),
     apiHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
+    appTheme: Schema.optionalKey(AppThemeSchema),
   },
   CompletedSaveEditorPreferences: {},
   SucceededLoadEditorLlmModels: {
@@ -939,6 +952,47 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
     ),
 })
 
+const applyAppThemeToDocument = (theme: AppTheme): void => {
+  if (typeof document === "undefined") {
+    return
+  }
+  if (theme === "system") {
+    delete document.documentElement.dataset.theme
+  } else {
+    document.documentElement.dataset.theme = theme
+  }
+}
+
+export const ApplyAppTheme = Command.define("ApplyAppTheme", {
+  args: {
+    theme: AppThemeSchema,
+  },
+  messages: [Message.CompletedApplyAppTheme],
+  execute: ({ theme }) =>
+    Effect.sync(() => {
+      applyAppThemeToDocument(theme)
+      return Message.CompletedApplyAppTheme()
+    }),
+})
+
+export const SaveAppTheme = Command.define("SaveAppTheme", {
+  args: {
+    theme: AppThemeSchema,
+  },
+  messages: [Message.CompletedSaveAppTheme],
+  execute: ({ theme }) =>
+    Effect.tryPromise({
+      try: async () => {
+        applyAppThemeToDocument(theme)
+        await storeAppTheme(theme)
+      },
+      catch: () => new Error("Failed to save app theme"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveAppTheme()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveAppTheme())),
+    ),
+})
+
 export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
   args: {
     lineNumbers: Schema.Boolean,
@@ -946,6 +1000,8 @@ export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
     wordWrap: Schema.Boolean,
     scrollBeyondLastLine: Schema.Boolean,
     theme: MonacoThemeSchema,
+    lineDecorationsWidth: Schema.Number,
+    lineNumbersMinChars: Schema.Number,
   },
   messages: [Message.CompletedSaveMonacoSettings],
   execute: (args) =>
@@ -957,6 +1013,8 @@ export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
           wordWrap: args.wordWrap,
           scrollBeyondLastLine: args.scrollBeyondLastLine,
           theme: args.theme,
+          lineDecorationsWidth: args.lineDecorationsWidth,
+          lineNumbersMinChars: args.lineNumbersMinChars,
         }),
       catch: () => new Error("Failed to save monaco settings"),
     }).pipe(
@@ -973,9 +1031,10 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredHistoryEnabled(),
       getStoredApiHistoryEnabled(),
       getStoredMonacoSettings(),
+      getStoredAppTheme(),
     ]),
   ).pipe(
-    Effect.map(([prefs, historyEnabled, apiHistoryEnabled, monacoSettings]) =>
+    Effect.map(([prefs, historyEnabled, apiHistoryEnabled, monacoSettings, appTheme]) =>
       Message.CompletedLoadEditorPreferences({
         isMaximized: prefs.isMaximized,
         llmBarMode: prefs.llmBarMode,
@@ -985,6 +1044,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         historyEnabled,
         apiHistoryEnabled,
         monacoSettings,
+        appTheme,
       }),
     ),
   ),
@@ -1983,11 +2043,14 @@ export const init = (
         llmTestState: LlmTestState.Idle(),
         historyEnabled: true,
         apiHistoryEnabled: true,
+        appTheme: "system",
         editorLineNumbers: defaultMonacoSettings.lineNumbers,
         editorFolding: defaultMonacoSettings.folding,
         editorWordWrap: defaultMonacoSettings.wordWrap,
         editorScrollBeyondLastLine: defaultMonacoSettings.scrollBeyondLastLine,
         editorTheme: defaultMonacoSettings.theme,
+        editorLineDecorationsWidth: defaultMonacoSettings.lineDecorationsWidth,
+        editorLineNumbersMinChars: defaultMonacoSettings.lineNumbersMinChars,
         clearAllHistoryState: ClearAllHistoryState.Idle(),
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -2056,11 +2119,14 @@ export const init = (
       llmTestState: LlmTestState.Idle(),
       historyEnabled: true,
       apiHistoryEnabled: true,
+      appTheme: "system",
       editorLineNumbers: defaultMonacoSettings.lineNumbers,
       editorFolding: defaultMonacoSettings.folding,
       editorWordWrap: defaultMonacoSettings.wordWrap,
       editorScrollBeyondLastLine: defaultMonacoSettings.scrollBeyondLastLine,
       editorTheme: defaultMonacoSettings.theme,
+      editorLineDecorationsWidth: defaultMonacoSettings.lineDecorationsWidth,
+      editorLineNumbersMinChars: defaultMonacoSettings.lineNumbersMinChars,
       clearAllHistoryState: ClearAllHistoryState.Idle(),
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -2172,6 +2238,25 @@ const enqueueMaybeToast = (
     onNone: () => ({ model }),
     onSome: (banner) => enqueueToast(model, banner),
   })
+
+const saveMonacoSettingsCommand = (model: Model) =>
+  SaveMonacoSettings({
+    lineNumbers: model.editorLineNumbers,
+    folding: model.editorFolding,
+    wordWrap: model.editorWordWrap,
+    scrollBeyondLastLine: model.editorScrollBeyondLastLine,
+    theme: model.editorTheme,
+    lineDecorationsWidth: model.editorLineDecorationsWidth,
+    lineNumbersMinChars: model.editorLineNumbersMinChars,
+  })
+
+const parseRangeNumber = (raw: string, fallback: number, min: number, max: number): number => {
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.min(max, Math.max(min, parsed))
+}
 
 const openSettingsDialogModel = (model: Model): Model =>
   modifyFields(model, {
@@ -3161,15 +3246,7 @@ export const update = (
       })
       return {
         model: nextModel,
-        commands: [
-          SaveMonacoSettings({
-            lineNumbers: nextModel.editorLineNumbers,
-            folding: nextModel.editorFolding,
-            wordWrap: nextModel.editorWordWrap,
-            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
-            theme: nextModel.editorTheme,
-          }),
-        ],
+        commands: [saveMonacoSettingsCommand(nextModel)],
       }
     },
 
@@ -3179,15 +3256,7 @@ export const update = (
       })
       return {
         model: nextModel,
-        commands: [
-          SaveMonacoSettings({
-            lineNumbers: nextModel.editorLineNumbers,
-            folding: nextModel.editorFolding,
-            wordWrap: nextModel.editorWordWrap,
-            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
-            theme: nextModel.editorTheme,
-          }),
-        ],
+        commands: [saveMonacoSettingsCommand(nextModel)],
       }
     },
 
@@ -3197,15 +3266,7 @@ export const update = (
       })
       return {
         model: nextModel,
-        commands: [
-          SaveMonacoSettings({
-            lineNumbers: nextModel.editorLineNumbers,
-            folding: nextModel.editorFolding,
-            wordWrap: nextModel.editorWordWrap,
-            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
-            theme: nextModel.editorTheme,
-          }),
-        ],
+        commands: [saveMonacoSettingsCommand(nextModel)],
       }
     },
 
@@ -3215,15 +3276,7 @@ export const update = (
       })
       return {
         model: nextModel,
-        commands: [
-          SaveMonacoSettings({
-            lineNumbers: nextModel.editorLineNumbers,
-            folding: nextModel.editorFolding,
-            wordWrap: nextModel.editorWordWrap,
-            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
-            theme: nextModel.editorTheme,
-          }),
-        ],
+        commands: [saveMonacoSettingsCommand(nextModel)],
       }
     },
 
@@ -3233,19 +3286,46 @@ export const update = (
       })
       return {
         model: nextModel,
-        commands: [
-          SaveMonacoSettings({
-            lineNumbers: nextModel.editorLineNumbers,
-            folding: nextModel.editorFolding,
-            wordWrap: nextModel.editorWordWrap,
-            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
-            theme: nextModel.editorTheme,
-          }),
-        ],
+        commands: [saveMonacoSettingsCommand(nextModel)],
+      }
+    },
+
+    UpdatedSettingsEditorLineDecorationsWidth: ({ value }) => {
+      const nextModel = modifyFields(model, {
+        editorLineDecorationsWidth: () => value,
+      })
+      return {
+        model: nextModel,
+        commands: [saveMonacoSettingsCommand(nextModel)],
+      }
+    },
+
+    UpdatedSettingsEditorLineNumbersMinChars: ({ value }) => {
+      const nextModel = modifyFields(model, {
+        editorLineNumbersMinChars: () => value,
+      })
+      return {
+        model: nextModel,
+        commands: [saveMonacoSettingsCommand(nextModel)],
       }
     },
 
     CompletedSaveMonacoSettings: () => ({
+      model,
+    }),
+
+    SelectedSettingsAppTheme: ({ theme }) => ({
+      model: modifyFields(model, {
+        appTheme: () => theme,
+      }),
+      commands: [SaveAppTheme({ theme })],
+    }),
+
+    CompletedSaveAppTheme: () => ({
+      model,
+    }),
+
+    CompletedApplyAppTheme: () => ({
       model,
     }),
 
@@ -3530,31 +3610,41 @@ export const update = (
       historyEnabled,
       apiHistoryEnabled,
       monacoSettings,
-    }) => ({
-      model: modifyFields(model, {
-        editorIsMaximized: () => isMaximized,
-        editorLlmBarMode: () => llmBarMode,
-        editorSplitPercent: () => editorSplitPercent,
-        historyEnabled: () => historyEnabled ?? model.historyEnabled,
-        apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
-        editorLineNumbers: () => monacoSettings?.lineNumbers ?? model.editorLineNumbers,
-        editorFolding: () => monacoSettings?.folding ?? model.editorFolding,
-        editorWordWrap: () => monacoSettings?.wordWrap ?? model.editorWordWrap,
-        editorScrollBeyondLastLine: () =>
-          monacoSettings?.scrollBeyondLastLine ?? model.editorScrollBeyondLastLine,
-        editorTheme: () => monacoSettings?.theme ?? model.editorTheme,
-        llmModel: (current) => (current === "" ? llmModel : current),
-        llmDraftModel: (current) => (current === "" ? llmModel : current),
-        llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
-        llmDraftThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
-        modalState: (current) =>
-          Modal.applyEditorPreferences(current, {
-            isMaximized,
-            llmBarMode,
-            editorSplitPercent,
-          }),
-      }),
-    }),
+      appTheme,
+    }) => {
+      const nextAppTheme = appTheme ?? model.appTheme
+      return {
+        model: modifyFields(model, {
+          editorIsMaximized: () => isMaximized,
+          editorLlmBarMode: () => llmBarMode,
+          editorSplitPercent: () => editorSplitPercent,
+          historyEnabled: () => historyEnabled ?? model.historyEnabled,
+          apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
+          appTheme: () => nextAppTheme,
+          editorLineNumbers: () => monacoSettings?.lineNumbers ?? model.editorLineNumbers,
+          editorFolding: () => monacoSettings?.folding ?? model.editorFolding,
+          editorWordWrap: () => monacoSettings?.wordWrap ?? model.editorWordWrap,
+          editorScrollBeyondLastLine: () =>
+            monacoSettings?.scrollBeyondLastLine ?? model.editorScrollBeyondLastLine,
+          editorTheme: () => monacoSettings?.theme ?? model.editorTheme,
+          editorLineDecorationsWidth: () =>
+            monacoSettings?.lineDecorationsWidth ?? model.editorLineDecorationsWidth,
+          editorLineNumbersMinChars: () =>
+            monacoSettings?.lineNumbersMinChars ?? model.editorLineNumbersMinChars,
+          llmModel: (current) => (current === "" ? llmModel : current),
+          llmDraftModel: (current) => (current === "" ? llmModel : current),
+          llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
+          llmDraftThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
+          modalState: (current) =>
+            Modal.applyEditorPreferences(current, {
+              isMaximized,
+              llmBarMode,
+              editorSplitPercent,
+            }),
+        }),
+        ...(appTheme === undefined ? {} : { commands: [ApplyAppTheme({ theme: nextAppTheme })] }),
+      }
+    },
 
     CompletedSaveEditorPreferences: () => ({ model }),
 
@@ -5385,10 +5475,50 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               h.span([], ["Über letzte Zeile hinaus scrollen"]),
                             ],
                           ),
-                          h.p(
-                            [h.Class("form-hint")],
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.For("settings-editor-line-decorations-width")],
+                            ["Dekorationsbreite"],
+                          ),
+                          h.div(
+                            [h.Class("form-range-row")],
                             [
-                              "Ermöglicht das Hochscrollen, sodass die letzte Zeile ganz oben stehen kann.",
+                              h.input([
+                                h.Type("range"),
+                                h.Id("settings-editor-line-decorations-width"),
+                                h.Min("0"),
+                                h.Max("32"),
+                                h.Step("1"),
+                                h.Value(String(model.editorLineDecorationsWidth)),
+                                h.OnInput((value) =>
+                                  Message.UpdatedSettingsEditorLineDecorationsWidth({
+                                    value: parseRangeNumber(
+                                      value,
+                                      model.editorLineDecorationsWidth,
+                                      0,
+                                      32,
+                                    ),
+                                  }),
+                                ),
+                              ]),
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("settings-editor-line-decorations-width-value"),
+                                  h.Class("form-range-value"),
+                                  h.Title("Standardwert wiederherstellen"),
+                                  h.OnClick(
+                                    Message.UpdatedSettingsEditorLineDecorationsWidth({
+                                      value: defaultMonacoSettings.lineDecorationsWidth,
+                                    }),
+                                  ),
+                                ],
+                                [`${model.editorLineDecorationsWidth} px`],
+                              ),
                             ],
                           ),
                         ],
@@ -5396,7 +5526,78 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("settings-editor-theme")], ["Theme"]),
+                          h.label(
+                            [h.For("settings-editor-line-numbers-min-chars")],
+                            ["Mindestbreite Zeilennummern"],
+                          ),
+                          h.div(
+                            [h.Class("form-range-row")],
+                            [
+                              h.input([
+                                h.Type("range"),
+                                h.Id("settings-editor-line-numbers-min-chars"),
+                                h.Min("0"),
+                                h.Max("10"),
+                                h.Step("1"),
+                                h.Value(String(model.editorLineNumbersMinChars)),
+                                h.OnInput((value) =>
+                                  Message.UpdatedSettingsEditorLineNumbersMinChars({
+                                    value: parseRangeNumber(
+                                      value,
+                                      model.editorLineNumbersMinChars,
+                                      0,
+                                      10,
+                                    ),
+                                  }),
+                                ),
+                              ]),
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("settings-editor-line-numbers-min-chars-value"),
+                                  h.Class("form-range-value"),
+                                  h.Title("Standardwert wiederherstellen"),
+                                  h.OnClick(
+                                    Message.UpdatedSettingsEditorLineNumbersMinChars({
+                                      value: defaultMonacoSettings.lineNumbersMinChars,
+                                    }),
+                                  ),
+                                ],
+                                [`${model.editorLineNumbersMinChars} Zeichen`],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("settings-app-theme")], ["App-Theme"]),
+                          h.select(
+                            [
+                              h.Id("settings-app-theme"),
+                              h.Class("form-input"),
+                              h.Value(model.appTheme),
+                              h.OnChange((value) =>
+                                Message.SelectedSettingsAppTheme({
+                                  theme: Schema.is(AppThemeSchema)(value)
+                                    ? (value as AppTheme)
+                                    : "system",
+                                }),
+                              ),
+                            ],
+                            [
+                              h.option([h.Value("system")], ["System (Automatisch)"]),
+                              h.option([h.Value("light")], ["Hell"]),
+                              h.option([h.Value("dark")], ["Dunkel"]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("settings-editor-theme")], ["Editor-Theme"]),
                           h.select(
                             [
                               h.Id("settings-editor-theme"),
@@ -5411,7 +5612,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               ),
                             ],
                             [
-                              h.option([h.Value("system")], ["System (Automatisch)"]),
+                              h.option([h.Value("system")], ["Automatisch (App-Theme)"]),
                               h.option([h.Value("vs")], ["Hell"]),
                               h.option([h.Value("vs-dark")], ["Dunkel"]),
                               h.option([h.Value("hc-black")], ["Hoher Kontrast (Dunkel)"]),
@@ -6380,7 +6581,10 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
           wordWrap: model.editorWordWrap,
           scrollBeyondLastLine: model.editorScrollBeyondLastLine,
           theme: model.editorTheme,
+          lineDecorationsWidth: model.editorLineDecorationsWidth,
+          lineNumbersMinChars: model.editorLineNumbersMinChars,
         },
+        appTheme: model.appTheme,
       },
     },
     view: Modal.view,

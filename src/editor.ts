@@ -48,6 +48,7 @@ import { monacoEditorElement, triggerMonacoHistoryAction } from "./monaco-elemen
 import { buildEditUrl, buildNewUrl } from "./route"
 import { checkTextBytes, getMimeType } from "./storage"
 import {
+  type AppTheme,
   DEFAULT_EDITOR_SPLIT_PERCENT,
   type MonacoSettings,
   clampEditorSplitPercent,
@@ -3819,6 +3820,7 @@ const viewEditorFileBody = (
   fileMode: EditorFileMode,
   filename: string,
   monacoSettings: MonacoSettings,
+  appTheme: AppTheme,
   h: Html.HtmlBuilder<Message>,
 ): ReadonlyArray<Html.Html> =>
   EditorFileMode.match(fileMode, {
@@ -3836,6 +3838,9 @@ const viewEditorFileBody = (
               monacoEditor.WordWrap(monacoSettings.wordWrap),
               monacoEditor.ScrollBeyondLastLine(monacoSettings.scrollBeyondLastLine),
               monacoEditor.Theme(monacoSettings.theme),
+              monacoEditor.AppTheme(appTheme),
+              monacoEditor.LineDecorationsWidth(monacoSettings.lineDecorationsWidth),
+              monacoEditor.LineNumbersMinChars(monacoSettings.lineNumbersMinChars),
               monacoEditor.OnContentChanged((detail) =>
                 Message.UpdatedTextContent({ content: detail.value }),
               ),
@@ -4025,6 +4030,7 @@ export type ViewInputs = {
   readonly llmThinkingLevels: ReadonlyArray<ThinkingLevelOption>
   readonly llmSelectedThinkingLevel: string
   readonly monacoSettings: MonacoSettings
+  readonly appTheme: AppTheme
 }
 
 const viewLlmChatHistory = (
@@ -5167,6 +5173,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                     EditorFileMode.Text({ content: state.content }),
                     state.name,
                     context.monacoSettings,
+                    context.appTheme,
                     h,
                   ),
                 ],
@@ -5325,7 +5332,13 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 nameValue: name,
                 maybeValidationError,
                 maybePasteError,
-                extraBodyNodes: viewEditorFileBody(fileMode, name, context.monacoSettings, h),
+                extraBodyNodes: viewEditorFileBody(
+                  fileMode,
+                  name,
+                  context.monacoSettings,
+                  context.appTheme,
+                  h,
+                ),
                 historyControls:
                   fileMode._tag === "Text"
                     ? {

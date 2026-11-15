@@ -5,6 +5,7 @@ import {
   MONACO_EDITOR_TAG,
   applyExternalValueToEditor,
   computeChangedSpan,
+  computeGutterOptions,
   languageFromFilename,
   resolveMonacoTheme,
 } from "./monaco-element"
@@ -115,12 +116,38 @@ describe("monaco-element", () => {
     expect(setValue).toHaveBeenCalledWith("neu")
   })
 
-  it("löst das Monaco-Theme anhand von Einstellung und Systemmodus auf", () => {
-    expect(resolveMonacoTheme("system", false)).toBe("vs")
-    expect(resolveMonacoTheme("system", true)).toBe("vs-dark")
-    expect(resolveMonacoTheme("vs", true)).toBe("vs")
-    expect(resolveMonacoTheme("vs-dark", false)).toBe("vs-dark")
-    expect(resolveMonacoTheme("hc-black", false)).toBe("hc-black")
-    expect(resolveMonacoTheme("hc-light", true)).toBe("hc-light")
+  it("löst das Monaco-Theme anhand von Einstellung, App-Theme und Systemmodus auf", () => {
+    expect(resolveMonacoTheme("system", "system", false)).toBe("vs")
+    expect(resolveMonacoTheme("system", "system", true)).toBe("vs-dark")
+    expect(resolveMonacoTheme("system", "dark", false)).toBe("vs-dark")
+    expect(resolveMonacoTheme("system", "light", true)).toBe("vs")
+    expect(resolveMonacoTheme("vs", "dark", true)).toBe("vs")
+    expect(resolveMonacoTheme("vs-dark", "light", false)).toBe("vs-dark")
+    expect(resolveMonacoTheme("hc-black", "light", false)).toBe("hc-black")
+    expect(resolveMonacoTheme("hc-light", "dark", true)).toBe("hc-light")
+  })
+
+  it("berechnet Gutter-Optionen anhand von Zeilennummern, Folds, Dekorationsbreite und Mindestbreite", () => {
+    expect(computeGutterOptions(false, false, 0, 5)).toEqual({
+      lineNumbers: "off",
+      folding: false,
+      glyphMargin: false,
+      lineDecorationsWidth: 0,
+      lineNumbersMinChars: 0,
+    })
+    expect(computeGutterOptions(false, true, 10, 5)).toEqual({
+      lineNumbers: "off",
+      folding: true,
+      glyphMargin: false,
+      lineDecorationsWidth: 10,
+      lineNumbersMinChars: 0,
+    })
+    expect(computeGutterOptions(true, false, 16, 3)).toEqual({
+      lineNumbers: "on",
+      folding: false,
+      glyphMargin: false,
+      lineDecorationsWidth: 16,
+      lineNumbersMinChars: 3,
+    })
   })
 })

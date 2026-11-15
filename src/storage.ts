@@ -362,6 +362,41 @@ export async function storeEditorPreferences(prefs: EditorPreferences): Promise<
   })
 }
 
+export const AppThemeSchema = Schema.Literals(["system", "light", "dark"])
+export type AppTheme = typeof AppThemeSchema.Type
+
+const APP_THEME_KEY = "app_theme"
+
+const isAppTheme = (value: unknown): value is AppTheme =>
+  value === "system" || value === "light" || value === "dark"
+
+export async function getStoredAppTheme(): Promise<AppTheme> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(APP_THEME_KEY)
+      req.onsuccess = () => {
+        resolve(isAppTheme(req.result) ? req.result : "system")
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen des App-Themes:", error)
+    return "system"
+  }
+}
+
+export async function storeAppTheme(theme: AppTheme): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put(theme, APP_THEME_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
 export const MonacoThemeSchema = Schema.Literals([
   "system",
   "vs",
@@ -377,6 +412,8 @@ export const MonacoSettingsSchema = Schema.Struct({
   wordWrap: Schema.Boolean,
   scrollBeyondLastLine: Schema.Boolean,
   theme: MonacoThemeSchema,
+  lineDecorationsWidth: Schema.Number,
+  lineNumbersMinChars: Schema.Number,
 })
 export type MonacoSettings = typeof MonacoSettingsSchema.Type
 
@@ -386,7 +423,12 @@ export const defaultMonacoSettings: MonacoSettings = {
   wordWrap: true,
   scrollBeyondLastLine: false,
   theme: "system",
+  lineDecorationsWidth: 10,
+  lineNumbersMinChars: 5,
 }
+
+const clampInt = (value: number, min: number, max: number): number =>
+  Math.min(max, Math.max(min, Math.round(value)))
 
 const MONACO_SETTINGS_KEY = "monaco_settings"
 
@@ -426,12 +468,26 @@ export async function getStoredMonacoSettings(): Promise<MonacoSettings> {
           "theme" in record && isMonacoTheme(record.theme)
             ? record.theme
             : defaultMonacoSettings.theme
+        const lineDecorationsWidth =
+          "lineDecorationsWidth" in record &&
+          typeof record.lineDecorationsWidth === "number" &&
+          Number.isFinite(record.lineDecorationsWidth)
+            ? clampInt(record.lineDecorationsWidth, 0, 32)
+            : defaultMonacoSettings.lineDecorationsWidth
+        const lineNumbersMinChars =
+          "lineNumbersMinChars" in record &&
+          typeof record.lineNumbersMinChars === "number" &&
+          Number.isFinite(record.lineNumbersMinChars)
+            ? clampInt(record.lineNumbersMinChars, 0, 10)
+            : defaultMonacoSettings.lineNumbersMinChars
         resolve({
           lineNumbers,
           folding,
           wordWrap,
           scrollBeyondLastLine,
           theme,
+          lineDecorationsWidth,
+          lineNumbersMinChars,
         })
       }
       req.onerror = () => reject(req.error)
