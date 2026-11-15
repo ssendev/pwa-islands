@@ -68,8 +68,8 @@ export const hashHistoryContent = (content: string): number =>
 export const encodeHistoryBytesRecord = (
   contentBytes: Uint8Array,
   timestampMs: number,
+  contentHash = hashContentBytes(contentBytes),
 ): Uint8Array => {
-  const contentHash = hashContentBytes(contentBytes)
   const record = new Uint8Array(contentBytes.byteLength + TRAILER_SIZE_BYTES)
   record.set(contentBytes, 0)
   const view = new DataView(
@@ -342,9 +342,38 @@ const getHistoryFileStore = async (
     ? getTauriHistoryFileStore(subPath, fileName)
     : getOpfsHistoryFileStore(subPath, fileName, create)
 
+const isSameAsLatestVersion = async (
+  store: HistoryFileStore,
+  oldBytes: Uint8Array,
+  contentHash: number,
+): Promise<boolean> => {
+  const size = await store.getSize()
+  if (size < TRAILER_SIZE_BYTES) {
+    return false
+  }
+  const maybeLatestMeta = await readHistoryMetaAt(store.readSlice, size)
+  if (Option.isNone(maybeLatestMeta)) {
+    return false
+  }
+  const latestMeta = maybeLatestMeta.value
+  if (latestMeta.byteLength !== oldBytes.byteLength || latestMeta.contentHash !== contentHash) {
+    return false
+  }
+  const maybeLatestRecord = await readHistoryBytesRecordAt(store.readSlice, size)
+  if (Option.isNone(maybeLatestRecord)) {
+    return false
+  }
+  const latestBytes = maybeLatestRecord.value.bytes
+  return (
+    latestBytes.byteLength === oldBytes.byteLength &&
+    oldBytes.every((byte, index) => byte === latestBytes[index])
+  )
+}
+
 /**
  * Hängt den alten Dateiinhalt inkl. Bearbeitungszeitstempel an die Verlaufsdatei
- * (in Tauri im internen App-Speicher, im Browser im OPFS) an.
+ * (in Tauri im internen App-Speicher, im Browser im OPFS) an, sofern er sich
+ * von der zuletzt gespeicherten Version unterscheidet.
  */
 export const appendFileHistoryBytes = async (
   subPath: ReadonlyArray<string>,
@@ -356,7 +385,11 @@ export const appendFileHistoryBytes = async (
   if (Option.isNone(maybeStore)) {
     return
   }
-  const record = encodeHistoryBytesRecord(oldBytes, timestampMs)
+  const contentHash = hashContentBytes(oldBytes)
+  if (await isSameAsLatestVersion(maybeStore.value, oldBytes, contentHash)) {
+    return
+  }
+  const record = encodeHistoryBytesRecord(oldBytes, timestampMs, contentHash)
   await maybeStore.value.append(record)
 }
 

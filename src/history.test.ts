@@ -332,4 +332,21 @@ describe("tauri history backend", () => {
     const indexAfterDisabled = await loadFileHistoryIndex(["apps", "demo"], "index.html")
     expect(indexAfterDisabled.map((entry) => entry.timestampMs)).toEqual([5000])
   })
+
+  it("skips appending when the content is identical to the latest saved version", async () => {
+    const subPath = ["apps", "dedupe"]
+    const fileName = "note.txt"
+
+    await appendFileHistory(subPath, fileName, "v1", 1000)
+    await appendFileHistory(subPath, fileName, "v1", 2000)
+    expect((await loadFileHistoryIndex(subPath, fileName)).map((e) => e.timestampMs)).toEqual([
+      1000,
+    ])
+
+    await appendFileHistory(subPath, fileName, "v2", 3000)
+    await appendFileHistory(subPath, fileName, "v1", 4000)
+    expect((await loadFileHistoryIndex(subPath, fileName)).map((e) => e.timestampMs)).toEqual([
+      4000, 3000, 1000,
+    ])
+  })
 })
