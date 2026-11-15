@@ -68,6 +68,7 @@ import {
   buildFolderUrl,
   buildHelpUrl,
   buildNewUrl,
+  buildSettingsUrl,
   decodeUrlPathnameSegments,
   encodeSubPath,
   parseIslandPath,
@@ -710,6 +711,7 @@ const resolveRouteDeepLink = async (
 }> => {
   const targetSubPath = AppRoute.match(route, {
     Help: ({ subPath }) => subPath,
+    Settings: ({ subPath }) => subPath,
     Folder: ({ subPath }) => subPath,
     New: ({ subPath }) => subPath,
     Edit: ({ subPath }) => subPath,
@@ -1869,6 +1871,7 @@ export const init = (
 } => {
   const isSupported = flags.hasTauri || flags.hasDirectoryPicker || flags.hasOPFS
   const initialRoute = parseUrlToRoute(url)
+  const isInitialSettingsOpen = initialRoute._tag === "Settings"
   const maybeInitialModal: Option.Option<Modal.ModalState> = Modal.initFromRoute(initialRoute)
 
   if (!isSupported) {
@@ -1887,7 +1890,7 @@ export const init = (
         storageState: StorageState.Unsupported(),
         showFileInfo: true,
         isSettingsOpen: false,
-        isSettingsDialogOpen: false,
+        isSettingsDialogOpen: isInitialSettingsOpen,
         llmEnabled: false,
         llmEditFormat: DEFAULT_EDIT_FORMAT,
         llmBaseUrl: "",
@@ -1954,7 +1957,7 @@ export const init = (
       storageState: StorageState.Initializing(),
       showFileInfo: true,
       isSettingsOpen: false,
-      isSettingsDialogOpen: false,
+      isSettingsDialogOpen: isInitialSettingsOpen,
       llmEnabled: false,
       llmEditFormat: DEFAULT_EDIT_FORMAT,
       llmBaseUrl: "",
@@ -2097,6 +2100,26 @@ const enqueueMaybeToast = (
   Option.match(maybeBanner, {
     onNone: () => ({ model }),
     onSome: (banner) => enqueueToast(model, banner),
+  })
+
+const openSettingsDialogModel = (model: Model): Model =>
+  modifyFields(model, {
+    isSettingsOpen: () => false,
+    isSettingsDialogOpen: () => true,
+    llmDraftEnabled: () => model.llmEnabled,
+    llmDraftEditFormat: () => model.llmEditFormat,
+    llmDraftBaseUrl: () => model.llmBaseUrl,
+    llmDraftApiKey: () => model.llmApiKey,
+    llmDraftModels: () => model.llmModels,
+    llmDraftStreaming: () => model.llmStreaming,
+    llmDraftToolCalls: () => model.llmToolCalls,
+    llmDraftThinkingParam: () => model.llmThinkingParam,
+    llmDraftThinkingLevels: () => model.llmThinkingLevels,
+    llmDraftExtraArgs: () => model.llmExtraArgs,
+    llmDraftModel: () => model.llmModel,
+    llmDraftThinkingLevel: () => model.llmThinkingLevel,
+    llmTestState: () => LlmTestState.Idle(),
+    clearAllHistoryState: () => ClearAllHistoryState.Idle(),
   })
 
 const handleStorageActivated = (
@@ -2687,6 +2710,7 @@ export const update = (
           const { folderSubPath, fileName } = parseIslandPath(url.pathname)
           return {
             model: modifyFields(model, {
+              isSettingsDialogOpen: () => false,
               maybeActiveIslandUrl: () => Option.some(buildTauriIslandUrl(folderSubPath, fileName)),
               maybeActiveIslandPath: () => Option.some(url.pathname),
             }),
@@ -2695,7 +2719,8 @@ export const update = (
       }
 
       const route = parseUrlToRoute(url)
-      const modelWithRoute = modifyFields(model, {
+      const modelWithRoute: Model = modifyFields(model, {
+        isSettingsDialogOpen: () => false,
         maybeActiveIslandUrl: () => Option.none(),
         maybeActiveIslandPath: () => Option.none(),
         storageState: (state) =>
@@ -2877,6 +2902,43 @@ export const update = (
             modalState: () => Modal.openHelp(maybeTopic, modelWithRoute.modalState),
           }),
         }),
+
+        Settings: ({ subPath }) => {
+          const openedSettingsModel = model.isSettingsDialogOpen
+            ? modifyFields(modelWithRoute, {
+                isSettingsOpen: () => false,
+                isSettingsDialogOpen: () => true,
+              })
+            : openSettingsDialogModel(modelWithRoute)
+
+          return Match.value(openedSettingsModel.storageState).pipe(
+            Match.tag("Ready", (readyState) => {
+              const isSamePath = isSameSubPath(readyState.subPath, subPath)
+              if (isSamePath) {
+                return {
+                  model: modifyFields(openedSettingsModel, {
+                    modalState: Modal.close,
+                  }),
+                }
+              }
+              return {
+                model: modifyFields(openedSettingsModel, {
+                  modalState: Modal.close,
+                  storageState: () =>
+                    modifyFields(readyState, {
+                      entriesState: () => EntriesState.Loading(),
+                    }),
+                }),
+                commands: [NavigateToSubfolder({ targetSubPath: subPath })],
+              }
+            }),
+            Match.orElse(() => ({
+              model: modifyFields(openedSettingsModel, {
+                modalState: Modal.close,
+              }),
+            })),
+          )
+        },
       })
     },
 
@@ -2916,34 +2978,25 @@ export const update = (
       }),
     }),
 
-    ClickedOpenSettingsDialog: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-        isSettingsDialogOpen: () => true,
-        llmDraftEnabled: () => model.llmEnabled,
-        llmDraftEditFormat: () => model.llmEditFormat,
-        llmDraftBaseUrl: () => model.llmBaseUrl,
-        llmDraftApiKey: () => model.llmApiKey,
-        llmDraftModels: () => model.llmModels,
-        llmDraftStreaming: () => model.llmStreaming,
-        llmDraftToolCalls: () => model.llmToolCalls,
-        llmDraftThinkingParam: () => model.llmThinkingParam,
-        llmDraftThinkingLevels: () => model.llmThinkingLevels,
-        llmDraftExtraArgs: () => model.llmExtraArgs,
-        llmDraftModel: () => model.llmModel,
-        llmDraftThinkingLevel: () => model.llmThinkingLevel,
-        llmTestState: () => LlmTestState.Idle(),
-        clearAllHistoryState: () => ClearAllHistoryState.Idle(),
-      }),
-    }),
+    ClickedOpenSettingsDialog: () => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model: openSettingsDialogModel(model),
+        commands: [PushUrl({ url: buildSettingsUrl(subPath) })],
+      }
+    },
 
-    ClickedCloseSettingsDialog: () => ({
-      model: modifyFields(model, {
-        isSettingsDialogOpen: () => false,
-        llmTestState: () => LlmTestState.Idle(),
-        clearAllHistoryState: () => ClearAllHistoryState.Idle(),
-      }),
-    }),
+    ClickedCloseSettingsDialog: () => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model: modifyFields(model, {
+          isSettingsDialogOpen: () => false,
+          llmTestState: () => LlmTestState.Idle(),
+          clearAllHistoryState: () => ClearAllHistoryState.Idle(),
+        }),
+        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })],
+      }
+    },
 
     ClickedRequestClearAllHistory: () => ({
       model: modifyFields(model, {
@@ -3003,45 +3056,49 @@ export const update = (
       model,
     }),
 
-    ClickedSaveSettingsDialog: () => ({
-      model: modifyFields(model, {
-        isSettingsDialogOpen: () => false,
-        llmEnabled: () => model.llmDraftEnabled,
-        llmEditFormat: () => model.llmDraftEditFormat,
-        llmBaseUrl: () => model.llmDraftBaseUrl,
-        llmApiKey: () => model.llmDraftApiKey,
-        llmModels: () => model.llmDraftModels,
-        llmStreaming: () => model.llmDraftStreaming,
-        llmToolCalls: () => model.llmDraftToolCalls,
-        llmThinkingParam: () => model.llmDraftThinkingParam,
-        llmThinkingLevels: () => model.llmDraftThinkingLevels,
-        llmExtraArgs: () => model.llmDraftExtraArgs,
-        llmModel: () => model.llmDraftModel,
-        llmThinkingLevel: () => model.llmDraftThinkingLevel,
-        hasLoadedEditorLlmModels: () => false,
-      }),
-      commands: [
-        SaveLlmSettings({
-          enabled: model.llmDraftEnabled,
-          editFormat: model.llmDraftEditFormat,
-          baseUrl: model.llmDraftBaseUrl,
-          apiKey: model.llmDraftApiKey,
-          models: model.llmDraftModels,
-          streaming: model.llmDraftStreaming,
-          toolCalls: model.llmDraftToolCalls,
-          thinkingParam: model.llmDraftThinkingParam,
-          thinkingLevels: model.llmDraftThinkingLevels,
-          extraArgs: model.llmDraftExtraArgs,
+    ClickedSaveSettingsDialog: () => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model: modifyFields(model, {
+          isSettingsDialogOpen: () => false,
+          llmEnabled: () => model.llmDraftEnabled,
+          llmEditFormat: () => model.llmDraftEditFormat,
+          llmBaseUrl: () => model.llmDraftBaseUrl,
+          llmApiKey: () => model.llmDraftApiKey,
+          llmModels: () => model.llmDraftModels,
+          llmStreaming: () => model.llmDraftStreaming,
+          llmToolCalls: () => model.llmDraftToolCalls,
+          llmThinkingParam: () => model.llmDraftThinkingParam,
+          llmThinkingLevels: () => model.llmDraftThinkingLevels,
+          llmExtraArgs: () => model.llmDraftExtraArgs,
+          llmModel: () => model.llmDraftModel,
+          llmThinkingLevel: () => model.llmDraftThinkingLevel,
+          hasLoadedEditorLlmModels: () => false,
         }),
-        SaveEditorPreferences({
-          isMaximized: model.editorIsMaximized,
-          llmBarMode: model.editorLlmBarMode,
-          llmModel: model.llmDraftModel,
-          llmThinkingLevel: model.llmDraftThinkingLevel,
-          editorSplitPercent: model.editorSplitPercent,
-        }),
-      ],
-    }),
+        commands: [
+          SaveLlmSettings({
+            enabled: model.llmDraftEnabled,
+            editFormat: model.llmDraftEditFormat,
+            baseUrl: model.llmDraftBaseUrl,
+            apiKey: model.llmDraftApiKey,
+            models: model.llmDraftModels,
+            streaming: model.llmDraftStreaming,
+            toolCalls: model.llmDraftToolCalls,
+            thinkingParam: model.llmDraftThinkingParam,
+            thinkingLevels: model.llmDraftThinkingLevels,
+            extraArgs: model.llmDraftExtraArgs,
+          }),
+          SaveEditorPreferences({
+            isMaximized: model.editorIsMaximized,
+            llmBarMode: model.editorLlmBarMode,
+            llmModel: model.llmDraftModel,
+            llmThinkingLevel: model.llmDraftThinkingLevel,
+            editorSplitPercent: model.editorSplitPercent,
+          }),
+          ReplaceUrl({ url: buildFolderUrl(subPath) }),
+        ],
+      }
+    },
 
     ToggledLlmEnabled: ({ isChecked }) => ({
       model: modifyFields(model, {
@@ -3594,10 +3651,16 @@ export const update = (
         }
       }
       if (model.isSettingsDialogOpen) {
+        const subPath = currentSubPathFromStorageState(model.storageState)
         return {
           model: modifyFields(model, {
             isSettingsDialogOpen: () => false,
+            llmTestState: () => LlmTestState.Idle(),
+            clearAllHistoryState: () => ClearAllHistoryState.Idle(),
           }),
+          ...(Modal.isOpen(model.modalState)
+            ? {}
+            : { commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })] }),
         }
       }
       if (!Modal.isOpen(model.modalState)) {

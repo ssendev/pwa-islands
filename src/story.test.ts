@@ -2204,7 +2204,8 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(Message.ClickedOpenSettingsDialog()),
-        Command.expectNone(),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
         Command.expectNone(),
         message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
@@ -2282,9 +2283,11 @@ describe("PWA Islands Story Tests", () => {
             llmThinkingLevel: "false",
             editorSplitPercent: 62,
           }),
+          ReplaceUrl({ url: "/?pwaislands" }),
         ),
         Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
         Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
           expect(m.llmStreaming).toBe(false)
           expect(m.llmToolCalls).toBe(false)
@@ -2304,7 +2307,8 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(Message.ClickedOpenSettingsDialog()),
-        Command.expectNone(),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
         Command.expectNone(),
         message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
@@ -2342,7 +2346,8 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(Message.ClickedOpenSettingsDialog()),
-        Command.expectNone(),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
         Command.expectNone(),
         message(Message.UpdatedLlmBaseUrl({ value: "https://api.example.com/v1" })),
@@ -2686,7 +2691,10 @@ describe("PWA Islands Story Tests", () => {
           expect(m.hasLanguageModel).toBe(true)
         }),
         message(Message.ClickedOpenSettingsDialog()),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=settings" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(Message.ToggledLlmEnabled({ isChecked: true })),
+        Command.expectNone(),
         message(Message.SelectedLlmModel({ value: "__language_model__" })),
         message(Message.ClickedTestLlm({ mode: "chat" })),
         Command.expectNone(),
@@ -2716,11 +2724,102 @@ describe("PWA Islands Story Tests", () => {
             llmThinkingLevel: "",
             editorSplitPercent: 62,
           }),
+          ReplaceUrl({ url: "/?pwaislands" }),
         ),
         Command.resolve(SaveLlmSettings, Message.CompletedSaveLlmSettings()),
         Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
         model((m) => {
           expect(m.llmModel).toBe("__language_model__")
+        }),
+      )
+    })
+  })
+
+  describe("Einstellungen-URL", () => {
+    it("öffnet den Einstellungsdialog beim Start über ?pwaislands=settings und ?pwaislands=einstellungen", () => {
+      const settingsUrl = Option.getOrThrow(
+        fromString("http://localhost:5173/?pwaislands=settings"),
+      )
+      const einstellungenUrl = Option.getOrThrow(
+        fromString("http://localhost:5173/unterordner?pwaislands=einstellungen"),
+      )
+
+      const initFromSettings = init(
+        {
+          hasDirectoryPicker: true,
+          hasOPFS: true,
+          hasTauri: false,
+          origin: "http://localhost:5173",
+        },
+        settingsUrl,
+      )
+      expect(initFromSettings.model.isSettingsDialogOpen).toBe(true)
+
+      const initFromGermanSettings = init(
+        {
+          hasDirectoryPicker: true,
+          hasOPFS: true,
+          hasTauri: false,
+          origin: "http://localhost:5173",
+        },
+        einstellungenUrl,
+      )
+      expect(initFromGermanSettings.model.isSettingsDialogOpen).toBe(true)
+    })
+
+    it("synchronisiert URL beim Öffnen, Schließen, Escape und Browser-Verlauf in Unterordnern", () => {
+      const subfolderModel: Model = {
+        ...readyModel,
+        storageState: StorageState.Ready({
+          storageType: "opfs",
+          rootName: "PWA Islands",
+          subPath: ["unterordner"],
+          entriesState: EntriesState.Loaded({ entries: [] }),
+          otherBackend: SavedBackend.NoFolderSelected(),
+        }),
+      }
+
+      const settingsUrl = Option.getOrThrow(
+        fromString("http://localhost:5173/unterordner?pwaislands=settings"),
+      )
+      const folderUrl = Option.getOrThrow(
+        fromString("http://localhost:5173/unterordner?pwaislands"),
+      )
+
+      story(
+        update,
+        given(subfolderModel),
+        message(Message.ClickedOpenSettingsDialog()),
+        Command.expectExact(PushUrl({ url: "/unterordner?pwaislands=settings" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        model((m) => {
+          expect(m.isSettingsDialogOpen).toBe(true)
+        }),
+        message(Message.ClickedCloseSettingsDialog()),
+        Command.expectExact(ReplaceUrl({ url: "/unterordner?pwaislands" })),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        model((m) => {
+          expect(m.isSettingsDialogOpen).toBe(false)
+        }),
+        message(Message.ChangedUrl({ url: settingsUrl })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.isSettingsDialogOpen).toBe(true)
+        }),
+        message(Message.ChangedUrl({ url: folderUrl })),
+        Command.expectNone(),
+        model((m) => {
+          expect(m.isSettingsDialogOpen).toBe(false)
+        }),
+        message(Message.ClickedOpenSettingsDialog()),
+        Command.expectExact(PushUrl({ url: "/unterordner?pwaislands=settings" })),
+        Command.resolve(PushUrl, Message.CompletedPushUrl()),
+        message(Message.PressedEscape()),
+        Command.expectExact(ReplaceUrl({ url: "/unterordner?pwaislands" })),
+        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        model((m) => {
+          expect(m.isSettingsDialogOpen).toBe(false)
         }),
       )
     })

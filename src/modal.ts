@@ -405,6 +405,7 @@ export const openHelp = (
 export const initFromRoute = (route: AppRoute): Option.Option<ModalState> =>
   AppRoute.match(route, {
     Folder: () => Option.none(),
+    Settings: () => Option.none(),
     New: () => Option.none(), // Wait for resolveModalForRoute!
     Edit: () => Option.none(),
     History: () => Option.none(),
@@ -428,6 +429,17 @@ export const resolveModalForRoute = async (
       }),
 
     Folder: ({ subPath }) =>
+      Promise.resolve({
+        maybeModalState: Option.none(),
+        maybeAlertBanner: didFallback
+          ? Option.some<AlertBanner>({
+              message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+              variant: "warning",
+            })
+          : Option.none(),
+      }),
+
+    Settings: ({ subPath }) =>
       Promise.resolve({
         maybeModalState: Option.none(),
         maybeAlertBanner: didFallback

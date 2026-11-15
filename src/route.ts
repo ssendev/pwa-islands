@@ -32,6 +32,9 @@ export const AppRoute = defineRouteUnion({
     subPath: Schema.Array(Schema.String),
     maybeTopic: Schema.Option(HelpTopic),
   },
+  Settings: {
+    subPath: Schema.Array(Schema.String),
+  },
 })
 export type AppRoute = typeof AppRoute.Type
 
@@ -83,6 +86,12 @@ export const buildHelpUrl = (
     onNone: () => `${pathPart}?pwaislands=help`,
     onSome: (topic) => `${pathPart}?pwaislands=help-${topic}`,
   })
+}
+
+export const buildSettingsUrl = (subPath: ReadonlyArray<string>): string => {
+  const encoded = encodeSubPath(subPath)
+  const pathPart = encoded !== "" ? `/${encoded}` : "/"
+  return `${pathPart}?pwaislands=settings`
 }
 
 export const parseHelpParam = (
@@ -182,6 +191,10 @@ export const parsePathAndSearchToRoute = (pathname: string, search: string): App
     })
   }
 
+  if (isSettingsActionParam(maybePwaislandsParam)) {
+    return AppRoute.Settings({ subPath: segments })
+  }
+
   const maybeNew = parseNewActionParam(maybePwaislandsParam)
   if (Option.isSome(maybeNew)) {
     return AppRoute.New({
@@ -243,4 +256,10 @@ export const isHistoryActionParam = (maybeRaw: Option.Option<string>): boolean =
   Option.exists(maybeRaw, (raw) => {
     const normalized = raw.trim().toLowerCase()
     return normalized === "history" || normalized === "verlauf"
+  })
+
+export const isSettingsActionParam = (maybeRaw: Option.Option<string>): boolean =>
+  Option.exists(maybeRaw, (raw) => {
+    const normalized = raw.trim().toLowerCase()
+    return normalized === "settings" || normalized === "einstellungen"
   })
