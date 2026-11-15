@@ -325,6 +325,54 @@ export const applyEditorLlmChatFailure = (modalState: ModalState, message: strin
     Match.orElse(() => modalState),
   )
 
+export const openDeletedEntryHistory = (
+  subPath: ReadonlyArray<string>,
+  entryName: string,
+): {
+  readonly model: ModalState
+  readonly commands: ReadonlyArray<Command.Command<Message>>
+} => ({
+  model: ModalState.Editor({
+    editor: Editor.Model.EditFile({
+      originalName: entryName,
+      name: entryName,
+      fileMode: EditorFileMode.Binary({
+        preview: PreviewContent.None(),
+        edit: BinaryEdit.Disabled(),
+      }),
+      maybeValidationError: Option.none(),
+      maybePasteError: Option.none(),
+      llmBarMode: "Closed",
+      isLlmModeMenuOpen: false,
+      llmChatInput: "",
+      llmChatMessages: [],
+      llmChatDisplay: [],
+      llmChatState: Editor.LlmChatState.Idle(),
+      isMaximized: false,
+      isEditingName: false,
+      isPreviewOpen: false,
+      editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+      editorSplitDrag: Option.none(),
+      canUndo: false,
+      canRedo: false,
+      historyState: Editor.HistoryState.Loading(),
+      isHistoryEnabled: true,
+      hasHistoryEntries: true,
+      isHistoryOnly: true,
+      isConfirmingDelete: false,
+    }),
+  }),
+  commands: Command.mapMessages(
+    [
+      Editor.LoadFullHistory({
+        subPath,
+        fileName: entryName,
+      }),
+    ],
+    (msg) => Message.GotEditorMessage({ message: msg }),
+  ),
+})
+
 export const openHelp = (
   maybeTopic: Option.Option<HelpTopic>,
   currentState: ModalState = ModalState.Closed(),
@@ -359,6 +407,7 @@ export const initFromRoute = (route: AppRoute): Option.Option<ModalState> =>
     Folder: () => Option.none(),
     New: () => Option.none(), // Wait for resolveModalForRoute!
     Edit: () => Option.none(),
+    History: () => Option.none(),
     Help: ({ maybeTopic }) => Option.some(openHelp(maybeTopic)),
   })
 
@@ -410,6 +459,68 @@ export const resolveModalForRoute = async (
       }
     },
 
+    History: async ({ subPath, name }) => {
+      if (didFallback) {
+        return {
+          maybeModalState: Option.none(),
+          maybeAlertBanner: Option.some<AlertBanner>({
+            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            variant: "warning",
+          }),
+        }
+      }
+      const maybeEntry = Array.findFirst(entries, (entry) => entry.name === name)
+      const isDeleted = Option.exists(maybeEntry, (entry) => entry.isDeleted === true)
+      const [fileMode, isHistoryEnabled] = await Promise.all([
+        isDeleted || Option.isNone(maybeEntry)
+          ? Promise.resolve(
+              EditorFileMode.Binary({
+                preview: PreviewContent.None(),
+                edit: BinaryEdit.Disabled(),
+              }),
+            )
+          : loadEditorFileModeForEntry(storage, subPath, name).catch(() =>
+              EditorFileMode.Binary({
+                preview: PreviewContent.None(),
+                edit: BinaryEdit.Disabled(),
+              }),
+            ),
+        getStoredHistoryEnabled(),
+      ])
+      return {
+        maybeModalState: Option.some(
+          ModalState.Editor({
+            editor: Editor.Model.EditFile({
+              originalName: name,
+              name,
+              fileMode,
+              maybeValidationError: Option.none(),
+              maybePasteError: Option.none(),
+              llmBarMode: "Closed",
+              isLlmModeMenuOpen: false,
+              llmChatInput: "",
+              llmChatMessages: [],
+              llmChatDisplay: [],
+              llmChatState: Editor.LlmChatState.Idle(),
+              isMaximized: false,
+              isEditingName: false,
+              isPreviewOpen: false,
+              editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
+              editorSplitDrag: Option.none(),
+              canUndo: false,
+              canRedo: false,
+              historyState: Editor.HistoryState.Loading(),
+              isHistoryEnabled,
+              hasHistoryEntries: true,
+              isHistoryOnly: true,
+              isConfirmingDelete: false,
+            }),
+          }),
+        ),
+        maybeAlertBanner: Option.none(),
+      }
+    },
+
     Edit: async ({ subPath, name }) => {
       if (didFallback) {
         return {
@@ -421,7 +532,10 @@ export const resolveModalForRoute = async (
         }
       }
 
-      const maybeEntry = Array.findFirst(entries, (entry) => entry.name === name)
+      const maybeEntry = Array.findFirst(
+        entries,
+        (entry) => entry.name === name && entry.isDeleted !== true,
+      )
       return await Option.match(maybeEntry, {
         onNone: () =>
           Promise.resolve({
@@ -495,6 +609,7 @@ export const Message = defineMessageUnion({
     fileMode: EditorFileMode,
     isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
+    openHistory: Schema.optionalKey(Schema.Boolean),
   },
   FailedInspectFileForEditor: {
     message: Schema.String,
@@ -560,6 +675,7 @@ export const InspectFileForEditor = Command.define("InspectFileForEditor", {
   args: {
     entryName: Schema.String,
     subPath: Schema.Array(Schema.String),
+    openHistory: Schema.optionalKey(Schema.Boolean),
   },
   messages: [Message.SucceededInspectFileForEditor, Message.FailedInspectFileForEditor],
   execute: (args) =>
@@ -576,6 +692,7 @@ export const InspectFileForEditor = Command.define("InspectFileForEditor", {
           fileMode,
           isHistoryEnabled,
           hasHistoryEntries,
+          openHistory: args.openHistory ?? false,
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -884,6 +1001,7 @@ export const update = (
       fileMode,
       isHistoryEnabled,
       hasHistoryEntries,
+      openHistory,
     }) => ({
       model: ModalState.Editor({
         editor: Editor.Model.EditFile({
@@ -906,13 +1024,24 @@ export const update = (
           editorSplitDrag: Option.none(),
           canUndo: false,
           canRedo: false,
-          historyState: Editor.HistoryState.Closed(),
+          historyState: openHistory ? Editor.HistoryState.Loading() : Editor.HistoryState.Closed(),
           isHistoryEnabled: isHistoryEnabled ?? true,
           hasHistoryEntries: hasHistoryEntries ?? true,
+          isHistoryOnly: openHistory ?? false,
           isConfirmingDelete: false,
         }),
       }),
-      commands: [FocusModalNameInput()],
+      commands: openHistory
+        ? Command.mapMessages(
+            [
+              Editor.LoadFullHistory({
+                subPath: context.subPath,
+                fileName: originalName,
+              }),
+            ],
+            (msg) => Message.GotEditorMessage({ message: msg }),
+          )
+        : [FocusModalNameInput()],
       outMessage: OutMessage.None(),
     }),
 

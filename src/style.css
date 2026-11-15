@@ -620,6 +620,16 @@ code {
   cursor: pointer;
 }
 
+.file-row.is-deleted .file-name {
+  opacity: 0.65;
+  text-decoration: line-through;
+}
+
+.file-row .files-actions-cell button.btn-edit-entry.is-deleted {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .empty-state {
   display: flex;
   flex-direction: column;

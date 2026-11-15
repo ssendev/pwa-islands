@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core"
-import { Option } from "effect"
+import { Effect, Option, Stream } from "effect"
 import { supportsTauri } from "./files"
 
 export const OPFS_HISTORY_FOLDER = "pwa-islands-history"
@@ -466,6 +466,52 @@ export const hasFileHistory = async (
     return false
   }
   return (await maybeStore.value.getSize()) > 0
+}
+
+/**
+ * Listet alle Dateinamen im Verlaufsordner für `subPath`, die mindestens einen Eintrag besitzen.
+ */
+export const listHistoryFileNames = async (
+  subPath: ReadonlyArray<string>,
+): Promise<ReadonlyArray<string>> => {
+  try {
+    if (supportsTauri()) {
+      return await invoke<ReadonlyArray<string>>("tauri_history_list_entries", {
+        subPath: [...subPath],
+      })
+    }
+    const maybeDir = await getOpfsHistoryDirectory(subPath, false)
+    if (Option.isNone(maybeDir)) {
+      return []
+    }
+    const dir = maybeDir.value
+    const dirWithValues = dir as unknown as {
+      values: () => AsyncIterableIterator<FileSystemHandle>
+    }
+    const handles = await Effect.runPromise(
+      Stream.runCollect(
+        Stream.fromAsyncIterable(dirWithValues.values(), (error) =>
+          error instanceof Error ? error : new Error(String(error)),
+        ),
+      ),
+    )
+    const results = await Promise.all(
+      handles.map(async (handle) => {
+        if (handle.kind !== "file") {
+          return Option.none<string>()
+        }
+        try {
+          const file = await (handle as FileSystemFileHandle).getFile()
+          return file.size > 0 ? Option.some(handle.name) : Option.none<string>()
+        } catch {
+          return Option.none<string>()
+        }
+      }),
+    )
+    return results.flatMap((item) => (Option.isSome(item) ? [item.value] : []))
+  } catch {
+    return []
+  }
 }
 
 /**

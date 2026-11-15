@@ -1,6 +1,7 @@
 import { Array, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
 import { invoke } from "@tauri-apps/api/core"
+import { listHistoryFileNames } from "./history"
 import {
   OPFS_APP_FOLDER,
   checkTextBytes,
@@ -32,6 +33,8 @@ export const FileEntry = Schema.Struct({
   kind: FileEntryKind,
   maybeSize: Schema.Option(Schema.Number),
   maybeLastModified: Schema.Option(Schema.Number),
+  hasHistory: Schema.optionalKey(Schema.Boolean),
+  isDeleted: Schema.optionalKey(Schema.Boolean),
 })
 export type FileEntry = typeof FileEntry.Type
 
@@ -312,6 +315,39 @@ const fileEntryOrder: Order.Order<FileEntry> = Order.make((a, b) => {
  * Works identically for both the File System Access API (user-picked local folder)
  * and the Origin Private File System (OPFS).
  */
+const mergeEntriesWithHistory = async (
+  subPath: ReadonlyArray<string>,
+  entries: ReadonlyArray<FileEntry>,
+): Promise<ReadonlyArray<FileEntry>> => {
+  const historyNames = await listHistoryFileNames(subPath)
+  if (Array.isReadonlyArrayEmpty(historyNames)) {
+    return Array.sort(entries, fileEntryOrder)
+  }
+  const historySet = new Set(historyNames)
+  const existingFileNames = new Set(
+    Array.map(
+      Array.filter(entries, (entry) => entry.kind === "file"),
+      (entry) => entry.name,
+    ),
+  )
+  const annotatedEntries: ReadonlyArray<FileEntry> = Array.map(entries, (entry) =>
+    entry.kind === "file" && historySet.has(entry.name) ? { ...entry, hasHistory: true } : entry,
+  )
+  const deletedEntries: ReadonlyArray<FileEntry> = Array.map(
+    Array.filter(historyNames, (name) => !existingFileNames.has(name)),
+    (name): FileEntry => ({
+      id: `deleted:${name}`,
+      name,
+      kind: "file",
+      maybeSize: Option.none(),
+      maybeLastModified: Option.none(),
+      hasHistory: true,
+      isDeleted: true,
+    }),
+  )
+  return Array.sort([...annotatedEntries, ...deletedEntries], fileEntryOrder)
+}
+
 export class FileSystemHandleStorage {
   readonly type: StorageType
   readonly rootHandle: FileSystemDirectoryHandle | null
@@ -376,7 +412,7 @@ export class FileSystemHandleStorage {
       }),
     )
 
-    return Array.sort(entries, fileEntryOrder)
+    return mergeEntriesWithHistory(subPath, entries)
   }
 
   async inspectFile(subPath: ReadonlyArray<string>, name: string): Promise<FileInspection> {
@@ -524,7 +560,7 @@ export class TauriStorage {
       maybeLastModified: Option.fromNullishOr(item.lastModified),
     }))
 
-    return Array.sort(entries, fileEntryOrder)
+    return mergeEntriesWithHistory(subPath, entries)
   }
 
   async inspectFile(subPath: ReadonlyArray<string>, name: string): Promise<FileInspection> {

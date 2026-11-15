@@ -1855,6 +1855,106 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector(".editor-history-restore-btn")).toExist(),
     )
   })
+
+  it("zeigt Versionen-Button in der Dateiliste und kennzeichnet gelöschte Dateien am Editor-Button", () => {
+    const entriesWithHistoryModel: Model = {
+      ...readyModel,
+      storageState: StorageState.Ready({
+        rootName: "Projekte",
+        storageType: "opfs",
+        subPath: [],
+        entriesState: EntriesState.Loaded({
+          entries: [
+            {
+              id: "file:index.html",
+              name: "index.html",
+              kind: "file",
+              maybeSize: Option.some(100),
+              maybeLastModified: Option.none(),
+              hasHistory: true,
+            },
+            {
+              id: "deleted:gone.html",
+              name: "gone.html",
+              kind: "file",
+              maybeSize: Option.none(),
+              maybeLastModified: Option.none(),
+              hasHistory: true,
+              isDeleted: true,
+            },
+          ],
+        }),
+        otherBackend: SavedBackend.Unsupported(),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(entriesWithHistoryModel),
+      sceneExpect(selector('.btn-entry-history[data-entry="index.html"]')).toExist(),
+      sceneExpect(selector('.btn-edit-entry[data-entry="index.html"]')).toContainText("Bearbeiten"),
+      sceneExpect(selector('.btn-entry-history[data-entry="gone.html"]')).toExist(),
+      sceneExpect(selector('.btn-edit-entry.is-deleted[data-entry="gone.html"]')).toBeDisabled(),
+      sceneExpect(selector('.btn-edit-entry[data-entry="gone.html"]')).toContainText("Gelöscht"),
+      click(selector('.btn-entry-history[data-entry="gone.html"]')),
+      Command.expectExact(PushUrl({ url: "/gone.html?pwaislands=history" })),
+      Command.resolve(PushUrl, Message.CompletedPushUrl()),
+    )
+
+    const historyOnlyModel: Model = {
+      ...entriesWithHistoryModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "gone.html",
+          name: "gone.html",
+          fileMode: EditorFileMode.Binary({
+            preview: PreviewContent.None(),
+            edit: BinaryEdit.Disabled(),
+          }),
+          maybeValidationError: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          isLlmModeMenuOpen: false,
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: readyModel.editorSplitPercent,
+          editorSplitDrag: Option.none(),
+          canUndo: false,
+          canRedo: false,
+          historyState: Editor.HistoryState.Open({
+            entries: [
+              {
+                offset: 0,
+                endOffset: 32,
+                timestampMs: 1_700_000_000_000,
+                byteLength: 16,
+                contentHash: 0x1234abcd,
+              },
+            ],
+            isConfirmingClear: false,
+            isHistoryEnabled: true,
+            maybePreviewContent: Option.none(),
+          }),
+          isHistoryEnabled: true,
+          hasHistoryEntries: true,
+          isHistoryOnly: true,
+          isConfirmingDelete: false,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(historyOnlyModel),
+      sceneExpect(selector("#editor-history-overlay")).toExist(),
+      sceneExpect(selector("#modal-form")).toBeAbsent(),
+    )
+  })
 })
 
 describe("LLM chat auto-scroll", () => {

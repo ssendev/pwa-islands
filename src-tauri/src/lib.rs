@@ -874,6 +874,38 @@ fn tauri_history_read_index(
 }
 
 #[tauri::command]
+fn tauri_history_list_entries(app: tauri::AppHandle, sub_path: Vec<String>) -> Result<Vec<String>, String> {
+  let base_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| format!("Konnte App-Datenordner nicht ermitteln: {e}"))?;
+  let mut dir = base_dir.join(HISTORY_FOLDER_NAME);
+  for segment in &sub_path {
+    dir.push(validate_history_segment(segment)?);
+  }
+  if !dir.is_dir() {
+    return Ok(Vec::new());
+  }
+  let read_dir =
+    fs::read_dir(&dir).map_err(|e| format!("Fehler beim Lesen des Verlaufsordners: {e}"))?;
+  let mut names = Vec::new();
+  for entry in read_dir {
+    let Ok(entry) = entry else {
+      continue;
+    };
+    let Ok(meta) = entry.metadata() else {
+      continue;
+    };
+    if meta.is_file() && meta.len() > 0 {
+      if let Some(name) = entry.file_name().to_str() {
+        names.push(name.to_string());
+      }
+    }
+  }
+  Ok(names)
+}
+
+#[tauri::command]
 fn tauri_fs_get_root() -> Result<Option<String>, String> {
   let guard = storage_root_lock()
     .read()
@@ -1127,6 +1159,7 @@ pub fn run() {
       tauri_history_clear,
       tauri_history_clear_all,
       tauri_history_read_index,
+      tauri_history_list_entries,
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");

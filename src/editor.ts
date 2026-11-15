@@ -212,6 +212,7 @@ export const Model = defineTaggedUnion({
     historyState: HistoryState,
     isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
+    isHistoryOnly: Schema.optionalKey(Schema.Boolean),
     isConfirmingDelete: Schema.Boolean,
   },
   ConfirmOverwrite: {
@@ -1083,6 +1084,9 @@ const recordDirectoryFileVersions = async (
     const entries = await storage.listEntries(subPath)
     await entries.reduce<Promise<void>>(async (acc, entry) => {
       await acc
+      if (entry.isDeleted) {
+        return
+      }
       if (entry.kind === "file") {
         await recordPreviousFileVersion(storage, subPath, entry.name, entry.name, timestampMs)
       } else {
@@ -3056,10 +3060,18 @@ export const update = (
       }
     },
 
-    ClickedCloseHistory: () => ({
-      model: closeHistory(model),
-      outMessage: OutMessage.None(),
-    }),
+    ClickedCloseHistory: () => {
+      if (model._tag === "EditFile" && model.isHistoryOnly) {
+        return {
+          model: closeHistory(model),
+          outMessage: OutMessage.CloseModal({ replaceUrl: true }),
+        }
+      }
+      return {
+        model: closeHistory(model),
+        outMessage: OutMessage.None(),
+      }
+    },
 
     SucceededLoadFullHistory: ({ entries, isHistoryEnabled }) => {
       if (model._tag !== "EditFile") {
@@ -3132,7 +3144,7 @@ export const update = (
       }
       const isHistoryEnabled =
         model.historyState._tag === "Open" ? model.historyState.isHistoryEnabled : true
-      if (model.fileMode._tag === "Binary") {
+      if (model.fileMode._tag === "Binary" || model.isHistoryOnly === true) {
         return {
           model: modifyFields(model, {
             historyState: () => HistoryState.Loading(),
@@ -3247,7 +3259,7 @@ export const update = (
           }),
           outMessage: OutMessage.EntriesUpdated({
             entries,
-            closeModal: false,
+            closeModal: model.isHistoryOnly === true,
             maybeAlertBanner: Option.some({
               message: "Version wiederhergestellt.",
               variant: "info",
@@ -5056,9 +5068,28 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         canUndo,
         canRedo,
         historyState,
+        isHistoryOnly,
         isConfirmingDelete,
-      }) =>
-        h.div(
+      }) => {
+        if (isHistoryOnly) {
+          return h.div(
+            [h.Class("editor-modal-host")],
+            [
+              viewHistoryOverlay(
+                historyState,
+                fileMode._tag === "Text"
+                  ? Option.some(hashAndMeasureHistoryContent(fileMode.content))
+                  : Option.none(),
+                fileMode._tag === "Binary",
+                h,
+              ),
+              historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
+                ? viewPreviewOverlay(historyState.maybePreviewContent.value, h)
+                : h.empty,
+            ],
+          )
+        }
+        return h.div(
           [h.Class("editor-modal-host")],
           [
             viewEditorModal(
@@ -5114,7 +5145,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               : h.empty,
             isConfirmingDelete ? viewConfirmDeleteModal(originalName, "file", h) : h.empty,
           ],
-        ),
+        )
+      },
 
       ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
     }),

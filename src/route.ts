@@ -24,6 +24,10 @@ export const AppRoute = defineRouteUnion({
     name: Schema.String,
     isPreview: Schema.Boolean,
   },
+  History: {
+    subPath: Schema.Array(Schema.String),
+    name: Schema.String,
+  },
   Help: {
     subPath: Schema.Array(Schema.String),
     maybeTopic: Schema.Option(HelpTopic),
@@ -62,6 +66,11 @@ export const buildEditUrl = (
 ): string => {
   const encoded = encodeSubPath([...subPath, entryName])
   return `/${encoded}?pwaislands=${isPreview ? "edit-preview" : "edit"}`
+}
+
+export const buildHistoryUrl = (subPath: ReadonlyArray<string>, entryName: string): string => {
+  const encoded = encodeSubPath([...subPath, entryName])
+  return `/${encoded}?pwaislands=history`
 }
 
 export const buildHelpUrl = (
@@ -191,6 +200,14 @@ export const parsePathAndSearchToRoute = (pathname: string, search: string): App
     }
   }
 
+  if (isHistoryActionParam(maybePwaislandsParam)) {
+    if (Array.isReadonlyArrayNonEmpty(segments)) {
+      const name = Array.lastNonEmpty(segments)
+      const subPath = Array.dropRight(segments, 1)
+      return AppRoute.History({ subPath, name })
+    }
+  }
+
   return AppRoute.Folder({ subPath: segments })
 }
 
@@ -221,3 +238,9 @@ const parseEditActionValue = (raw: string): Option.Option<{ readonly isPreview: 
 
 export const isEditActionParam = (maybeRaw: Option.Option<string>): boolean =>
   Option.isSome(parseEditActionParam(maybeRaw))
+
+export const isHistoryActionParam = (maybeRaw: Option.Option<string>): boolean =>
+  Option.exists(maybeRaw, (raw) => {
+    const normalized = raw.trim().toLowerCase()
+    return normalized === "history" || normalized === "verlauf"
+  })

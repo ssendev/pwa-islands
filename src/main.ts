@@ -64,6 +64,7 @@ import { AlertBanner, Toast, view as viewToasts } from "./toast"
 import {
   AppRoute,
   buildEditUrl,
+  buildHistoryUrl,
   buildFolderUrl,
   buildHelpUrl,
   buildNewUrl,
@@ -639,6 +640,9 @@ export const Message = defineMessageUnion({
   ClickedEditEntry: {
     entry: FileEntry,
   },
+  ClickedEntryHistory: {
+    entry: FileEntry,
+  },
   ClickedOpenHelp: {},
   PressedEscape: {},
 
@@ -709,6 +713,7 @@ const resolveRouteDeepLink = async (
     Folder: ({ subPath }) => subPath,
     New: ({ subPath }) => subPath,
     Edit: ({ subPath }) => subPath,
+    History: ({ subPath }) => subPath,
   })
 
   const { resolvedSubPath, entries, didFallback } = await listEntriesOrRoot(storage, targetSubPath)
@@ -2443,6 +2448,12 @@ export const update = (
 
     ClickedEntryRow: ({ entry }) => {
       const subPath = currentSubPathFromStorageState(model.storageState)
+      if (entry.isDeleted) {
+        return {
+          model,
+          commands: [PushUrl({ url: buildHistoryUrl(subPath, entry.name) })],
+        }
+      }
       if (entry.kind === "directory") {
         const targetSubPath = [...subPath, entry.name]
         return {
@@ -2774,6 +2785,47 @@ export const update = (
             return syncOpenEditor(nextModel, baseCommands)
           })
         },
+
+        History: ({ subPath, name }) =>
+          whenReady(modelWithRoute, (readyState) => {
+            const isSamePath = isSameSubPath(readyState.subPath, subPath)
+            const maybeEntry = isSamePath
+              ? EntriesState.match(readyState.entriesState, {
+                  Loaded: ({ entries }) => Array.findFirst(entries, (e) => e.name === name),
+                  Loading: () => Option.none(),
+                  Error: () => Option.none(),
+                })
+              : Option.none()
+
+            if (
+              Option.isNone(maybeEntry) ||
+              Option.exists(maybeEntry, (entry) => entry.isDeleted === true)
+            ) {
+              const deletedHistory = Modal.openDeletedEntryHistory(subPath, name)
+              return {
+                model: modifyFields(modelWithRoute, {
+                  isSettingsOpen: () => false,
+                  modalState: () => deletedHistory.model,
+                }),
+                commands: Array.map(deletedHistory.commands, toModalCommand),
+              }
+            }
+
+            return {
+              model: modifyFields(modelWithRoute, {
+                isSettingsOpen: () => false,
+              }),
+              commands: [
+                toModalCommand(
+                  Modal.InspectFileForEditor({
+                    entryName: name,
+                    subPath,
+                    openHistory: true,
+                  }),
+                ),
+              ],
+            }
+          }),
 
         Edit: ({ subPath, name, isPreview }) => {
           if (Modal.isEditingEntry(modelWithRoute.modalState, name)) {
@@ -3494,6 +3546,14 @@ export const update = (
       return {
         model,
         commands: [PushUrl({ url: buildEditUrl(subPath, entry.name) })],
+      }
+    },
+
+    ClickedEntryHistory: ({ entry }) => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model,
+        commands: [PushUrl({ url: buildHistoryUrl(subPath, entry.name) })],
       }
     },
 
@@ -5525,13 +5585,22 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
         onSome: formatDate,
       })
 
+  const isDeleted = entry.isDeleted === true
+  const hasHistory = entry.hasHistory === true || isDeleted
+
   return h.keyed("tr")(
     entry.id,
     [
-      h.Class(`file-row ${isDir ? "is-directory" : "is-file"}`),
+      h.Class(`file-row ${isDir ? "is-directory" : "is-file"}${isDeleted ? " is-deleted" : ""}`),
       h.DataAttribute("entry", entry.name),
       h.DataAttribute("kind", entry.kind),
-      h.Title(isDir ? "Ordner öffnen" : "Datei öffnen"),
+      h.Title(
+        isDir
+          ? "Ordner öffnen"
+          : isDeleted
+            ? "Datei gelöscht – Versionen anzeigen"
+            : "Datei öffnen",
+      ),
       h.OnClick(Message.ClickedEntryRow({ entry })),
     ],
     [
@@ -5566,18 +5635,43 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
           h.div(
             [h.Class("files-actions-inner")],
             [
+              !isDir && hasHistory
+                ? h.button(
+                    [
+                      h.Type("button"),
+                      h.Class("btn btn-secondary btn-sm btn-entry-history"),
+                      h.DataAttribute("entry", entry.name),
+                      h.Title("Versionsverlauf"),
+                      h.AriaLabel(`Versionsverlauf für ${entry.name}`),
+                      h.OnClick(Message.ClickedEntryHistory({ entry }), {
+                        propagation: "Stop",
+                      }),
+                    ],
+                    [viewIcon("history", h), h.span([h.Class("btn-label")], ["Versionen"])],
+                  )
+                : h.empty,
               h.button(
                 [
                   h.Type("button"),
-                  h.Class("btn btn-secondary btn-sm btn-edit-entry"),
+                  h.Class(
+                    `btn btn-secondary btn-sm btn-edit-entry${isDeleted ? " is-deleted" : ""}`,
+                  ),
                   h.DataAttribute("entry", entry.name),
-                  h.Title(isDir ? "Ordner bearbeiten" : "Datei bearbeiten"),
-                  h.AriaLabel(isDir ? "Ordner bearbeiten" : "Datei bearbeiten"),
+                  h.Disabled(isDeleted),
+                  h.Title(
+                    isDeleted ? "Datei gelöscht" : isDir ? "Ordner bearbeiten" : "Datei bearbeiten",
+                  ),
+                  h.AriaLabel(
+                    isDeleted ? "Datei gelöscht" : isDir ? "Ordner bearbeiten" : "Datei bearbeiten",
+                  ),
                   h.OnClick(Message.ClickedEditEntry({ entry }), {
                     propagation: "Stop",
                   }),
                 ],
-                [viewIcon("edit", h), h.span([h.Class("btn-label")], ["Bearbeiten"])],
+                [
+                  viewIcon("edit", h),
+                  h.span([h.Class("btn-label")], [isDeleted ? "Gelöscht" : "Bearbeiten"]),
+                ],
               ),
             ],
           ),
