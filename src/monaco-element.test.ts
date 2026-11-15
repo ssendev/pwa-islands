@@ -6,6 +6,7 @@ import {
   applyExternalValueToEditor,
   computeChangedSpan,
   languageFromFilename,
+  resolveMonacoTheme,
 } from "./monaco-element"
 
 describe("monaco-element", () => {
@@ -112,5 +113,14 @@ describe("monaco-element", () => {
     applyExternalValueToEditor(fakeEditor, Option.none(), "alt", "neu")
 
     expect(setValue).toHaveBeenCalledWith("neu")
+  })
+
+  it("löst das Monaco-Theme anhand von Einstellung und Systemmodus auf", () => {
+    expect(resolveMonacoTheme("system", false)).toBe("vs")
+    expect(resolveMonacoTheme("system", true)).toBe("vs-dark")
+    expect(resolveMonacoTheme("vs", true)).toBe("vs")
+    expect(resolveMonacoTheme("vs-dark", false)).toBe("vs-dark")
+    expect(resolveMonacoTheme("hc-black", false)).toBe("hc-black")
+    expect(resolveMonacoTheme("hc-light", true)).toBe("hc-light")
   })
 })

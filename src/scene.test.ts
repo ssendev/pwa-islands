@@ -35,6 +35,7 @@ import {
   SaveEditorPreferences,
   SaveApiHistoryEnabledPreference,
   SaveHistoryEnabledPreference,
+  SaveMonacoSettings,
   ScrollEditorLlmChatToBottomIfAtBottom,
   StorageState,
   TestLlm,
@@ -124,6 +125,11 @@ const readyModel: Model = {
   llmTestState: LlmTestState.Idle(),
   historyEnabled: true,
   apiHistoryEnabled: true,
+  editorLineNumbers: true,
+  editorFolding: true,
+  editorWordWrap: true,
+  editorScrollBeyondLastLine: false,
+  editorTheme: "system",
   clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
@@ -2179,5 +2185,82 @@ describe("LLM chat auto-scroll", () => {
 
     expect(el.scrollTop).toBe(420)
     document.body.innerHTML = ""
+  })
+})
+
+describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
+  it("speichert Zeilennummern, Folds, Zeilenumbruch, Scrollen über letzte Zeile und Theme in den Einstellungen", () => {
+    scene(
+      { update, view },
+      given(readyModel),
+      click(selector("#btn-settings")),
+      click(selector("#btn-open-settings")),
+      Command.resolve(PushUrl, Message.CompletedPushUrl()),
+      sceneExpect(selector("#settings-group-editor")).toExist(),
+      sceneExpect(selector("#settings-editor-line-numbers")).toBeChecked(),
+      sceneExpect(selector("#settings-editor-folding")).toBeChecked(),
+      sceneExpect(selector("#settings-editor-word-wrap")).toBeChecked(),
+      sceneExpect(selector("#settings-editor-scroll-beyond-last-line")).not.toBeChecked(),
+      sceneExpect(selector("#settings-editor-theme")).toHaveValue("system"),
+      change(selector("#settings-editor-line-numbers"), "false"),
+      Command.expectExact(
+        SaveMonacoSettings({
+          lineNumbers: false,
+          folding: true,
+          wordWrap: true,
+          scrollBeyondLastLine: false,
+          theme: "system",
+        }),
+      ),
+      Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
+      sceneExpect(selector("#settings-editor-line-numbers")).not.toBeChecked(),
+      change(selector("#settings-editor-folding"), "false"),
+      Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
+      sceneExpect(selector("#settings-editor-folding")).not.toBeChecked(),
+      change(selector("#settings-editor-word-wrap"), "false"),
+      Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
+      sceneExpect(selector("#settings-editor-word-wrap")).not.toBeChecked(),
+      change(selector("#settings-editor-scroll-beyond-last-line"), "true"),
+      Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
+      sceneExpect(selector("#settings-editor-scroll-beyond-last-line")).toBeChecked(),
+      change(selector("#settings-editor-theme"), "vs-dark"),
+      Command.expectExact(
+        SaveMonacoSettings({
+          lineNumbers: false,
+          folding: false,
+          wordWrap: false,
+          scrollBeyondLastLine: true,
+          theme: "vs-dark",
+        }),
+      ),
+      Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
+      sceneExpect(selector("#settings-editor-theme")).toHaveValue("vs-dark"),
+    )
+  })
+
+  it("öffnet die Einstellungen aus dem Monaco-Editor-Kontextmenü und behält den offenen Editor bei", () => {
+    scene(
+      { update, view },
+      given(readyModel),
+      click(selector("#btn-new-file")),
+      Command.resolveAll(
+        [PushUrl, Message.CompletedPushUrl()],
+        [Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()],
+        [Editor.LoadUserTemplates, Editor.Message.CompletedLoadUserTemplates({ templates: [] })],
+      ),
+      sceneExpect(selector("#modal-file-content")).toExist(),
+      CustomElement.emit(
+        monacoEditorElement,
+        selector("#modal-file-content"),
+        "settings-requested",
+        {},
+      ),
+      sceneExpect(selector("#settings-dialog")).toExist(),
+      change(selector("#settings-editor-theme"), "hc-black"),
+      Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
+      click(selector("#btn-close-settings")),
+      sceneExpect(selector("#settings-dialog")).toBeAbsent(),
+      sceneExpect(selector("#modal-file-content")).toExist(),
+    )
   })
 })

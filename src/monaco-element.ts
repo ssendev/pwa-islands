@@ -1,6 +1,7 @@
 import { Option, Schema } from "effect"
 import { CustomElement } from "foldkit"
 import type * as Monaco from "monaco-editor"
+import { defaultMonacoSettings, type MonacoTheme, MonacoThemeSchema } from "./storage"
 
 export const MONACO_EDITOR_TAG = "monaco-editor"
 
@@ -9,11 +10,17 @@ export const monacoEditorElement = CustomElement.define({
   properties: {
     value: Schema.String,
     filename: Schema.String,
+    lineNumbers: Schema.Boolean,
+    folding: Schema.Boolean,
+    wordWrap: Schema.Boolean,
+    scrollBeyondLastLine: Schema.Boolean,
+    theme: MonacoThemeSchema,
   },
   events: {
     "content-changed": Schema.Struct({ value: Schema.String }),
     "history-changed": Schema.Struct({ canUndo: Schema.Boolean, canRedo: Schema.Boolean }),
     "save-requested": Schema.Struct({}),
+    "settings-requested": Schema.Struct({}),
   },
 })
 
@@ -56,7 +63,8 @@ export const languageFromFilename = (filename: string): string => {
   return LANGUAGE_BY_EXTENSION[ext] ?? "plaintext"
 }
 
-const getMonacoTheme = (isDark: boolean): string => (isDark ? "vs-dark" : "vs")
+export const resolveMonacoTheme = (theme: MonacoTheme, isSystemDark: boolean): string =>
+  theme === "system" ? (isSystemDark ? "vs-dark" : "vs") : theme
 
 export const computeChangedSpan = (
   oldText: string,
@@ -157,6 +165,11 @@ export const registerMonacoEditorElement = (): void => {
   class MonacoEditorHost extends HTMLElement {
     private currentValue = ""
     private currentFilename = ""
+    private currentLineNumbers = defaultMonacoSettings.lineNumbers
+    private currentFolding = defaultMonacoSettings.folding
+    private currentWordWrap = defaultMonacoSettings.wordWrap
+    private currentScrollBeyondLastLine = defaultMonacoSettings.scrollBeyondLastLine
+    private currentTheme: MonacoTheme = defaultMonacoSettings.theme
     private isApplyingExternalValue = false
     private isDisconnected = false
     private lastCanUndo = false
@@ -166,11 +179,20 @@ export const registerMonacoEditorElement = (): void => {
     private maybeContentDisposable: Option.Option<Monaco.IDisposable> = Option.none()
     private maybeContainer: Option.Option<HTMLDivElement> = Option.none()
     private maybeMediaQuery: Option.Option<MediaQueryList> = Option.none()
+    private isSystemDark(): boolean {
+      return Option.match(this.maybeMediaQuery, {
+        onNone: () => false,
+        onSome: (mediaQuery) => mediaQuery.matches,
+      })
+    }
     private readonly handleThemeChange = (event: MediaQueryListEvent): void => {
+      if (this.currentTheme !== "system") {
+        return
+      }
       Option.match(this.maybeMonaco, {
         onNone: () => {},
         onSome: (monacoApi) => {
-          monacoApi.editor.setTheme(getMonacoTheme(event.matches))
+          monacoApi.editor.setTheme(resolveMonacoTheme(this.currentTheme, event.matches))
         },
       })
     }
@@ -262,6 +284,91 @@ export const registerMonacoEditorElement = (): void => {
       })
     }
 
+    get lineNumbers(): boolean {
+      return this.currentLineNumbers
+    }
+
+    set lineNumbers(nextLineNumbers: boolean) {
+      if (this.currentLineNumbers === nextLineNumbers) {
+        return
+      }
+      this.currentLineNumbers = nextLineNumbers
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.updateOptions({ lineNumbers: nextLineNumbers ? "on" : "off" })
+        },
+      })
+    }
+
+    get folding(): boolean {
+      return this.currentFolding
+    }
+
+    set folding(nextFolding: boolean) {
+      if (this.currentFolding === nextFolding) {
+        return
+      }
+      this.currentFolding = nextFolding
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.updateOptions({ folding: nextFolding })
+        },
+      })
+    }
+
+    get wordWrap(): boolean {
+      return this.currentWordWrap
+    }
+
+    set wordWrap(nextWordWrap: boolean) {
+      if (this.currentWordWrap === nextWordWrap) {
+        return
+      }
+      this.currentWordWrap = nextWordWrap
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.updateOptions({ wordWrap: nextWordWrap ? "on" : "off" })
+        },
+      })
+    }
+
+    get scrollBeyondLastLine(): boolean {
+      return this.currentScrollBeyondLastLine
+    }
+
+    set scrollBeyondLastLine(nextScrollBeyondLastLine: boolean) {
+      if (this.currentScrollBeyondLastLine === nextScrollBeyondLastLine) {
+        return
+      }
+      this.currentScrollBeyondLastLine = nextScrollBeyondLastLine
+      Option.match(this.maybeEditor, {
+        onNone: () => {},
+        onSome: (editor) => {
+          editor.updateOptions({ scrollBeyondLastLine: nextScrollBeyondLastLine })
+        },
+      })
+    }
+
+    get theme(): MonacoTheme {
+      return this.currentTheme
+    }
+
+    set theme(nextTheme: MonacoTheme) {
+      if (this.currentTheme === nextTheme) {
+        return
+      }
+      this.currentTheme = nextTheme
+      Option.match(this.maybeMonaco, {
+        onNone: () => {},
+        onSome: (monacoApi) => {
+          monacoApi.editor.setTheme(resolveMonacoTheme(nextTheme, this.isSystemDark()))
+        },
+      })
+    }
+
     connectedCallback(): void {
       this.isDisconnected = false
       const container = document.createElement("div")
@@ -278,7 +385,7 @@ export const registerMonacoEditorElement = (): void => {
         mediaQuery.addEventListener("change", this.handleThemeChange)
       }
 
-      void this.mountEditor(container, mediaQuery?.matches ?? false)
+      void this.mountEditor(container)
     }
 
     disconnectedCallback(): void {
@@ -313,7 +420,7 @@ export const registerMonacoEditorElement = (): void => {
       this.maybeContainer = Option.none()
     }
 
-    private async mountEditor(container: HTMLDivElement, isDark: boolean): Promise<void> {
+    private async mountEditor(container: HTMLDivElement): Promise<void> {
       const { monaco: monacoApi } = await import("./monaco-runtime")
       if (this.isDisconnected || !this.isConnected) {
         return
@@ -323,13 +430,15 @@ export const registerMonacoEditorElement = (): void => {
       const editor = monacoApi.editor.create(container, {
         value: this.currentValue,
         language: languageFromFilename(this.currentFilename),
-        theme: getMonacoTheme(isDark),
+        theme: resolveMonacoTheme(this.currentTheme, this.isSystemDark()),
         automaticLayout: true,
         minimap: { enabled: false },
-        wordWrap: "on",
+        lineNumbers: this.currentLineNumbers ? "on" : "off",
+        folding: this.currentFolding,
+        wordWrap: this.currentWordWrap ? "on" : "off",
         fontSize: 13,
         tabSize: 2,
-        scrollBeyondLastLine: false,
+        scrollBeyondLastLine: this.currentScrollBeyondLastLine,
         padding: { top: 8, bottom: 8 },
       })
       this.maybeEditor = Option.some(editor)
@@ -357,6 +466,21 @@ export const registerMonacoEditorElement = (): void => {
             bubbles: true,
           }),
         )
+      })
+
+      editor.addAction({
+        id: "pwa-islands-open-settings",
+        label: "Einstellungen",
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 1.5,
+        run: () => {
+          this.dispatchEvent(
+            new CustomEvent("settings-requested", {
+              detail: {},
+              bubbles: true,
+            }),
+          )
+        },
       })
     }
   }

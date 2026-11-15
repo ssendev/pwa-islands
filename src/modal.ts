@@ -684,6 +684,7 @@ export const OutMessage = defineTaggedUnion({
   ChangedEditorSplitPercent: {
     editorSplitPercent: Schema.Number,
   },
+  RequestedSettings: {},
 })
 export type OutMessage = typeof OutMessage.Type
 
@@ -949,6 +950,11 @@ export const update = (
               model: ModalState.Editor({ editor: editorResult.model }),
               commands: mappedCommands,
               outMessage: OutMessage.ChangedEditorSplitPercent({ editorSplitPercent }),
+            }),
+            RequestedSettings: () => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.RequestedSettings(),
             }),
           })
         }),

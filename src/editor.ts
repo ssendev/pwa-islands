@@ -49,6 +49,7 @@ import { buildEditUrl, buildNewUrl } from "./route"
 import { checkTextBytes, getMimeType } from "./storage"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
+  type MonacoSettings,
   clampEditorSplitPercent,
   deleteUserTemplate,
   getStoredHistoryEnabled,
@@ -829,6 +830,7 @@ export const Message = defineMessageUnion({
     message: Schema.String,
   },
   CompletedCopyPasteErrorToClipboard: {},
+  RequestedSettings: {},
   ClickedSave: {},
   ClickedOpenPreview: {},
   ClickedClosePreview: {},
@@ -952,6 +954,7 @@ export const OutMessage = defineTaggedUnion({
   ChangedLlmBarMode: { llmBarMode: LlmBarMode },
   ChangedMaximize: { isMaximized: Schema.Boolean },
   ChangedEditorSplitPercent: { editorSplitPercent: Schema.Number },
+  RequestedSettings: {},
 })
 export type OutMessage = typeof OutMessage.Type
 
@@ -2877,6 +2880,11 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
+    RequestedSettings: () => ({
+      model,
+      outMessage: OutMessage.RequestedSettings(),
+    }),
+
     ClickedSave: () => handleSaveAction(model, context),
 
     ClickedOpenPreview: () =>
@@ -3810,6 +3818,7 @@ const viewPreviewContent = (preview: PreviewContent, h: Html.HtmlBuilder<Message
 const viewEditorFileBody = (
   fileMode: EditorFileMode,
   filename: string,
+  monacoSettings: MonacoSettings,
   h: Html.HtmlBuilder<Message>,
 ): ReadonlyArray<Html.Html> =>
   EditorFileMode.match(fileMode, {
@@ -3822,11 +3831,17 @@ const viewEditorFileBody = (
             monacoEditor([
               monacoEditor.Value(content),
               monacoEditor.Filename(filename),
+              monacoEditor.LineNumbers(monacoSettings.lineNumbers),
+              monacoEditor.Folding(monacoSettings.folding),
+              monacoEditor.WordWrap(monacoSettings.wordWrap),
+              monacoEditor.ScrollBeyondLastLine(monacoSettings.scrollBeyondLastLine),
+              monacoEditor.Theme(monacoSettings.theme),
               monacoEditor.OnContentChanged((detail) =>
                 Message.UpdatedTextContent({ content: detail.value }),
               ),
               monacoEditor.OnHistoryChanged((detail) => Message.ChangedEditorHistoryState(detail)),
               monacoEditor.OnSaveRequested(() => Message.ClickedSave()),
+              monacoEditor.OnSettingsRequested(() => Message.RequestedSettings()),
               h.Id("modal-file-content"),
               h.Class("monaco-editor-host"),
               h.AriaLabel("Inhalt"),
@@ -4009,6 +4024,7 @@ export type ViewInputs = {
   readonly llmSelectedModel: string
   readonly llmThinkingLevels: ReadonlyArray<ThinkingLevelOption>
   readonly llmSelectedThinkingLevel: string
+  readonly monacoSettings: MonacoSettings
 }
 
 const viewLlmChatHistory = (
@@ -5150,6 +5166,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                   ...viewEditorFileBody(
                     EditorFileMode.Text({ content: state.content }),
                     state.name,
+                    context.monacoSettings,
                     h,
                   ),
                 ],
@@ -5308,7 +5325,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 nameValue: name,
                 maybeValidationError,
                 maybePasteError,
-                extraBodyNodes: viewEditorFileBody(fileMode, name, h),
+                extraBodyNodes: viewEditorFileBody(fileMode, name, context.monacoSettings, h),
                 historyControls:
                   fileMode._tag === "Text"
                     ? {

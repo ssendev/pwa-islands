@@ -1,4 +1,4 @@
-import { Array, Data, Effect, Option, Stream } from "effect"
+import { Array, Data, Effect, Option, Schema, Stream } from "effect"
 import { invoke } from "@tauri-apps/api/core"
 
 export class DirectoryIterationError extends Data.TaggedError("DirectoryIterationError")<{
@@ -357,6 +357,96 @@ export async function storeEditorPreferences(prefs: EditorPreferences): Promise<
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
     const req = tx.objectStore(STORE_NAME).put({ ...prefs }, EDITOR_PREFERENCES_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export const MonacoThemeSchema = Schema.Literals([
+  "system",
+  "vs",
+  "vs-dark",
+  "hc-black",
+  "hc-light",
+])
+export type MonacoTheme = typeof MonacoThemeSchema.Type
+
+export const MonacoSettingsSchema = Schema.Struct({
+  lineNumbers: Schema.Boolean,
+  folding: Schema.Boolean,
+  wordWrap: Schema.Boolean,
+  scrollBeyondLastLine: Schema.Boolean,
+  theme: MonacoThemeSchema,
+})
+export type MonacoSettings = typeof MonacoSettingsSchema.Type
+
+export const defaultMonacoSettings: MonacoSettings = {
+  lineNumbers: true,
+  folding: true,
+  wordWrap: true,
+  scrollBeyondLastLine: false,
+  theme: "system",
+}
+
+const MONACO_SETTINGS_KEY = "monaco_settings"
+
+const isMonacoTheme = (value: unknown): value is MonacoTheme =>
+  value === "system" ||
+  value === "vs" ||
+  value === "vs-dark" ||
+  value === "hc-black" ||
+  value === "hc-light"
+
+export async function getStoredMonacoSettings(): Promise<MonacoSettings> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(MONACO_SETTINGS_KEY)
+      req.onsuccess = () => {
+        const value: unknown = req.result
+        const record = typeof value === "object" && value !== null ? value : {}
+        const lineNumbers =
+          "lineNumbers" in record && typeof record.lineNumbers === "boolean"
+            ? record.lineNumbers
+            : defaultMonacoSettings.lineNumbers
+        const folding =
+          "folding" in record && typeof record.folding === "boolean"
+            ? record.folding
+            : defaultMonacoSettings.folding
+        const wordWrap =
+          "wordWrap" in record && typeof record.wordWrap === "boolean"
+            ? record.wordWrap
+            : defaultMonacoSettings.wordWrap
+        const scrollBeyondLastLine =
+          "scrollBeyondLastLine" in record && typeof record.scrollBeyondLastLine === "boolean"
+            ? record.scrollBeyondLastLine
+            : defaultMonacoSettings.scrollBeyondLastLine
+        const theme =
+          "theme" in record && isMonacoTheme(record.theme)
+            ? record.theme
+            : defaultMonacoSettings.theme
+        resolve({
+          lineNumbers,
+          folding,
+          wordWrap,
+          scrollBeyondLastLine,
+          theme,
+        })
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Monaco-Einstellungen:", error)
+    return defaultMonacoSettings
+  }
+}
+
+export async function storeMonacoSettings(settings: MonacoSettings): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put({ ...settings }, MONACO_SETTINGS_KEY)
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
   })

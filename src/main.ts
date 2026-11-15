@@ -104,16 +104,22 @@ import * as Editor from "./editor"
 import * as LlmResponse from "./llm-response"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
+  type MonacoTheme,
+  MonacoSettingsSchema,
+  MonacoThemeSchema,
   OPFS_APP_FOLDER,
+  defaultMonacoSettings,
   getFileExtension,
   getStoredApiHistoryEnabled,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
   getStoredLlmSettings,
+  getStoredMonacoSettings,
   storeApiHistoryEnabled,
   storeEditorPreferences,
   storeHistoryEnabled,
   storeLlmSettings,
+  storeMonacoSettings,
 } from "./storage"
 
 // FORMATTING
@@ -370,6 +376,11 @@ export const Model = Schema.Struct({
   llmTestState: LlmTestState,
   historyEnabled: Schema.Boolean,
   apiHistoryEnabled: Schema.Boolean,
+  editorLineNumbers: Schema.Boolean,
+  editorFolding: Schema.Boolean,
+  editorWordWrap: Schema.Boolean,
+  editorScrollBeyondLastLine: Schema.Boolean,
+  editorTheme: MonacoThemeSchema,
   clearAllHistoryState: ClearAllHistoryState,
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
@@ -535,6 +546,12 @@ export const Message = defineMessageUnion({
   CompletedSaveHistoryEnabledPreference: {},
   ToggledSettingsApiHistoryEnabled: { isEnabled: Schema.Boolean },
   CompletedSaveApiHistoryEnabledPreference: {},
+  ToggledSettingsEditorLineNumbers: { isEnabled: Schema.Boolean },
+  ToggledSettingsEditorFolding: { isEnabled: Schema.Boolean },
+  ToggledSettingsEditorWordWrap: { isEnabled: Schema.Boolean },
+  ToggledSettingsEditorScrollBeyondLastLine: { isEnabled: Schema.Boolean },
+  SelectedSettingsEditorTheme: { theme: MonacoThemeSchema },
+  CompletedSaveMonacoSettings: {},
   ClickedTestLlm: { mode: LlmTestMode },
   UpdatedTestLlmStream: {
     content: Schema.String,
@@ -581,6 +598,7 @@ export const Message = defineMessageUnion({
     editorSplitPercent: Schema.Number,
     historyEnabled: Schema.optionalKey(Schema.Boolean),
     apiHistoryEnabled: Schema.optionalKey(Schema.Boolean),
+    monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
   },
   CompletedSaveEditorPreferences: {},
   SucceededLoadEditorLlmModels: {
@@ -921,6 +939,32 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
     ),
 })
 
+export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
+  args: {
+    lineNumbers: Schema.Boolean,
+    folding: Schema.Boolean,
+    wordWrap: Schema.Boolean,
+    scrollBeyondLastLine: Schema.Boolean,
+    theme: MonacoThemeSchema,
+  },
+  messages: [Message.CompletedSaveMonacoSettings],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () =>
+        storeMonacoSettings({
+          lineNumbers: args.lineNumbers,
+          folding: args.folding,
+          wordWrap: args.wordWrap,
+          scrollBeyondLastLine: args.scrollBeyondLastLine,
+          theme: args.theme,
+        }),
+      catch: () => new Error("Failed to save monaco settings"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveMonacoSettings()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveMonacoSettings())),
+    ),
+})
+
 export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
   messages: [Message.CompletedLoadEditorPreferences],
   execute: Effect.promise(() =>
@@ -928,9 +972,10 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredEditorPreferences(),
       getStoredHistoryEnabled(),
       getStoredApiHistoryEnabled(),
+      getStoredMonacoSettings(),
     ]),
   ).pipe(
-    Effect.map(([prefs, historyEnabled, apiHistoryEnabled]) =>
+    Effect.map(([prefs, historyEnabled, apiHistoryEnabled, monacoSettings]) =>
       Message.CompletedLoadEditorPreferences({
         isMaximized: prefs.isMaximized,
         llmBarMode: prefs.llmBarMode,
@@ -939,6 +984,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         editorSplitPercent: prefs.editorSplitPercent,
         historyEnabled,
         apiHistoryEnabled,
+        monacoSettings,
       }),
     ),
   ),
@@ -1937,6 +1983,11 @@ export const init = (
         llmTestState: LlmTestState.Idle(),
         historyEnabled: true,
         apiHistoryEnabled: true,
+        editorLineNumbers: defaultMonacoSettings.lineNumbers,
+        editorFolding: defaultMonacoSettings.folding,
+        editorWordWrap: defaultMonacoSettings.wordWrap,
+        editorScrollBeyondLastLine: defaultMonacoSettings.scrollBeyondLastLine,
+        editorTheme: defaultMonacoSettings.theme,
         clearAllHistoryState: ClearAllHistoryState.Idle(),
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -2005,6 +2056,11 @@ export const init = (
       llmTestState: LlmTestState.Idle(),
       historyEnabled: true,
       apiHistoryEnabled: true,
+      editorLineNumbers: defaultMonacoSettings.lineNumbers,
+      editorFolding: defaultMonacoSettings.folding,
+      editorWordWrap: defaultMonacoSettings.wordWrap,
+      editorScrollBeyondLastLine: defaultMonacoSettings.scrollBeyondLastLine,
+      editorTheme: defaultMonacoSettings.theme,
       clearAllHistoryState: ClearAllHistoryState.Idle(),
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -3022,6 +3078,7 @@ export const update = (
 
     ClickedCloseSettingsDialog: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
+      const isModalOpen = model.modalState._tag !== "Closed"
       return {
         model: modifyFields(model, {
           isSettingsDialogOpen: () => false,
@@ -3029,7 +3086,7 @@ export const update = (
           llmTestState: () => LlmTestState.Idle(),
           clearAllHistoryState: () => ClearAllHistoryState.Idle(),
         }),
-        commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })],
+        ...(isModalOpen ? {} : { commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })] }),
       }
     },
 
@@ -3098,8 +3155,103 @@ export const update = (
       model,
     }),
 
+    ToggledSettingsEditorLineNumbers: ({ isEnabled }) => {
+      const nextModel = modifyFields(model, {
+        editorLineNumbers: () => isEnabled,
+      })
+      return {
+        model: nextModel,
+        commands: [
+          SaveMonacoSettings({
+            lineNumbers: nextModel.editorLineNumbers,
+            folding: nextModel.editorFolding,
+            wordWrap: nextModel.editorWordWrap,
+            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
+            theme: nextModel.editorTheme,
+          }),
+        ],
+      }
+    },
+
+    ToggledSettingsEditorFolding: ({ isEnabled }) => {
+      const nextModel = modifyFields(model, {
+        editorFolding: () => isEnabled,
+      })
+      return {
+        model: nextModel,
+        commands: [
+          SaveMonacoSettings({
+            lineNumbers: nextModel.editorLineNumbers,
+            folding: nextModel.editorFolding,
+            wordWrap: nextModel.editorWordWrap,
+            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
+            theme: nextModel.editorTheme,
+          }),
+        ],
+      }
+    },
+
+    ToggledSettingsEditorWordWrap: ({ isEnabled }) => {
+      const nextModel = modifyFields(model, {
+        editorWordWrap: () => isEnabled,
+      })
+      return {
+        model: nextModel,
+        commands: [
+          SaveMonacoSettings({
+            lineNumbers: nextModel.editorLineNumbers,
+            folding: nextModel.editorFolding,
+            wordWrap: nextModel.editorWordWrap,
+            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
+            theme: nextModel.editorTheme,
+          }),
+        ],
+      }
+    },
+
+    ToggledSettingsEditorScrollBeyondLastLine: ({ isEnabled }) => {
+      const nextModel = modifyFields(model, {
+        editorScrollBeyondLastLine: () => isEnabled,
+      })
+      return {
+        model: nextModel,
+        commands: [
+          SaveMonacoSettings({
+            lineNumbers: nextModel.editorLineNumbers,
+            folding: nextModel.editorFolding,
+            wordWrap: nextModel.editorWordWrap,
+            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
+            theme: nextModel.editorTheme,
+          }),
+        ],
+      }
+    },
+
+    SelectedSettingsEditorTheme: ({ theme }) => {
+      const nextModel = modifyFields(model, {
+        editorTheme: () => theme,
+      })
+      return {
+        model: nextModel,
+        commands: [
+          SaveMonacoSettings({
+            lineNumbers: nextModel.editorLineNumbers,
+            folding: nextModel.editorFolding,
+            wordWrap: nextModel.editorWordWrap,
+            scrollBeyondLastLine: nextModel.editorScrollBeyondLastLine,
+            theme: nextModel.editorTheme,
+          }),
+        ],
+      }
+    },
+
+    CompletedSaveMonacoSettings: () => ({
+      model,
+    }),
+
     ClickedSaveSettingsDialog: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
+      const isModalOpen = model.modalState._tag !== "Closed"
       return {
         model: modifyFields(model, {
           isSettingsDialogOpen: () => false,
@@ -3138,7 +3290,7 @@ export const update = (
             llmThinkingLevel: model.llmDraftThinkingLevel,
             editorSplitPercent: model.editorSplitPercent,
           }),
-          ReplaceUrl({ url: buildFolderUrl(subPath) }),
+          ...(isModalOpen ? [] : [ReplaceUrl({ url: buildFolderUrl(subPath) })]),
         ],
       }
     },
@@ -3377,6 +3529,7 @@ export const update = (
       editorSplitPercent,
       historyEnabled,
       apiHistoryEnabled,
+      monacoSettings,
     }) => ({
       model: modifyFields(model, {
         editorIsMaximized: () => isMaximized,
@@ -3384,6 +3537,12 @@ export const update = (
         editorSplitPercent: () => editorSplitPercent,
         historyEnabled: () => historyEnabled ?? model.historyEnabled,
         apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
+        editorLineNumbers: () => monacoSettings?.lineNumbers ?? model.editorLineNumbers,
+        editorFolding: () => monacoSettings?.folding ?? model.editorFolding,
+        editorWordWrap: () => monacoSettings?.wordWrap ?? model.editorWordWrap,
+        editorScrollBeyondLastLine: () =>
+          monacoSettings?.scrollBeyondLastLine ?? model.editorScrollBeyondLastLine,
+        editorTheme: () => monacoSettings?.theme ?? model.editorTheme,
         llmModel: (current) => (current === "" ? llmModel : current),
         llmDraftModel: (current) => (current === "" ? llmModel : current),
         llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
@@ -4040,6 +4199,15 @@ export const update = (
               editorSplitPercent,
             }),
           ],
+        }),
+
+        RequestedSettings: () => ({
+          model: openSettingsDialogModel(
+            modifyFields(model, {
+              modalState: () => modalResult.model,
+            }),
+          ),
+          commands: mappedCommands,
         }),
       })
     },
@@ -5132,6 +5300,129 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                     ],
                   ),
                   h.section(
+                    [h.Class("settings-group"), h.Id("settings-group-editor")],
+                    [
+                      h.h4([h.Class("settings-group-title")], ["Editor"]),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-editor-line-numbers"),
+                                h.Checked(model.editorLineNumbers),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsEditorLineNumbers({
+                                    isEnabled: !model.editorLineNumbers,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Zeilennummern anzeigen"]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-editor-folding"),
+                                h.Checked(model.editorFolding),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsEditorFolding({
+                                    isEnabled: !model.editorFolding,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Folds anzeigen"]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-editor-word-wrap"),
+                                h.Checked(model.editorWordWrap),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsEditorWordWrap({
+                                    isEnabled: !model.editorWordWrap,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Zeilen umbrechen"]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-editor-scroll-beyond-last-line"),
+                                h.Checked(model.editorScrollBeyondLastLine),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsEditorScrollBeyondLastLine({
+                                    isEnabled: !model.editorScrollBeyondLastLine,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], ["Über letzte Zeile hinaus scrollen"]),
+                            ],
+                          ),
+                          h.p(
+                            [h.Class("form-hint")],
+                            [
+                              "Ermöglicht das Hochscrollen, sodass die letzte Zeile ganz oben stehen kann.",
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label([h.For("settings-editor-theme")], ["Theme"]),
+                          h.select(
+                            [
+                              h.Id("settings-editor-theme"),
+                              h.Class("form-input"),
+                              h.Value(model.editorTheme),
+                              h.OnChange((value) =>
+                                Message.SelectedSettingsEditorTheme({
+                                  theme: Schema.is(MonacoThemeSchema)(value)
+                                    ? (value as MonacoTheme)
+                                    : "system",
+                                }),
+                              ),
+                            ],
+                            [
+                              h.option([h.Value("system")], ["System (Automatisch)"]),
+                              h.option([h.Value("vs")], ["Hell"]),
+                              h.option([h.Value("vs-dark")], ["Dunkel"]),
+                              h.option([h.Value("hc-black")], ["Hoher Kontrast (Dunkel)"]),
+                              h.option([h.Value("hc-light")], ["Hoher Kontrast (Hell)"]),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  h.section(
                     [h.Class("settings-group"), h.Id("settings-group-llm")],
                     [
                       h.h4([h.Class("settings-group-title")], ["KI"]),
@@ -6083,6 +6374,13 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
         llmSelectedModel,
         llmThinkingLevels,
         llmSelectedThinkingLevel: model.llmThinkingLevel,
+        monacoSettings: {
+          lineNumbers: model.editorLineNumbers,
+          folding: model.editorFolding,
+          wordWrap: model.editorWordWrap,
+          scrollBeyondLastLine: model.editorScrollBeyondLastLine,
+          theme: model.editorTheme,
+        },
       },
     },
     view: Modal.view,
