@@ -1,5 +1,6 @@
 import { Array } from "effect"
 import type { HtmlBuilder } from "foldkit/html"
+import { viewIcon } from "./icons"
 import { viewMarkdown } from "./markdown"
 
 export type LlmToolDetail = {
@@ -53,6 +54,25 @@ const viewMarkdownToggleButton = <Message>(
       )
     : h.empty
 
+const viewHeaderCopyButton = <Message>(
+  text: string,
+  onCopy: ((text: string) => Message) | undefined,
+  label: string,
+  h: HtmlBuilder<Message>,
+) =>
+  onCopy !== undefined
+    ? h.button(
+        [
+          h.Type("button"),
+          h.Class("llm-markdown-toggle-btn"),
+          h.AriaLabel(label),
+          h.DataAttribute("tip", label),
+          h.OnClick(onCopy(text)),
+        ],
+        [viewIcon("clipboard", h)],
+      )
+    : h.empty
+
 export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<Message>) => {
   const toolDetails = props.toolDetails ?? []
   const hasToolDetails = Array.isReadonlyArrayNonEmpty(toolDetails)
@@ -80,11 +100,22 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                     [h.Class("llm-response-label")],
                     [props.isStreaming && !hasContent ? "Thinking …" : "Thinking"],
                   ),
-                  viewMarkdownToggleButton(
-                    isThinkingMarkdown,
-                    props.onToggleThinkingMarkdown,
-                    "Thinking-Markdown umschalten",
-                    h,
+                  h.div(
+                    [h.Class("llm-response-section-actions")],
+                    [
+                      viewHeaderCopyButton(
+                        props.reasoning,
+                        props.onCopyCode,
+                        "Thinking kopieren",
+                        h,
+                      ),
+                      viewMarkdownToggleButton(
+                        isThinkingMarkdown,
+                        props.onToggleThinkingMarkdown,
+                        "Thinking-Markdown umschalten",
+                        h,
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -107,11 +138,22 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                     [h.Class("llm-response-section-header")],
                     [
                       h.span([h.Class("llm-response-label")], ["Antwort"]),
-                      viewMarkdownToggleButton(
-                        isContentMarkdown,
-                        props.onToggleContentMarkdown,
-                        "Antwort-Markdown umschalten",
-                        h,
+                      h.div(
+                        [h.Class("llm-response-section-actions")],
+                        [
+                          viewHeaderCopyButton(
+                            displayContent,
+                            props.onCopyCode,
+                            "Antwort kopieren",
+                            h,
+                          ),
+                          viewMarkdownToggleButton(
+                            isContentMarkdown,
+                            props.onToggleContentMarkdown,
+                            "Antwort-Markdown umschalten",
+                            h,
+                          ),
+                        ],
                       ),
                     ],
                   )

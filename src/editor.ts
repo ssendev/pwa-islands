@@ -4332,15 +4332,30 @@ const viewLlmChatHistory = (
               [h.Class("llm-response-section-header modal-llm-chat-user-header")],
               [
                 h.span([h.Class("modal-llm-chat-role")], [userName]),
-                h.button(
+                h.div(
+                  [h.Class("llm-response-section-actions")],
                   [
-                    h.Type("button"),
-                    h.Class("llm-markdown-toggle-btn"),
-                    h.AriaPressed(isUserMarkdown ? "true" : "false"),
-                    h.AriaLabel("Nutzer-Markdown umschalten"),
-                    h.OnClick(Message.ToggledLlmUserMarkdown()),
+                    h.button(
+                      [
+                        h.Type("button"),
+                        h.Class("llm-markdown-toggle-btn"),
+                        h.AriaLabel("Nachricht kopieren"),
+                        h.DataAttribute("tip", "Nachricht kopieren"),
+                        h.OnClick(onCopyCode(content)),
+                      ],
+                      [viewIcon("clipboard", h)],
+                    ),
+                    h.button(
+                      [
+                        h.Type("button"),
+                        h.Class("llm-markdown-toggle-btn"),
+                        h.AriaPressed(isUserMarkdown ? "true" : "false"),
+                        h.AriaLabel("Nutzer-Markdown umschalten"),
+                        h.OnClick(Message.ToggledLlmUserMarkdown()),
+                      ],
+                      [isUserMarkdown ? "md" : "txt"],
+                    ),
                   ],
-                  [isUserMarkdown ? "md" : "txt"],
                 ),
               ],
             ),
