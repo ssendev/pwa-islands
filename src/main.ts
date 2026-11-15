@@ -2379,6 +2379,24 @@ const maybeLoadEditorLlmModels = (
   }
 }
 
+const mapLoadedEntries = (
+  storageState: StorageState,
+  transform: (entries: ReadonlyArray<FileEntry>) => ReadonlyArray<FileEntry>,
+): StorageState =>
+  Match.value(storageState).pipe(
+    Match.tag("Ready", (readyState) =>
+      EntriesState.match(readyState.entriesState, {
+        Loading: () => readyState,
+        Error: () => readyState,
+        Loaded: ({ entries }) =>
+          modifyFields(readyState, {
+            entriesState: () => EntriesState.Loaded({ entries: transform(entries) }),
+          }),
+      }),
+    ),
+    Match.orElse(() => storageState),
+  )
+
 export const update = (
   model: Model,
   message: Message,
@@ -3037,6 +3055,13 @@ export const update = (
     SucceededClearAllHistory: () => ({
       model: modifyFields(model, {
         clearAllHistoryState: () => ClearAllHistoryState.Done(),
+        storageState: (storageState) =>
+          mapLoadedEntries(storageState, (entries) =>
+            Array.map(
+              Array.filter(entries, (entry) => entry.isDeleted !== true),
+              (entry) => ({ ...entry, hasHistory: false }),
+            ),
+          ),
       }),
     }),
 
@@ -3894,6 +3919,23 @@ export const update = (
             commands,
           }
         },
+
+        FileHistoryCleared: ({ fileName }) => ({
+          model: modifyFields(model, {
+            modalState: () => modalResult.model,
+            storageState: (storageState) =>
+              mapLoadedEntries(storageState, (entries) =>
+                Array.map(
+                  Array.filter(
+                    entries,
+                    (entry) => !(entry.name === fileName && entry.isDeleted === true),
+                  ),
+                  (entry) => (entry.name === fileName ? { ...entry, hasHistory: false } : entry),
+                ),
+              ),
+          }),
+          commands: mappedCommands,
+        }),
 
         ShowAlert: ({ banner, replaceUrl: shouldReplaceUrl }) => {
           const toastResult = enqueueToast(

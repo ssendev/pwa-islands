@@ -662,6 +662,9 @@ export const OutMessage = defineTaggedUnion({
     maybeAlertBanner: Schema.Option(AlertBanner),
     replaceUrl: Schema.Boolean,
   },
+  FileHistoryCleared: {
+    fileName: Schema.String,
+  },
   ShowAlert: {
     banner: AlertBanner,
     replaceUrl: Schema.Boolean,
@@ -906,6 +909,11 @@ export const update = (
                 maybeAlertBanner,
                 replaceUrl: closeModal,
               }),
+            }),
+            FileHistoryCleared: ({ fileName }) => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.FileHistoryCleared({ fileName }),
             }),
             ShowAlert: ({ banner, closeModal, replaceUrl }) => ({
               model: closeModal

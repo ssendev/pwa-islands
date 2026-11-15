@@ -2080,6 +2080,15 @@ describe("PWA Islands Scene Tests", () => {
       click(selector("#editor-preview-close")),
       sceneExpect(selector("#editor-preview-overlay")).toBeAbsent(),
       sceneExpect(selector("#editor-history-overlay")).toExist(),
+      sceneExpect(selector('.btn-entry-history[data-entry="gone.html"]')).toExist(),
+      click(selector("#editor-history-delete-latest-btn")),
+      click(selector("#editor-history-delete-latest-confirm-btn")),
+      Command.resolve(
+        Editor.DeleteLatestFileHistoryEntry,
+        Editor.Message.SucceededDeleteLatestHistoryEntry(),
+      ),
+      sceneExpect(selector('.btn-entry-history[data-entry="gone.html"]')).toBeAbsent(),
+      sceneExpect(selector('.btn-edit-entry[data-entry="gone.html"]')).toBeAbsent(),
     )
   })
 })

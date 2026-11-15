@@ -939,6 +939,9 @@ export const OutMessage = defineTaggedUnion({
     closeModal: Schema.Boolean,
     maybeAlertBanner: Schema.Option(AlertBanner),
   },
+  FileHistoryCleared: {
+    fileName: Schema.String,
+  },
   ShowAlert: {
     banner: AlertBanner,
     closeModal: Schema.Boolean,
@@ -3530,7 +3533,9 @@ export const update = (
               maybePreviewContent: Option.none(),
             }),
         }),
-        outMessage: OutMessage.None(),
+        outMessage: OutMessage.FileHistoryCleared({
+          fileName: model.originalName,
+        }),
       }
     },
 
@@ -3625,7 +3630,12 @@ export const update = (
               maybePreviewContent: Option.none(),
             }),
         }),
-        outMessage: OutMessage.None(),
+        outMessage:
+          nextEntries.length === 0
+            ? OutMessage.FileHistoryCleared({
+                fileName: model.originalName,
+              })
+            : OutMessage.None(),
       }
     },
 
