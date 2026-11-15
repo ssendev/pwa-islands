@@ -4547,7 +4547,6 @@ const viewLlmChatBar = (
                 h.Placeholder("Nachricht an die KI …"),
                 h.AriaLabel("Nachricht an die KI"),
                 h.Autocomplete("off"),
-                h.Disabled(isSending),
                 h.Value(llmChatInput),
                 h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
                 h.OnKeyDownPreventDefault((key, modifiers) =>
