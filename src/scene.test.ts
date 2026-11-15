@@ -1981,6 +1981,7 @@ describe("PWA Islands Scene Tests", () => {
           isHistoryEnabled: true,
           hasHistoryEntries: true,
           isHistoryOnly: true,
+          isDeletedHistory: true,
           isConfirmingDelete: false,
         }),
       }),
@@ -1991,6 +1992,22 @@ describe("PWA Islands Scene Tests", () => {
       given(historyOnlyModel),
       sceneExpect(selector("#editor-history-overlay")).toExist(),
       sceneExpect(selector("#modal-form")).toBeAbsent(),
+      sceneExpect(selector(".editor-history-preview-btn")).toExist(),
+      click(selector(".editor-history-preview-btn")),
+      Command.resolve(
+        Editor.LoadHistoryPreviewAt,
+        Editor.Message.SucceededLoadHistoryPreviewAt({
+          maybeContent: Option.some("<h1>Gelöschte Vorschau</h1>"),
+        }),
+      ),
+      sceneExpect(selector("#editor-preview-overlay")).toExist(),
+      sceneExpect(selector("#editor-preview-iframe")).toHaveAttr(
+        "srcdoc",
+        "<h1>Gelöschte Vorschau</h1>",
+      ),
+      click(selector("#editor-preview-close")),
+      sceneExpect(selector("#editor-preview-overlay")).toBeAbsent(),
+      sceneExpect(selector("#editor-history-overlay")).toExist(),
     )
   })
 })

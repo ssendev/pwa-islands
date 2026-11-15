@@ -43,6 +43,7 @@ import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { monacoEditorElement, triggerMonacoHistoryAction } from "./monaco-element"
 import { buildEditUrl, buildNewUrl } from "./route"
+import { checkTextBytes } from "./storage"
 import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
   clampEditorSplitPercent,
@@ -214,6 +215,7 @@ export const Model = defineTaggedUnion({
     isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
     isHistoryOnly: Schema.optionalKey(Schema.Boolean),
+    isDeletedHistory: Schema.optionalKey(Schema.Boolean),
     isConfirmingDelete: Schema.Boolean,
   },
   ConfirmOverwrite: {
@@ -1625,13 +1627,24 @@ export const LoadHistoryPreviewAt = Command.define("LoadHistoryPreviewAt", {
   execute: (args) =>
     Effect.tryPromise({
       try: async () => {
-        const maybeRecord = await loadFileHistoryEntryAt(
+        const maybeRecord = await loadFileHistoryBytesAt(
           args.subPath,
           args.fileName,
           args.endOffset,
         )
+        if (Option.isNone(maybeRecord)) {
+          return Message.SucceededLoadHistoryPreviewAt({
+            maybeContent: Option.none(),
+          })
+        }
+        const check = checkTextBytes(maybeRecord.value.bytes)
+        if (check.kind === "binary") {
+          return Message.FailedLoadHistoryPreviewAt({
+            message: "Für Binärdateien ist keine Vorschau verfügbar.",
+          })
+        }
         return Message.SucceededLoadHistoryPreviewAt({
-          maybeContent: Option.map(maybeRecord, (record) => record.content),
+          maybeContent: Option.some(check.kind === "text" ? check.text : ""),
         })
       },
       catch: (error) => (error instanceof Error ? error : new Error(String(error))),
@@ -3306,7 +3319,10 @@ export const update = (
     },
 
     ClickedPreviewHistoryEntry: ({ endOffset }) => {
-      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+      if (
+        model._tag !== "EditFile" ||
+        (model.fileMode._tag !== "Text" && model.isDeletedHistory !== true)
+      ) {
         return { model, outMessage: OutMessage.None() }
       }
       return {
@@ -5129,8 +5145,10 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         canRedo,
         historyState,
         isHistoryOnly,
+        isDeletedHistory,
         isConfirmingDelete,
       }) => {
+        const isBinaryHistory = fileMode._tag === "Binary" && isDeletedHistory !== true
         if (isHistoryOnly) {
           return h.div(
             [h.Class("editor-modal-host")],
@@ -5140,7 +5158,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 fileMode._tag === "Text"
                   ? Option.some(hashAndMeasureHistoryContent(fileMode.content))
                   : Option.none(),
-                fileMode._tag === "Binary",
+                isBinaryHistory,
                 h,
               ),
               historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
@@ -5197,7 +5215,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               fileMode._tag === "Text"
                 ? Option.some(hashAndMeasureHistoryContent(fileMode.content))
                 : Option.none(),
-              fileMode._tag === "Binary",
+              isBinaryHistory,
               h,
             ),
             historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
