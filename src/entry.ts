@@ -15,6 +15,11 @@ import {
 import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
 import { initMarkdown } from "./markdown"
 import { registerMonacoEditorElement } from "./monaco-element"
+import type { AlertBanner } from "./toast"
+
+const dispatchServiceWorkerToast = (banner: AlertBanner) => {
+  window.dispatchEvent(new CustomEvent("pwaislands:sw-toast", { detail: banner }))
+}
 
 registerMonacoEditorElement()
 
@@ -48,19 +53,6 @@ if (supportsTauri()) {
       }
     })
   }
-} else {
-  registerSW({
-    immediate: true,
-    onNeedReload() {
-      console.log("PWA: onNeedReload - Service Worker aktualisiert")
-    },
-    onOfflineReady() {
-      console.log("PWA: onOfflineReady - App ist bereit für die Offline-Nutzung")
-    },
-    onRegisterError(error) {
-      console.error("PWA: onRegisterError - Fehler bei der Service-Worker-Registrierung:", error)
-    },
-  })
 }
 
 const container = document.getElementById("app")
@@ -97,6 +89,38 @@ void initMarkdown()
         origin: window.location.origin,
       })),
     })
+
+    if (!supportsTauri()) {
+      registerSW({
+        immediate: true,
+        onNeedReload() {
+          dispatchServiceWorkerToast({
+            message: "Update bereit – bitte Seite neu laden.",
+            variant: "info",
+          })
+        },
+        onOfflineReady() {
+          dispatchServiceWorkerToast({
+            message: "App ist bereit für die Offline-Nutzung.",
+            variant: "info",
+          })
+        },
+        onRegisterError(error) {
+          console.error(
+            "PWA: onRegisterError - Fehler bei der Service-Worker-Registrierung:",
+            error,
+          )
+          const detail =
+            error instanceof Error ? error.message : typeof error === "string" ? error : ""
+          dispatchServiceWorkerToast({
+            message: detail
+              ? `Fehler bei der Service-Worker-Registrierung: ${detail}`
+              : "Fehler bei der Service-Worker-Registrierung.",
+            variant: "danger",
+          })
+        },
+      })
+    }
   })
 
 if (supportsTauri()) {

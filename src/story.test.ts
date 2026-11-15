@@ -1643,6 +1643,52 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
+    it("shows service worker messages as persistent global toasts without auto-dismiss", () => {
+      story(
+        update,
+        given(readyModel),
+        message(
+          Message.ReceivedServiceWorkerToast({
+            banner: {
+              message: "App ist bereit für die Offline-Nutzung.",
+              variant: "info",
+            },
+          }),
+        ),
+        model((m) => {
+          expect(m.toasts).toEqual([
+            {
+              id: 1,
+              message: "App ist bereit für die Offline-Nutzung.",
+              variant: "info",
+            },
+          ])
+        }),
+        message(
+          Message.ReceivedServiceWorkerToast({
+            banner: {
+              message: "Fehler bei der Service-Worker-Registrierung.",
+              variant: "danger",
+            },
+          }),
+        ),
+        model((m) => {
+          expect(m.toasts).toEqual([
+            {
+              id: 1,
+              message: "App ist bereit für die Offline-Nutzung.",
+              variant: "info",
+            },
+            {
+              id: 2,
+              message: "Fehler bei der Service-Worker-Registrierung.",
+              variant: "danger",
+            },
+          ])
+        }),
+      )
+    })
+
     it("handles import collision conflict flow and resolution", () => {
       story(
         update,

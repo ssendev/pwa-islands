@@ -528,6 +528,9 @@ export const Message = defineMessageUnion({
   ChangedWindowFullscreen: {
     isFullscreen: Schema.Boolean,
   },
+  ReceivedServiceWorkerToast: {
+    banner: AlertBanner,
+  },
   CompletedResolveIslandBackNavigation: {
     targetUrl: Schema.String,
     isIsland: Schema.Boolean,
@@ -2288,6 +2291,7 @@ const syncOpenEditor = (
 const enqueueToast = (
   model: Model,
   banner: AlertBanner,
+  options?: { readonly autoDismiss?: boolean },
 ): {
   readonly model: Model
   readonly commands?: ReadonlyArray<Command.Command<Message>>
@@ -2324,7 +2328,8 @@ const enqueueToast = (
     toasts: (toasts) => [...toasts, toast],
     nextToastId: (id) => id + 1,
   })
-  if (banner.variant === "info") {
+  const shouldAutoDismiss = options?.autoDismiss ?? banner.variant === "info"
+  if (shouldAutoDismiss) {
     return {
       model: nextModel,
       commands: [WaitBeforeDismissToast({ id: toastId })],
@@ -2999,6 +3004,8 @@ export const update = (
         isWindowFullscreen: () => isFullscreen,
       }),
     }),
+
+    ReceivedServiceWorkerToast: ({ banner }) => enqueueToast(model, banner, { autoDismiss: false }),
 
     CompletedResolveIslandBackNavigation: ({ targetUrl, isIsland, subPath, shouldNavigate }) => {
       if (!shouldNavigate) {
@@ -5159,6 +5166,19 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
       mapEvent: (event) =>
         Message.ChangedWindowFullscreen({
           isFullscreen: Boolean(event.detail),
+        }),
+    }),
+  ),
+
+  serviceWorkerToast: Subscription.persistentEntry(
+    Dom.streamFromEvent({
+      target: window as Dom.TypedEventTarget<{
+        "pwaislands:sw-toast": CustomEvent<AlertBanner>
+      }>,
+      type: "pwaislands:sw-toast",
+      mapEvent: (event) =>
+        Message.ReceivedServiceWorkerToast({
+          banner: event.detail,
         }),
     }),
   ),
