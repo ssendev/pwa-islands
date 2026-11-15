@@ -2737,11 +2737,11 @@ describe("PWA Islands Story Tests", () => {
   })
 
   describe("Einstellungen-URL", () => {
-    it("öffnet den Einstellungsdialog beim Start über ?pwaislands=settings und ?pwaislands=einstellungen", () => {
+    it("öffnet den Einstellungsdialog beim Start nur über die kanonische URL ?pwaislands=settings", () => {
       const settingsUrl = Option.getOrThrow(
         fromString("http://localhost:5173/?pwaislands=settings"),
       )
-      const einstellungenUrl = Option.getOrThrow(
+      const nonCanonicalUrl = Option.getOrThrow(
         fromString("http://localhost:5173/unterordner?pwaislands=einstellungen"),
       )
 
@@ -2756,16 +2756,16 @@ describe("PWA Islands Story Tests", () => {
       )
       expect(initFromSettings.model.isSettingsDialogOpen).toBe(true)
 
-      const initFromGermanSettings = init(
+      const initFromNonCanonical = init(
         {
           hasDirectoryPicker: true,
           hasOPFS: true,
           hasTauri: false,
           origin: "http://localhost:5173",
         },
-        einstellungenUrl,
+        nonCanonicalUrl,
       )
-      expect(initFromGermanSettings.model.isSettingsDialogOpen).toBe(true)
+      expect(initFromNonCanonical.model.isSettingsDialogOpen).toBe(false)
     })
 
     it("synchronisiert URL beim Öffnen, Schließen, Escape und Browser-Verlauf in Unterordnern", () => {

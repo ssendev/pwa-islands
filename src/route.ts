@@ -102,17 +102,16 @@ export const parseHelpParam = (
 const parseHelpValue = (
   raw: string,
 ): Option.Option<{ readonly maybeTopic: Option.Option<HelpTopic> }> => {
-  const normalized = raw.trim().toLowerCase()
-  if (normalized === "help" || normalized === "h" || normalized === "hilfe") {
+  if (raw === "help") {
     return Option.some({ maybeTopic: Option.none() })
   }
-  if (normalized === "help-quickstart" || normalized === "hilfe-quickstart") {
+  if (raw === "help-quickstart") {
     return Option.some({ maybeTopic: Option.some("quickstart" as const) })
   }
-  if (normalized === "help-api" || normalized === "hilfe-api") {
+  if (raw === "help-api") {
     return Option.some({ maybeTopic: Option.some("api" as const) })
   }
-  if (normalized === "help-fs" || normalized === "hilfe-fs") {
+  if (raw === "help-fs") {
     return Option.some({ maybeTopic: Option.some("fs" as const) })
   }
   return Option.none()
@@ -126,14 +125,13 @@ export const parseNewActionParam = (
 const parseNewActionValue = (
   raw: string,
 ): Option.Option<{ readonly target: NewTarget; readonly isPreview: boolean }> => {
-  const normalized = raw.trim().toLowerCase()
-  if (normalized === "new" || normalized === "neu" || normalized === "new-file") {
+  if (raw === "new") {
     return Option.some({ target: "file" as const, isPreview: false })
   }
-  if (normalized === "new-preview") {
+  if (raw === "new-preview") {
     return Option.some({ target: "file" as const, isPreview: true })
   }
-  if (normalized === "new-folder" || normalized === "neuer-ordner") {
+  if (raw === "new-folder") {
     return Option.some({ target: "folder" as const, isPreview: false })
   }
   return Option.none()
@@ -234,16 +232,10 @@ export const parseEditActionParam = (
 ): Option.Option<{ readonly isPreview: boolean }> => Option.flatMap(maybeRaw, parseEditActionValue)
 
 const parseEditActionValue = (raw: string): Option.Option<{ readonly isPreview: boolean }> => {
-  const normalized = raw.trim().toLowerCase()
-  if (
-    normalized === "edit" ||
-    normalized === "e" ||
-    normalized === "bearbeiten" ||
-    normalized === "true"
-  ) {
+  if (raw === "edit") {
     return Option.some({ isPreview: false })
   }
-  if (normalized === "edit-preview") {
+  if (raw === "edit-preview") {
     return Option.some({ isPreview: true })
   }
   return Option.none()
@@ -253,13 +245,7 @@ export const isEditActionParam = (maybeRaw: Option.Option<string>): boolean =>
   Option.isSome(parseEditActionParam(maybeRaw))
 
 export const isHistoryActionParam = (maybeRaw: Option.Option<string>): boolean =>
-  Option.exists(maybeRaw, (raw) => {
-    const normalized = raw.trim().toLowerCase()
-    return normalized === "history" || normalized === "verlauf"
-  })
+  Option.exists(maybeRaw, (raw) => raw === "history")
 
 export const isSettingsActionParam = (maybeRaw: Option.Option<string>): boolean =>
-  Option.exists(maybeRaw, (raw) => {
-    const normalized = raw.trim().toLowerCase()
-    return normalized === "settings" || normalized === "einstellungen"
-  })
+  Option.exists(maybeRaw, (raw) => raw === "settings")
