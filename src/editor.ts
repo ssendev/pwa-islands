@@ -29,6 +29,7 @@ import {
   applyEditsForFormat,
   formatFencedFileForFormat,
   formatLlmContextForFormat,
+  getEditorToolsForFormat,
 } from "./edit-format"
 import { formatUpdatedHashlines } from "./hashline"
 import {
@@ -4186,6 +4187,7 @@ export type ViewInputs = {
   readonly llmSelectedThinkingLevel: string
   readonly monacoSettings: MonacoSettings
   readonly appTheme: AppTheme
+  readonly llmEditFormat?: EditFormat
   readonly llmChatAiName?: string
   readonly llmChatUserName?: string
 }
@@ -4199,6 +4201,7 @@ const viewLlmChatHistory = (
   isUserMarkdown: boolean,
   aiName: string,
   userName: string,
+  editFormat: EditFormat,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
@@ -4220,6 +4223,7 @@ const viewLlmChatHistory = (
   }
 
   const onCopyCode = (code: string) => Message.ClickedCopyLlmCode({ code })
+  const toolsMarkdown = `\`\`\`json tools\n${JSON.stringify(getEditorToolsForFormat(editFormat), null, 2)}\n\`\`\``
 
   const systemNodes =
     Array.isReadonlyArrayNonEmpty(systemMessages) || Array.isReadonlyArrayNonEmpty(autoUserMessages)
@@ -4247,12 +4251,19 @@ const viewLlmChatHistory = (
                       ],
                     ),
                   ),
+                  h.div(
+                    [h.Class("modal-llm-chat-context-block")],
+                    [
+                      h.span([h.Class("llm-response-label")], ["Tools"]),
+                      viewMarkdown(toolsMarkdown, { onCopyCode, codeblocksOpen: false }, h),
+                    ],
+                  ),
                   ...Array.map(autoUserMessages, (msg) =>
                     h.div(
                       [h.Class("modal-llm-chat-context-block")],
                       [
-                        h.span([h.Class("llm-response-label")], ["Kontext (Auto-Nachricht)"]),
-                        viewUserMarkdown(msg.content, { onCopyCode }, h),
+                        h.span([h.Class("llm-response-label")], ["Kontext"]),
+                        viewUserMarkdown(msg.content, { onCopyCode, codeblocksOpen: false }, h),
                       ],
                     ),
                   ),
@@ -4503,6 +4514,7 @@ const viewLlmChatBar = (
   isUserMarkdown: boolean,
   aiName: string,
   userName: string,
+  editFormat: EditFormat,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
@@ -4519,6 +4531,7 @@ const viewLlmChatBar = (
         isUserMarkdown,
         aiName,
         userName,
+        editFormat,
         h,
       ),
       h.div(
@@ -4859,6 +4872,7 @@ const viewEditorModal = (
                     isLlmUserMarkdown,
                     llmViewInputs.llmChatAiName?.trim() || "KI",
                     llmViewInputs.llmChatUserName?.trim() || "Du",
+                    llmViewInputs.llmEditFormat ?? "hashline",
                     h,
                   )
                 : h.empty,

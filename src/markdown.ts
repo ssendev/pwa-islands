@@ -119,6 +119,7 @@ const simpleTagBuilders = <Message>(
 
 type RenderOptions<Message> = {
   readonly onCopyCode?: (code: string) => Message
+  readonly codeblocksOpen?: boolean
 }
 
 const renderNode = <Message>(
@@ -181,7 +182,7 @@ const renderNode = <Message>(
             )
           : h.empty
       return h.details(
-        [h.Class("llm-markdown-codeblock"), h.Open(true)],
+        [h.Class("llm-markdown-codeblock"), h.Open(opts.codeblocksOpen ?? true)],
         [
           h.summary(
             [h.Class("llm-markdown-codeblock-header")],
@@ -238,6 +239,7 @@ const renderNode = <Message>(
 export type ViewMarkdownOptions<Message> = {
   readonly heal?: boolean
   readonly onCopyCode?: (code: string) => Message
+  readonly codeblocksOpen?: boolean
 }
 
 export const viewMarkdown = <Message>(
@@ -248,7 +250,7 @@ export const viewMarkdown = <Message>(
   try {
     const tree = parseAST(markdown, { heal: opts.heal })
     const nodes = Array.map(tree.nodes, (node) =>
-      renderNode(node, { onCopyCode: opts.onCopyCode }, h),
+      renderNode(node, { onCopyCode: opts.onCopyCode, codeblocksOpen: opts.codeblocksOpen }, h),
     )
     return h.div([h.Class("llm-markdown")], nodes)
   } catch {

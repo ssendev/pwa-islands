@@ -7409,6 +7409,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
         llmSelectedModel,
         llmThinkingLevels,
         llmSelectedThinkingLevel: model.llmThinkingLevel,
+        llmEditFormat: model.llmEditFormat,
         llmChatAiName: model.llmChatAiName,
         llmChatUserName: model.llmChatUserName,
         monacoSettings: {
