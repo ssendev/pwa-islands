@@ -104,9 +104,11 @@ import {
   DEFAULT_EDITOR_SPLIT_PERCENT,
   OPFS_APP_FOLDER,
   getFileExtension,
+  getStoredApiHistoryEnabled,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
   getStoredLlmSettings,
+  storeApiHistoryEnabled,
   storeEditorPreferences,
   storeHistoryEnabled,
   storeLlmSettings,
@@ -364,6 +366,7 @@ export const Model = Schema.Struct({
   llmDraftThinkingLevel: Schema.String,
   llmTestState: LlmTestState,
   historyEnabled: Schema.Boolean,
+  apiHistoryEnabled: Schema.Boolean,
   clearAllHistoryState: ClearAllHistoryState,
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
@@ -526,6 +529,8 @@ export const Message = defineMessageUnion({
   FailedClearAllHistory: { message: Schema.String },
   ToggledSettingsHistoryEnabled: { isEnabled: Schema.Boolean },
   CompletedSaveHistoryEnabledPreference: {},
+  ToggledSettingsApiHistoryEnabled: { isEnabled: Schema.Boolean },
+  CompletedSaveApiHistoryEnabledPreference: {},
   ClickedTestLlm: { mode: LlmTestMode },
   UpdatedTestLlmStream: {
     content: Schema.String,
@@ -571,6 +576,7 @@ export const Message = defineMessageUnion({
     llmThinkingLevel: Schema.String,
     editorSplitPercent: Schema.Number,
     historyEnabled: Schema.optionalKey(Schema.Boolean),
+    apiHistoryEnabled: Schema.optionalKey(Schema.Boolean),
   },
   CompletedSaveEditorPreferences: {},
   SucceededLoadEditorLlmModels: {
@@ -785,6 +791,19 @@ export const SaveHistoryEnabledPreference = Command.define("SaveHistoryEnabledPr
     ),
 })
 
+export const SaveApiHistoryEnabledPreference = Command.define("SaveApiHistoryEnabledPreference", {
+  args: { isEnabled: Schema.Boolean },
+  messages: [Message.CompletedSaveApiHistoryEnabledPreference],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () => storeApiHistoryEnabled(args.isEnabled),
+      catch: () => undefined,
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveApiHistoryEnabledPreference()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveApiHistoryEnabledPreference())),
+    ),
+})
+
 export const ClearAllHistory = Command.define("ClearAllHistory", {
   messages: [Message.SucceededClearAllHistory, Message.FailedClearAllHistory],
   execute: Effect.tryPromise({
@@ -896,9 +915,13 @@ export const SaveLlmSettings = Command.define("SaveLlmSettings", {
 export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
   messages: [Message.CompletedLoadEditorPreferences],
   execute: Effect.promise(() =>
-    Promise.all([getStoredEditorPreferences(), getStoredHistoryEnabled()]),
+    Promise.all([
+      getStoredEditorPreferences(),
+      getStoredHistoryEnabled(),
+      getStoredApiHistoryEnabled(),
+    ]),
   ).pipe(
-    Effect.map(([prefs, historyEnabled]) =>
+    Effect.map(([prefs, historyEnabled, apiHistoryEnabled]) =>
       Message.CompletedLoadEditorPreferences({
         isMaximized: prefs.isMaximized,
         llmBarMode: prefs.llmBarMode,
@@ -906,6 +929,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         llmThinkingLevel: prefs.llmThinkingLevel,
         editorSplitPercent: prefs.editorSplitPercent,
         historyEnabled,
+        apiHistoryEnabled,
       }),
     ),
   ),
@@ -1890,6 +1914,7 @@ export const init = (
         llmDraftThinkingLevel: "",
         llmTestState: LlmTestState.Idle(),
         historyEnabled: true,
+        apiHistoryEnabled: true,
         clearAllHistoryState: ClearAllHistoryState.Idle(),
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -1956,6 +1981,7 @@ export const init = (
       llmDraftThinkingLevel: "",
       llmTestState: LlmTestState.Idle(),
       historyEnabled: true,
+      apiHistoryEnabled: true,
       clearAllHistoryState: ClearAllHistoryState.Idle(),
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
@@ -2914,6 +2940,17 @@ export const update = (
       model,
     }),
 
+    ToggledSettingsApiHistoryEnabled: ({ isEnabled }) => ({
+      model: modifyFields(model, {
+        apiHistoryEnabled: () => isEnabled,
+      }),
+      commands: [SaveApiHistoryEnabledPreference({ isEnabled })],
+    }),
+
+    CompletedSaveApiHistoryEnabledPreference: () => ({
+      model,
+    }),
+
     ClickedSaveSettingsDialog: () => ({
       model: modifyFields(model, {
         isSettingsDialogOpen: () => false,
@@ -3180,12 +3217,14 @@ export const update = (
       llmThinkingLevel,
       editorSplitPercent,
       historyEnabled,
+      apiHistoryEnabled,
     }) => ({
       model: modifyFields(model, {
         editorIsMaximized: () => isMaximized,
         editorLlmBarMode: () => llmBarMode,
         editorSplitPercent: () => editorSplitPercent,
         historyEnabled: () => historyEnabled ?? model.historyEnabled,
+        apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
         llmModel: (current) => (current === "" ? llmModel : current),
         llmDraftModel: (current) => (current === "" ? llmModel : current),
         llmThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
@@ -4796,6 +4835,39 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             ),
                           ]),
                           h.span([], ["Versionen automatisch speichern"]),
+                        ],
+                      ),
+                      h.p(
+                        [h.Class("form-hint")],
+                        [
+                          "Sichert vor jedem Speichern, Überschreiben oder Löschen im Editor bzw. Dateimanager eine Kopie der vorherigen Datei.",
+                        ],
+                      ),
+                    ],
+                  ),
+                  h.div(
+                    [h.Class("form-group")],
+                    [
+                      h.label(
+                        [h.Class("form-check")],
+                        [
+                          h.input([
+                            h.Type("checkbox"),
+                            h.Id("settings-api-history-enabled"),
+                            h.Checked(model.apiHistoryEnabled),
+                            h.OnChange(() =>
+                              Message.ToggledSettingsApiHistoryEnabled({
+                                isEnabled: !model.apiHistoryEnabled,
+                              }),
+                            ),
+                          ]),
+                          h.span([], ["api.js Versionen speichern"]),
+                        ],
+                      ),
+                      h.p(
+                        [h.Class("form-hint")],
+                        [
+                          "Sichert vor jedem Überschreiben, Umbenennen, Kopieren oder Löschen über api.js eine Kopie der bisherigen Daten (auch Binärdateien).",
                         ],
                       ),
                     ],

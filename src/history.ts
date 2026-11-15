@@ -19,6 +19,14 @@ export interface HistoryRecord {
   readonly endOffset: number
 }
 
+export interface HistoryBytesRecord {
+  readonly bytes: Uint8Array
+  readonly timestampMs: number
+  readonly contentHash: number
+  readonly startOffset: number
+  readonly endOffset: number
+}
+
 export interface HistoryEntryMeta {
   readonly offset: number
   readonly endOffset: number
@@ -56,8 +64,10 @@ export const hashHistoryContent = (content: string): number =>
  * Kodiert einen Versions-Eintrag als Binärblock für die Append-Only-Historie:
  * `[UTF-8 Inhalt] [Hash (Uint32 LE, 4 Bytes)] [Zeitstempel (Float64 LE, 8 Bytes)] [Inhaltslänge (Uint32 LE, 4 Bytes)]`.
  */
-export const encodeHistoryRecord = (content: string, timestampMs: number): Uint8Array => {
-  const contentBytes = textEncoder.encode(content)
+export const encodeHistoryBytesRecord = (
+  contentBytes: Uint8Array,
+  timestampMs: number,
+): Uint8Array => {
   const contentHash = hashContentBytes(contentBytes)
   const record = new Uint8Array(contentBytes.byteLength + TRAILER_SIZE_BYTES)
   record.set(contentBytes, 0)
@@ -71,6 +81,9 @@ export const encodeHistoryRecord = (content: string, timestampMs: number): Uint8
   view.setUint32(12, contentBytes.byteLength, true)
   return record
 }
+
+export const encodeHistoryRecord = (content: string, timestampMs: number): Uint8Array =>
+  encodeHistoryBytesRecord(textEncoder.encode(content), timestampMs)
 
 export type SliceReader = (start: number, end: number) => Promise<ArrayBuffer>
 
@@ -112,10 +125,10 @@ export const readHistoryMetaAt = async (
 /**
  * Liest genau einen Eintrag rückwärts ab `endOffset` über die am Ende gespeicherte Länge.
  */
-export const readHistoryRecordAt = async (
+export const readHistoryBytesRecordAt = async (
   readSlice: SliceReader,
   endOffset: number,
-): Promise<Option.Option<HistoryRecord>> => {
+): Promise<Option.Option<HistoryBytesRecord>> => {
   const maybeMeta = await readHistoryMetaAt(readSlice, endOffset)
   if (Option.isNone(maybeMeta)) {
     return Option.none()
@@ -128,12 +141,26 @@ export const readHistoryRecordAt = async (
   }
 
   return Option.some({
-    content: textDecoder.decode(contentBuffer),
+    bytes: new Uint8Array(contentBuffer),
     timestampMs: meta.timestampMs,
     contentHash: meta.contentHash,
     startOffset: meta.offset,
     endOffset,
   })
+}
+
+export const readHistoryRecordAt = async (
+  readSlice: SliceReader,
+  endOffset: number,
+): Promise<Option.Option<HistoryRecord>> => {
+  const maybeRecord = await readHistoryBytesRecordAt(readSlice, endOffset)
+  return Option.map(maybeRecord, (record) => ({
+    content: textDecoder.decode(record.bytes),
+    timestampMs: record.timestampMs,
+    contentHash: record.contentHash,
+    startOffset: record.startOffset,
+    endOffset: record.endOffset,
+  }))
 }
 
 /**
@@ -318,19 +345,27 @@ const getHistoryFileStore = async (
  * Hängt den alten Dateiinhalt inkl. Bearbeitungszeitstempel an die Verlaufsdatei
  * (in Tauri im internen App-Speicher, im Browser im OPFS) an.
  */
-export const appendFileHistory = async (
+export const appendFileHistoryBytes = async (
   subPath: ReadonlyArray<string>,
   fileName: string,
-  oldContent: string,
+  oldBytes: Uint8Array,
   timestampMs: number,
 ): Promise<void> => {
   const maybeStore = await getHistoryFileStore(subPath, fileName, true)
   if (Option.isNone(maybeStore)) {
     return
   }
-  const record = encodeHistoryRecord(oldContent, timestampMs)
+  const record = encodeHistoryBytesRecord(oldBytes, timestampMs)
   await maybeStore.value.append(record)
 }
+
+export const appendFileHistory = async (
+  subPath: ReadonlyArray<string>,
+  fileName: string,
+  oldContent: string,
+  timestampMs: number,
+): Promise<void> =>
+  appendFileHistoryBytes(subPath, fileName, textEncoder.encode(oldContent), timestampMs)
 
 /**
  * Liest genau die nächste ältere Version ab `maybeCursor` (oder ab Dateiende bei `Option.none()`).
@@ -386,6 +421,18 @@ export const loadFileHistoryEntryAt = async (
     return Option.none()
   }
   return readHistoryRecordAt(maybeStore.value.readSlice, endOffset)
+}
+
+export const loadFileHistoryBytesAt = async (
+  subPath: ReadonlyArray<string>,
+  fileName: string,
+  endOffset: number,
+): Promise<Option.Option<HistoryBytesRecord>> => {
+  const maybeStore = await getHistoryFileStore(subPath, fileName, false)
+  if (Option.isNone(maybeStore)) {
+    return Option.none()
+  }
+  return readHistoryBytesRecordAt(maybeStore.value.readSlice, endOffset)
 }
 
 /**

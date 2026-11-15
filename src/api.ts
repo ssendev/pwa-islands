@@ -1,11 +1,13 @@
-import { Array, Option, Order } from "effect"
+import { Array, Clock, Effect, Option, Order } from "effect"
 import { invoke } from "@tauri-apps/api/core"
+import { appendFileHistoryBytes } from "./history"
 import {
   checkTextBytes,
   collectDirectoryHandles,
   copyDirectory,
   findActiveStorage,
   getDirectory,
+  getStoredApiHistoryEnabled,
   getStoredStorageType,
   normalizePath,
   readTextOrThrow,
@@ -58,6 +60,94 @@ function splitEntryPath(path: string): { dirs: ReadonlyArray<string>; name: stri
     dirs: Array.dropRight(parts, 1),
     name: Array.lastNonEmpty(parts),
   }
+}
+
+async function recordTauriPathVersions(cleanPath: string, timestampMs: number): Promise<void> {
+  try {
+    const buffer = await invoke<ArrayBuffer>("tauri_fs_read_file", {
+      subPath: cleanPath,
+    })
+    const { dirs, name } = splitEntryPath(cleanPath)
+    await appendFileHistoryBytes(dirs, name, new Uint8Array(buffer), timestampMs)
+    return
+  } catch {
+    // Kein Dateilesen möglich – prüfe ob es ein Verzeichnis ist
+  }
+  const entries = await invoke<ReadonlyArray<{ readonly name: string }>>("tauri_fs_list_entries", {
+    subPath: cleanPath,
+  })
+  await entries.reduce<Promise<void>>(async (acc, entry) => {
+    await acc
+    await recordTauriPathVersions(`${cleanPath}/${entry.name}`, timestampMs)
+  }, Promise.resolve())
+}
+
+async function recordBrowserPathVersions(cleanPath: string, timestampMs: number): Promise<void> {
+  try {
+    const file = await (await resolveFile(cleanPath)).getFile()
+    const { dirs, name } = splitEntryPath(cleanPath)
+    await appendFileHistoryBytes(dirs, name, new Uint8Array(await file.arrayBuffer()), timestampMs)
+    return
+  } catch {
+    // Keine Datei – prüfe ob es ein Verzeichnis ist
+  }
+  const dir = await resolveDirectory(cleanPath)
+  const handles = await collectDirectoryHandles(dir)
+  await handles.reduce<Promise<void>>(async (acc, handle) => {
+    await acc
+    const childPath = `${cleanPath}/${handle.name}`
+    if (handle.kind === "file") {
+      const file = await handle.getFile()
+      const { dirs, name } = splitEntryPath(childPath)
+      await appendFileHistoryBytes(
+        dirs,
+        name,
+        new Uint8Array(await file.arrayBuffer()),
+        timestampMs,
+      )
+    } else {
+      await recordBrowserPathVersions(childPath, timestampMs)
+    }
+  }, Promise.resolve())
+}
+
+async function recordPreviousApiFileVersion(path: string): Promise<void> {
+  try {
+    if (!(await getStoredApiHistoryEnabled())) {
+      return
+    }
+    const cleanPath = normalizePath(path)
+    if (!cleanPath) {
+      return
+    }
+    const timestampMs = Effect.runSync(Clock.currentTimeMillis)
+    if (await isTauriActive()) {
+      const exists = await invoke<boolean>("tauri_fs_exists", { subPath: cleanPath })
+      if (!exists) {
+        return
+      }
+      await recordTauriPathVersions(cleanPath, timestampMs)
+      return
+    }
+    await recordBrowserPathVersions(cleanPath, timestampMs)
+  } catch {
+    // NOTE: Fehlende Quelldatei oder nicht verfügbares OPFS darf das Schreiben oder Löschen über api.js nicht blockieren
+  }
+}
+
+async function removeEntryInternal(path: string, recursive: boolean): Promise<void> {
+  if (await isTauriActive()) {
+    await invoke("tauri_fs_remove_entry", {
+      subPath: normalizePath(path),
+      isDirectory: recursive,
+    })
+    return
+  }
+
+  const root = await requireRoot()
+  const { dirs, name } = splitEntryPath(path)
+  const dir = await getDirectory(root, dirs)
+  await dir.removeEntry(name, { recursive })
 }
 
 const islandEntryOrder: Order.Order<IslandEntry> = Order.make((a, b) => {
@@ -174,6 +264,10 @@ const api: IslandsApi = {
       throw new Error(`Datei existiert bereits: ${path}`)
     }
 
+    if (overwrite) {
+      await recordPreviousApiFileVersion(path)
+    }
+
     if (await isTauriActive()) {
       let bytes: Uint8Array
       if (typeof content === "string") {
@@ -212,6 +306,7 @@ const api: IslandsApi = {
 
   async rename(from, to) {
     if (await isTauriActive()) {
+      await recordPreviousApiFileVersion(to)
       await invoke("tauri_fs_rename", {
         fromSubPath: normalizePath(from),
         toSubPath: normalizePath(to),
@@ -220,26 +315,17 @@ const api: IslandsApi = {
     }
 
     await api.copy(from, to)
-    await api.remove(from)
+    await removeEntryInternal(from, false)
   },
 
   async remove(path, options) {
     const recursive = options?.recursive ?? false
-    if (await isTauriActive()) {
-      await invoke("tauri_fs_remove_entry", {
-        subPath: normalizePath(path),
-        isDirectory: recursive,
-      })
-      return
-    }
-
-    const root = await requireRoot()
-    const { dirs, name } = splitEntryPath(path)
-    const dir = await getDirectory(root, dirs)
-    await dir.removeEntry(name, { recursive })
+    await recordPreviousApiFileVersion(path)
+    await removeEntryInternal(path, recursive)
   },
 
   async copy(from, to) {
+    await recordPreviousApiFileVersion(to)
     if (await isTauriActive()) {
       await invoke("tauri_fs_copy", {
         fromSubPath: normalizePath(from),

@@ -139,6 +139,7 @@ const readyModel: Model = {
   llmDraftThinkingLevel: "",
   llmTestState: LlmTestState.Idle(),
   historyEnabled: true,
+  apiHistoryEnabled: true,
   clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),

@@ -14,6 +14,7 @@ export const USER_TEMPLATES_KEY = "user_templates"
 export const STORAGE_TYPE_KEY = "selected_storage_type"
 export const FILE_INFO_VISIBLE_KEY = "file_info_visible"
 export const HISTORY_ENABLED_KEY = "history_enabled"
+export const API_HISTORY_ENABLED_KEY = "api_history_enabled"
 export const ISLAND_PARAM = "pwaislands"
 
 // NOTE: OPFS has a single root per origin; files are placed in a subfolder
@@ -166,35 +167,48 @@ export async function storeFileInfoVisible(visible: boolean): Promise<void> {
   })
 }
 
-// NOTE: Defaults to true so version saving is active unless explicitly disabled
-export async function getStoredHistoryEnabled(): Promise<boolean> {
+async function getStoredBooleanFlag(key: string, defaultValue: boolean): Promise<boolean> {
   try {
     const db = await openDB()
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readonly")
       const store = tx.objectStore(STORE_NAME)
-      const req = store.get(HISTORY_ENABLED_KEY)
+      const req = store.get(key)
 
-      req.onsuccess = () => resolve(req.result !== false)
+      req.onsuccess = () => resolve(typeof req.result === "boolean" ? req.result : defaultValue)
       req.onerror = () => reject(req.error)
     })
   } catch (error) {
     console.error("Fehler beim Abrufen der Verlaufs-Einstellung:", error)
-    return true
+    return defaultValue
   }
 }
 
-export async function storeHistoryEnabled(enabled: boolean): Promise<void> {
+async function storeBooleanFlag(key: string, enabled: boolean): Promise<void> {
   const db = await openDB()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
     const store = tx.objectStore(STORE_NAME)
-    const req = store.put(enabled, HISTORY_ENABLED_KEY)
+    const req = store.put(enabled, key)
 
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
   })
 }
+
+// NOTE: Defaults to true so version saving is active unless explicitly disabled
+export const getStoredHistoryEnabled = (): Promise<boolean> =>
+  getStoredBooleanFlag(HISTORY_ENABLED_KEY, true)
+
+export const storeHistoryEnabled = (enabled: boolean): Promise<void> =>
+  storeBooleanFlag(HISTORY_ENABLED_KEY, enabled)
+
+// NOTE: Defaults to true so api.js edits save versions unless explicitly disabled
+export const getStoredApiHistoryEnabled = (): Promise<boolean> =>
+  getStoredBooleanFlag(API_HISTORY_ENABLED_KEY, true)
+
+export const storeApiHistoryEnabled = (enabled: boolean): Promise<void> =>
+  storeBooleanFlag(API_HISTORY_ENABLED_KEY, enabled)
 
 import { emptyLlmSettings, type LlmSettings } from "./agent"
 import { parseEditFormat } from "./edit-format"

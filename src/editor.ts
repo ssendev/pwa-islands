@@ -16,6 +16,7 @@ import {
   PreviewContent,
   arrayBufferToBase64,
   base64ToUint8Array,
+  loadEditorFileModeForEntry,
   requireActiveStorage,
   revokeActivePreviewUrl,
 } from "./files"
@@ -29,8 +30,11 @@ import {
 import { formatUpdatedHashlines } from "./hashline"
 import {
   appendFileHistory,
+  appendFileHistoryBytes,
   clearFileHistory,
   hashAndMeasureHistoryContent,
+  hashContentBytes,
+  loadFileHistoryBytesAt,
   loadFileHistoryEntryAt,
   loadFileHistoryIndex,
   truncateLatestFileHistoryEntry,
@@ -849,6 +853,13 @@ export const Message = defineMessageUnion({
   FailedLoadHistoryEntryAt: {
     message: Schema.String,
   },
+  SucceededRestoreBinaryHistoryEntry: {
+    maybeFileMode: Schema.Option(EditorFileMode),
+    entries: Schema.Array(FileEntry),
+  },
+  FailedRestoreBinaryHistoryEntry: {
+    message: Schema.String,
+  },
   ClickedPreviewHistoryEntry: {
     endOffset: Schema.Number,
   },
@@ -1054,10 +1065,32 @@ const recordPreviousFileVersion = async (
       return
     }
     const buffer = await storage.readFileBuffer(subPath, readFromName)
-    const oldContent = new TextDecoder("utf-8").decode(buffer)
-    await appendFileHistory(subPath, historyTargetName, oldContent, timestampMs)
+    await appendFileHistoryBytes(subPath, historyTargetName, new Uint8Array(buffer), timestampMs)
   } catch {
     // NOTE: Fehlende Quelldatei oder nicht verfügbares OPFS darf das Speichern nicht blockieren
+  }
+}
+
+const recordDirectoryFileVersions = async (
+  storage: ReturnType<typeof requireActiveStorage>,
+  subPath: ReadonlyArray<string>,
+  timestampMs: number,
+): Promise<void> => {
+  try {
+    if (!(await getStoredHistoryEnabled())) {
+      return
+    }
+    const entries = await storage.listEntries(subPath)
+    await entries.reduce<Promise<void>>(async (acc, entry) => {
+      await acc
+      if (entry.kind === "file") {
+        await recordPreviousFileVersion(storage, subPath, entry.name, entry.name, timestampMs)
+      } else {
+        await recordDirectoryFileVersions(storage, [...subPath, entry.name], timestampMs)
+      }
+    }, Promise.resolve())
+  } catch {
+    // NOTE: Nicht verfügbares OPFS darf das Löschen nicht blockieren
   }
 }
 
@@ -1078,6 +1111,7 @@ const executeSaveChanges = async (
         }
       },
       binaryEditing: async (content) => {
+        await recordPreviousFileVersion(storage, subPath, originalName, targetName, timestampMs)
         await storage.writeFileBuffer(subPath, targetName, base64ToUint8Array(content))
         if (originalName !== targetName) {
           await storage.deleteEntry(subPath, originalName, "file")
@@ -1165,17 +1199,36 @@ export const DeleteEntry = Command.define("DeleteEntry", {
   },
   messages: [Message.SucceededDeleteEntry, Message.FailedDeleteEntry],
   execute: (args) =>
-    Effect.tryPromise({
-      try: async () => {
-        const storage = requireActiveStorage()
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((timestampMs) =>
+        Effect.tryPromise({
+          try: async () => {
+            const storage = requireActiveStorage()
 
-        await storage.deleteEntry(args.subPath, args.entryName, args.entryKind)
-        revokeActivePreviewUrl()
-        const updatedEntries = await storage.listEntries(args.subPath)
-        return Message.SucceededDeleteEntry({ entries: updatedEntries })
-      },
-      catch: (error) => (error instanceof Error ? error : new Error(String(error))),
-    }).pipe(
+            if (args.entryKind === "file") {
+              await recordPreviousFileVersion(
+                storage,
+                args.subPath,
+                args.entryName,
+                args.entryName,
+                timestampMs,
+              )
+            } else {
+              await recordDirectoryFileVersions(
+                storage,
+                [...args.subPath, args.entryName],
+                timestampMs,
+              )
+            }
+
+            await storage.deleteEntry(args.subPath, args.entryName, args.entryKind)
+            revokeActivePreviewUrl()
+            const updatedEntries = await storage.listEntries(args.subPath)
+            return Message.SucceededDeleteEntry({ entries: updatedEntries })
+          },
+          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+        }),
+      ),
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedDeleteEntry({
@@ -1456,6 +1509,84 @@ export const LoadHistoryEntryAt = Command.define("LoadHistoryEntryAt", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedLoadHistoryEntryAt({
+            message: `Version konnte nicht geladen werden: ${error.message}`,
+          }),
+        ),
+      ),
+    ),
+})
+
+export const RestoreBinaryHistoryEntryAt = Command.define("RestoreBinaryHistoryEntryAt", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+    endOffset: Schema.Number,
+    saveCurrentIfMissing: Schema.Boolean,
+  },
+  messages: [Message.SucceededRestoreBinaryHistoryEntry, Message.FailedRestoreBinaryHistoryEntry],
+  execute: (args) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((timestampMs) =>
+        Effect.tryPromise({
+          try: async () => {
+            const storage = requireActiveStorage()
+            const maybeRecord = await loadFileHistoryBytesAt(
+              args.subPath,
+              args.fileName,
+              args.endOffset,
+            )
+            if (Option.isNone(maybeRecord)) {
+              const entries = await storage.listEntries(args.subPath)
+              return Message.SucceededRestoreBinaryHistoryEntry({
+                maybeFileMode: Option.none(),
+                entries,
+              })
+            }
+            if (args.saveCurrentIfMissing) {
+              try {
+                const currentBuffer = await storage.readFileBuffer(args.subPath, args.fileName)
+                const currentBytes = new Uint8Array(currentBuffer)
+                const currentHash = hashContentBytes(currentBytes)
+                const existingIndex = await loadFileHistoryIndex(args.subPath, args.fileName)
+                const isAlreadySaved = Array.some(
+                  existingIndex,
+                  (entry) =>
+                    entry.contentHash === currentHash &&
+                    entry.byteLength === currentBytes.byteLength,
+                )
+                if (!isAlreadySaved) {
+                  await appendFileHistoryBytes(
+                    args.subPath,
+                    args.fileName,
+                    currentBytes,
+                    timestampMs,
+                  )
+                }
+              } catch {
+                // NOTE: Nicht verfügbares OPFS darf die Wiederherstellung nicht blockieren
+              }
+            }
+            await storage.writeFileBuffer(
+              args.subPath,
+              args.fileName,
+              new Uint8Array(maybeRecord.value.bytes),
+            )
+            revokeActivePreviewUrl()
+            const [nextFileMode, entries] = await Promise.all([
+              loadEditorFileModeForEntry(storage, args.subPath, args.fileName),
+              storage.listEntries(args.subPath),
+            ])
+            return Message.SucceededRestoreBinaryHistoryEntry({
+              maybeFileMode: Option.some(nextFileMode),
+              entries,
+            })
+          },
+          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+        }),
+      ),
+      Effect.catch((error) =>
+        Effect.succeed(
+          Message.FailedRestoreBinaryHistoryEntry({
             message: `Version konnte nicht geladen werden: ${error.message}`,
           }),
         ),
@@ -2756,8 +2887,7 @@ export const update = (
           model: modifyFields(model, {
             originalName: () => savedName,
             name: () => savedName,
-            hasHistoryEntries: (current) =>
-              model.fileMode._tag === "Text" && model.isHistoryEnabled !== false ? true : current,
+            hasHistoryEntries: (current) => (model.isHistoryEnabled !== false ? true : current),
           }),
           outMessage: OutMessage.EntriesUpdated({
             entries,
@@ -2909,7 +3039,7 @@ export const update = (
     },
 
     ClickedOpenHistory: () => {
-      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+      if (model._tag !== "EditFile") {
         return { model, outMessage: OutMessage.None() }
       }
       return {
@@ -2997,14 +3127,30 @@ export const update = (
     },
 
     ClickedRestoreHistoryEntry: ({ endOffset }) => {
-      if (model._tag !== "EditFile" || model.fileMode._tag !== "Text") {
+      if (model._tag !== "EditFile") {
         return { model, outMessage: OutMessage.None() }
+      }
+      const isHistoryEnabled =
+        model.historyState._tag === "Open" ? model.historyState.isHistoryEnabled : true
+      if (model.fileMode._tag === "Binary") {
+        return {
+          model: modifyFields(model, {
+            historyState: () => HistoryState.Loading(),
+          }),
+          commands: [
+            RestoreBinaryHistoryEntryAt({
+              subPath: context.subPath,
+              fileName: model.originalName,
+              endOffset,
+              saveCurrentIfMissing: isHistoryEnabled,
+            }),
+          ],
+          outMessage: OutMessage.None(),
+        }
       }
       const currentContent = model.fileMode.content
       const { contentHash: currentHash, byteLength: currentByteLength } =
         hashAndMeasureHistoryContent(currentContent)
-      const isHistoryEnabled =
-        model.historyState._tag === "Open" ? model.historyState.isHistoryEnabled : true
       const isCurrentInHistory =
         model.historyState._tag === "Open" &&
         Array.some(
@@ -3057,6 +3203,61 @@ export const update = (
     },
 
     FailedLoadHistoryEntryAt: ({ message: errorMessage }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return {
+        model: modifyFields(model, {
+          historyState: () => HistoryState.Closed(),
+        }),
+        outMessage: OutMessage.ShowAlert({
+          banner: {
+            message: errorMessage,
+            variant: "danger",
+          },
+          closeModal: false,
+          replaceUrl: false,
+        }),
+      }
+    },
+
+    SucceededRestoreBinaryHistoryEntry: ({ maybeFileMode, entries }) => {
+      if (model._tag !== "EditFile") {
+        return { model, outMessage: OutMessage.None() }
+      }
+      return Option.match(maybeFileMode, {
+        onNone: () => ({
+          model: modifyFields(model, {
+            historyState: () => HistoryState.Closed(),
+          }),
+          outMessage: OutMessage.ShowAlert({
+            banner: {
+              message: "Version konnte nicht geladen werden.",
+              variant: "danger",
+            },
+            closeModal: false,
+            replaceUrl: false,
+          }),
+        }),
+        onSome: (nextFileMode) => ({
+          model: modifyFields(model, {
+            fileMode: () => nextFileMode,
+            historyState: () => HistoryState.Closed(),
+            hasHistoryEntries: () => true,
+          }),
+          outMessage: OutMessage.EntriesUpdated({
+            entries,
+            closeModal: false,
+            maybeAlertBanner: Option.some({
+              message: "Version wiederhergestellt.",
+              variant: "info",
+            }),
+          }),
+        }),
+      })
+    },
+
+    FailedRestoreBinaryHistoryEntry: ({ message: errorMessage }) => {
       if (model._tag !== "EditFile") {
         return { model, outMessage: OutMessage.None() }
       }
@@ -4504,13 +4705,16 @@ const formatHistoryHash = (contentHash: number): string =>
 
 const viewHistoryOverlay = (
   historyState: HistoryState,
-  currentContent: string,
+  maybeCurrentVersion: Option.Option<{
+    readonly contentHash: number
+    readonly byteLength: number
+  }>,
+  isBinary: boolean,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   if (historyState._tag === "Closed") {
     return h.empty
   }
-  const currentVersion = hashAndMeasureHistoryContent(currentContent)
 
   return h.div(
     [
@@ -4649,9 +4853,12 @@ const viewHistoryOverlay = (
                           h.ul(
                             [h.Class("editor-history-list")],
                             Array.map(nonEmptyEntries, (entry) => {
-                              const isCurrentVersion =
-                                entry.contentHash === currentVersion.contentHash &&
-                                entry.byteLength === currentVersion.byteLength
+                              const isCurrentVersion = Option.exists(
+                                maybeCurrentVersion,
+                                (currentVersion) =>
+                                  entry.contentHash === currentVersion.contentHash &&
+                                  entry.byteLength === currentVersion.byteLength,
+                              )
                               return h.keyed("li")(
                                 String(entry.offset),
                                 [
@@ -4682,18 +4889,22 @@ const viewHistoryOverlay = (
                                   h.div(
                                     [h.Class("editor-history-actions")],
                                     [
-                                      h.button(
-                                        [
-                                          h.Type("button"),
-                                          h.Class("btn btn-secondary editor-history-preview-btn"),
-                                          h.OnClick(
-                                            Message.ClickedPreviewHistoryEntry({
-                                              endOffset: entry.endOffset,
-                                            }),
-                                          ),
-                                        ],
-                                        ["Vorschau"],
-                                      ),
+                                      !isBinary
+                                        ? h.button(
+                                            [
+                                              h.Type("button"),
+                                              h.Class(
+                                                "btn btn-secondary editor-history-preview-btn",
+                                              ),
+                                              h.OnClick(
+                                                Message.ClickedPreviewHistoryEntry({
+                                                  endOffset: entry.endOffset,
+                                                }),
+                                              ),
+                                            ],
+                                            ["Vorschau"],
+                                          )
+                                        : h.empty,
                                       h.button(
                                         [
                                           h.Type("button"),
@@ -4879,16 +5090,25 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                         canRedo,
                         showStepButtons: true,
                       }
-                    : undefined,
+                    : {
+                        canUndo: false,
+                        canRedo: false,
+                        showStepButtons: false,
+                      },
               },
               h,
             ),
             previewOpen && fileMode._tag === "Text"
               ? viewPreviewOverlay(fileMode.content, h)
               : h.empty,
-            fileMode._tag === "Text"
-              ? viewHistoryOverlay(historyState, fileMode.content, h)
-              : h.empty,
+            viewHistoryOverlay(
+              historyState,
+              fileMode._tag === "Text"
+                ? Option.some(hashAndMeasureHistoryContent(fileMode.content))
+                : Option.none(),
+              fileMode._tag === "Binary",
+              h,
+            ),
             historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
               ? viewPreviewOverlay(historyState.maybePreviewContent.value, h)
               : h.empty,

@@ -33,6 +33,7 @@ import {
   ReplaceUrl,
   SavedBackend,
   SaveEditorPreferences,
+  SaveApiHistoryEnabledPreference,
   SaveHistoryEnabledPreference,
   ScrollEditorLlmChatToBottomIfAtBottom,
   StorageState,
@@ -121,6 +122,7 @@ const readyModel: Model = {
   llmDraftThinkingLevel: "",
   llmTestState: LlmTestState.Idle(),
   historyEnabled: true,
+  apiHistoryEnabled: true,
   clearAllHistoryState: ClearAllHistoryState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
@@ -1776,6 +1778,13 @@ describe("PWA Islands Scene Tests", () => {
         Message.CompletedSaveHistoryEnabledPreference(),
       ),
       sceneExpect(selector("#settings-history-enabled")).not.toBeChecked(),
+      sceneExpect(selector("#settings-api-history-enabled")).toBeChecked(),
+      change(selector("#settings-api-history-enabled"), "false"),
+      Command.resolve(
+        SaveApiHistoryEnabledPreference,
+        Message.CompletedSaveApiHistoryEnabledPreference(),
+      ),
+      sceneExpect(selector("#settings-api-history-enabled")).not.toBeChecked(),
       sceneExpect(selector("#btn-clear-all-history")).toExist(),
       click(selector("#btn-clear-all-history")),
       sceneExpect(selector("#clear-all-history-confirm")).toExist(),
@@ -1784,6 +1793,66 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#clear-all-history-done")).toContainText(
         "Alle Versionen wurden gelöscht.",
       ),
+    )
+  })
+
+  it("öffnet den Versionsverlauf im Editor auch für Binärdateien", () => {
+    const binaryEditorModel: Model = {
+      ...readyModel,
+      modalState: ModalState.Editor({
+        editor: Editor.Model.EditFile({
+          originalName: "logo.png",
+          name: "logo.png",
+          fileMode: EditorFileMode.Binary({
+            preview: PreviewContent.None(),
+            edit: BinaryEdit.Disabled(),
+          }),
+          maybeValidationError: Option.none(),
+          maybePasteError: Option.none(),
+          llmBarMode: "Closed",
+          isLlmModeMenuOpen: false,
+          llmChatInput: "",
+          llmChatMessages: [],
+          llmChatDisplay: [],
+          llmChatState: Editor.LlmChatState.Idle(),
+          isMaximized: false,
+          isEditingName: false,
+          isPreviewOpen: false,
+          editorSplitPercent: readyModel.editorSplitPercent,
+          editorSplitDrag: Option.none(),
+          canUndo: false,
+          canRedo: false,
+          historyState: Editor.HistoryState.Closed(),
+          isHistoryEnabled: true,
+          hasHistoryEntries: true,
+          isConfirmingDelete: false,
+        }),
+      }),
+    }
+
+    scene(
+      { update, view },
+      given(binaryEditorModel),
+      sceneExpect(selector("#modal-btn-history")).toExist(),
+      click(selector("#modal-btn-history")),
+      Command.resolve(
+        Editor.LoadFullHistory,
+        Editor.Message.SucceededLoadFullHistory({
+          entries: [
+            {
+              offset: 0,
+              endOffset: 32,
+              timestampMs: 1_700_000_000_000,
+              byteLength: 16,
+              contentHash: 0x1234abcd,
+            },
+          ],
+          isHistoryEnabled: true,
+        }),
+      ),
+      sceneExpect(selector("#editor-history-overlay")).toExist(),
+      sceneExpect(selector(".editor-history-preview-btn")).toBeAbsent(),
+      sceneExpect(selector(".editor-history-restore-btn")).toExist(),
     )
   })
 })
