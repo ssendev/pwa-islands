@@ -695,7 +695,7 @@ export const checkFileExists = async (
 
 // RUNTIME BRIDGE
 
-type RuntimeBridge = {
+const runtimeBridge: {
   activeStorage: Option.Option<StorageBackend>
   pendingHandle: Option.Option<FileSystemDirectoryHandle>
   savedFsaHandle: Option.Option<FileSystemDirectoryHandle>
@@ -703,42 +703,14 @@ type RuntimeBridge = {
   maybeActivePreviewObjectUrl: Option.Option<string>
   deferredInstallPrompt: Option.Option<BeforeInstallPromptEvent>
   pendingImportFiles: ReadonlyArray<globalThis.File>
-}
-
-const restoreActiveStorage = (
-  maybeStorage: Option.Option<StorageBackend>,
-): Option.Option<StorageBackend> =>
-  Option.map(maybeStorage, (storage) => {
-    if (storage.type === "tauri" && "folderPath" in storage) {
-      return new TauriStorage(storage.folderPath)
-    }
-    if (storage.rootHandle) {
-      return new FileSystemHandleStorage(storage.rootHandle, storage.type)
-    }
-    return storage
-  })
-
-const previousRuntimeBridge: RuntimeBridge | undefined = import.meta.hot?.data?.runtimeBridge
-
-const runtimeBridge: RuntimeBridge = previousRuntimeBridge
-  ? {
-      ...previousRuntimeBridge,
-      activeStorage: restoreActiveStorage(previousRuntimeBridge.activeStorage),
-    }
-  : {
-      activeStorage: Option.none(),
-      pendingHandle: Option.none(),
-      savedFsaHandle: Option.none(),
-      savedTauriFolder: Option.none(),
-      maybeActivePreviewObjectUrl: Option.none(),
-      deferredInstallPrompt: Option.none(),
-      pendingImportFiles: [],
-    }
-
-if (import.meta.hot) {
-  import.meta.hot.dispose((data) => {
-    data.runtimeBridge = runtimeBridge
-  })
+} = {
+  activeStorage: Option.none(),
+  pendingHandle: Option.none(),
+  savedFsaHandle: Option.none(),
+  savedTauriFolder: Option.none(),
+  maybeActivePreviewObjectUrl: Option.none(),
+  deferredInstallPrompt: Option.none(),
+  pendingImportFiles: [],
 }
 
 export const getSavedFsaHandle = (): Option.Option<FileSystemDirectoryHandle> =>
