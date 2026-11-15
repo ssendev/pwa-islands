@@ -180,10 +180,10 @@ const renderNode = <Message>(
               [viewIcon("clipboard", h)],
             )
           : h.empty
-      return h.div(
-        [h.Class("llm-markdown-codeblock")],
+      return h.details(
+        [h.Class("llm-markdown-codeblock"), h.Open(true)],
         [
-          h.div(
+          h.summary(
             [h.Class("llm-markdown-codeblock-header")],
             [h.span([h.Class("llm-markdown-filename")], [label])],
           ),

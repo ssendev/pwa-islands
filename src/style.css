@@ -3022,6 +3022,22 @@ code {
   gap: 8px;
   padding: 3px 6px 3px 10px;
   background: var(--border);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.llm-markdown-codeblock-header::-webkit-details-marker {
+  display: none;
+}
+
+.llm-markdown-filename::before {
+  content: "▾ ";
+  opacity: 0.7;
+}
+
+.llm-markdown-codeblock:not([open]) .llm-markdown-filename::before {
+  content: "▸ ";
 }
 
 .llm-markdown-filename {
