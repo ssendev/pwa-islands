@@ -139,6 +139,22 @@ export const closePreview = (state: ModalState): ModalState =>
     Help: () => state,
   })
 
+export const isLlmSlashMenuOpen = (state: ModalState): boolean =>
+  ModalState.match(state, {
+    Closed: () => false,
+    Editor: ({ editor }) => Editor.isLlmSlashMenuOpen(editor),
+    ImportConflict: () => false,
+    Help: () => false,
+  })
+
+export const dismissLlmSlashMenu = (state: ModalState): ModalState =>
+  ModalState.match(state, {
+    Closed: () => state,
+    Editor: ({ editor }) => ModalState.Editor({ editor: Editor.dismissLlmSlashMenu(editor) }),
+    ImportConflict: () => state,
+    Help: () => state,
+  })
+
 export const isConfirmingDelete = (state: ModalState): boolean =>
   ModalState.match(state, {
     Closed: () => false,

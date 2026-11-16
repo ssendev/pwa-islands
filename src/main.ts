@@ -4558,6 +4558,13 @@ export const update = (
         }
         return { model }
       }
+      if (Modal.isLlmSlashMenuOpen(model.modalState)) {
+        return {
+          model: modifyFields(model, {
+            modalState: Modal.dismissLlmSlashMenu,
+          }),
+        }
+      }
       if (Modal.isPreviewOpen(model.modalState)) {
         const shouldNavigateBack = Modal.isEditorPreviewOpen(model.modalState)
         return {

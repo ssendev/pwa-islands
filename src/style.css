@@ -1517,9 +1517,60 @@ code {
 }
 
 .modal-llm-chat-input-row {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 8px;
+}
+
+.modal-llm-slash-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modal-llm-slash-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 8px 10px;
+  font-family: var(--sans);
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-h);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.modal-llm-slash-item:hover,
+.modal-llm-slash-item:focus-visible,
+.modal-llm-slash-item.is-selected {
+  background: var(--accent-bg);
+  outline: none;
+}
+
+.modal-llm-slash-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.modal-llm-slash-desc {
+  color: var(--text);
+  font-size: 12px;
 }
 
 .modal-llm-chat-input-wrap {

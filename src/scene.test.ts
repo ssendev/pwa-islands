@@ -581,6 +581,34 @@ describe("PWA Islands Scene Tests", () => {
       ).toContainText("file"),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Ich füge den Titel hinzu."),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Senden"),
+      type(selector("#modal-llm-chat-input"), "/"),
+      sceneExpect(selector("#modal-llm-slash-menu")).toContainText("/clear"),
+      sceneExpect(selector("#modal-llm-slash-menu")).toContainText("Chat-Verlauf leeren"),
+      sceneExpect(selector("#modal-llm-slash-menu .modal-llm-slash-item")).toHaveAttr(
+        "aria-selected",
+        "true",
+      ),
+      keydown(selector("#modal-llm-chat-input"), "ArrowDown"),
+      keydown(selector("#modal-llm-chat-input"), "ArrowUp"),
+      sceneExpect(selector("#modal-llm-slash-menu .modal-llm-slash-item")).toHaveAttr(
+        "aria-selected",
+        "true",
+      ),
+      keydown(selector("#modal-llm-chat-input"), "Escape"),
+      sceneExpect(selector("#modal-llm-slash-menu")).toBeAbsent(),
+      sceneExpect(selector(".modal-overlay")).toExist(),
+      type(selector("#modal-llm-chat-input"), "/c"),
+      sceneExpect(selector("#modal-llm-slash-menu")).toContainText("/clear"),
+      keydown(selector("#modal-llm-chat-input"), "Enter"),
+      sceneExpect(selector("#modal-llm-chat-input")).toHaveValue(""),
+      sceneExpect(selector("#modal-llm-slash-menu")).toBeAbsent(),
+      sceneExpect(selector("#modal-llm-chat-history")).not.toContainText(
+        "Ich füge den Titel hinzu.",
+      ),
+      type(selector("#modal-llm-chat-input"), "/"),
+      click(selector("#modal-llm-slash-menu .modal-llm-slash-item")),
+      sceneExpect(selector("#modal-llm-chat-input")).toHaveValue(""),
+      sceneExpect(selector("#modal-llm-slash-menu")).toBeAbsent(),
     )
   })
 

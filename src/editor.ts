@@ -210,6 +210,8 @@ export const Model = defineTaggedUnion({
     llmBarMode: LlmBarMode,
     isLlmModeMenuOpen: Schema.optionalKey(Schema.Boolean),
     llmChatInput: Schema.String,
+    llmSlashMenuSelectedIndex: Schema.optionalKey(Schema.Number),
+    isLlmSlashMenuDismissed: Schema.optionalKey(Schema.Boolean),
     llmChatMessages: Schema.Array(LlmChatMessage),
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
     llmChatState: LlmChatState,
@@ -240,6 +242,8 @@ export const Model = defineTaggedUnion({
     llmBarMode: LlmBarMode,
     isLlmModeMenuOpen: Schema.optionalKey(Schema.Boolean),
     llmChatInput: Schema.String,
+    llmSlashMenuSelectedIndex: Schema.optionalKey(Schema.Number),
+    isLlmSlashMenuDismissed: Schema.optionalKey(Schema.Boolean),
     llmChatMessages: Schema.Array(LlmChatMessage),
     llmChatDisplay: Schema.Array(LlmChatDisplayEntry),
     llmChatState: LlmChatState,
@@ -822,6 +826,14 @@ export const Message = defineMessageUnion({
   ClickedOutsideLlmModeMenu: {},
   UpdatedLlmChatInput: {
     value: Schema.String,
+  },
+  NavigatedLlmSlashMenu: {
+    delta: Schema.Number,
+  },
+  DismissedLlmSlashMenu: {},
+  AcceptedLlmSlashCommand: {},
+  ClickedLlmSlashCommand: {
+    command: Schema.String,
   },
   SubmittedLlmChat: {},
   ClickedStopLlmChat: {},
@@ -2456,12 +2468,44 @@ export const update = (
 
     UpdatedLlmChatInput: ({ value }) => ({
       model: Model.match(model, {
-        CreateFile: (state) => modifyFields(state, { llmChatInput: () => value }),
-        EditFile: (state) => modifyFields(state, { llmChatInput: () => value }),
+        CreateFile: (state) =>
+          Model.CreateFile({
+            ...state,
+            llmChatInput: value,
+            llmSlashMenuSelectedIndex: 0,
+            isLlmSlashMenuDismissed: false,
+          }),
+        EditFile: (state) =>
+          Model.EditFile({
+            ...state,
+            llmChatInput: value,
+            llmSlashMenuSelectedIndex: 0,
+            isLlmSlashMenuDismissed: false,
+          }),
         CreateFolder: () => model,
         EditFolder: () => model,
         ConfirmOverwrite: () => model,
       }),
+      outMessage: OutMessage.None(),
+    }),
+
+    NavigatedLlmSlashMenu: ({ delta }) => ({
+      model: navigateLlmSlashMenu(delta, model),
+      outMessage: OutMessage.None(),
+    }),
+
+    DismissedLlmSlashMenu: () => ({
+      model: dismissLlmSlashMenu(model),
+      outMessage: OutMessage.None(),
+    }),
+
+    AcceptedLlmSlashCommand: () => ({
+      model: acceptSelectedLlmSlashCommand(model),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedLlmSlashCommand: ({ command }) => ({
+      model: executeChatSlashCommand(command, model),
       outMessage: OutMessage.None(),
     }),
 
@@ -2471,6 +2515,9 @@ export const update = (
           const prompt = state.llmChatInput.trim()
           if (prompt === "" || state.llmChatState._tag === "Sending") {
             return { model, outMessage: OutMessage.None() }
+          }
+          if (prompt.toLowerCase() === "/clear") {
+            return { model: clearLlmChat(model), outMessage: OutMessage.None() }
           }
           return {
             model: modifyFields(state, {
@@ -2500,6 +2547,9 @@ export const update = (
           const prompt = state.llmChatInput.trim()
           if (prompt === "" || state.llmChatState._tag === "Sending") {
             return { model, outMessage: OutMessage.None() }
+          }
+          if (prompt.toLowerCase() === "/clear") {
+            return { model: clearLlmChat(model), outMessage: OutMessage.None() }
           }
           return EditorFileMode.match(state.fileMode, {
             Text: ({ content }) => ({
@@ -4541,8 +4591,208 @@ const viewLlmChatModelControls = (
   ]
 }
 
+type ChatSlashCommand = {
+  readonly name: string
+  readonly description: string
+}
+
+const CHAT_SLASH_COMMANDS: ReadonlyArray<ChatSlashCommand> = [
+  {
+    name: "/clear",
+    description: "Chat-Verlauf leeren",
+  },
+]
+
+const matchingChatSlashCommands = (input: string): ReadonlyArray<ChatSlashCommand> => {
+  if (!input.startsWith("/") || /\s/.test(input)) {
+    return []
+  }
+  const query = input.toLowerCase()
+  return Array.filter(CHAT_SLASH_COMMANDS, (cmd) => cmd.name.startsWith(query))
+}
+
+const getOpenSlashCommands = (
+  llmChatInput: string,
+  llmChatState: LlmChatState,
+  isLlmSlashMenuDismissed: boolean,
+): ReadonlyArray<ChatSlashCommand> =>
+  llmChatState._tag === "Sending" || isLlmSlashMenuDismissed
+    ? []
+    : matchingChatSlashCommands(llmChatInput)
+
+const clampSlashIndex = (index: number, length: number): number =>
+  length > 0 ? ((index % length) + length) % length : 0
+
+export const isLlmSlashMenuOpen = (model: Model): boolean =>
+  Model.match(model, {
+    CreateFile: (state) =>
+      getOpenSlashCommands(
+        state.llmChatInput,
+        state.llmChatState,
+        state.isLlmSlashMenuDismissed ?? false,
+      ).length > 0,
+    EditFile: (state) =>
+      getOpenSlashCommands(
+        state.llmChatInput,
+        state.llmChatState,
+        state.isLlmSlashMenuDismissed ?? false,
+      ).length > 0,
+    CreateFolder: () => false,
+    EditFolder: () => false,
+    ConfirmOverwrite: () => false,
+  })
+
+export const dismissLlmSlashMenu = (model: Model): Model =>
+  Model.match(model, {
+    CreateFile: (state) => Model.CreateFile({ ...state, isLlmSlashMenuDismissed: true }),
+    EditFile: (state) => Model.EditFile({ ...state, isLlmSlashMenuDismissed: true }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+const nextSlashMenuIndex = (
+  delta: number,
+  llmChatInput: string,
+  llmChatState: LlmChatState,
+  isLlmSlashMenuDismissed: boolean,
+  currentIndex: number,
+): number | undefined => {
+  const commands = getOpenSlashCommands(llmChatInput, llmChatState, isLlmSlashMenuDismissed)
+  if (commands.length === 0) {
+    return undefined
+  }
+  return clampSlashIndex(currentIndex + delta, commands.length)
+}
+
+const navigateLlmSlashMenu = (delta: number, model: Model): Model =>
+  Model.match(model, {
+    CreateFile: (state) => {
+      const nextIndex = nextSlashMenuIndex(
+        delta,
+        state.llmChatInput,
+        state.llmChatState,
+        state.isLlmSlashMenuDismissed ?? false,
+        state.llmSlashMenuSelectedIndex ?? 0,
+      )
+      return nextIndex !== undefined
+        ? Model.CreateFile({ ...state, llmSlashMenuSelectedIndex: nextIndex })
+        : state
+    },
+    EditFile: (state) => {
+      const nextIndex = nextSlashMenuIndex(
+        delta,
+        state.llmChatInput,
+        state.llmChatState,
+        state.isLlmSlashMenuDismissed ?? false,
+        state.llmSlashMenuSelectedIndex ?? 0,
+      )
+      return nextIndex !== undefined
+        ? Model.EditFile({ ...state, llmSlashMenuSelectedIndex: nextIndex })
+        : state
+    },
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+const clearLlmChat = (model: Model): Model => {
+  const clearFields = {
+    llmChatInput: "",
+    llmSlashMenuSelectedIndex: 0,
+    isLlmSlashMenuDismissed: false,
+    llmChatMessages: [] as ReadonlyArray<LlmChatMessage>,
+    llmChatDisplay: [] as ReadonlyArray<LlmChatDisplayEntry>,
+    llmChatState: LlmChatState.Idle(),
+    llmToolRawKeys: [] as ReadonlyArray<string>,
+  }
+  return Model.match(model, {
+    CreateFile: (state) =>
+      state.llmChatState._tag === "Sending"
+        ? state
+        : Model.CreateFile({ ...state, ...clearFields }),
+    EditFile: (state) =>
+      state.llmChatState._tag === "Sending" ? state : Model.EditFile({ ...state, ...clearFields }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+}
+
+const executeChatSlashCommand = (command: string, model: Model): Model =>
+  command.trim().toLowerCase() === "/clear" ? clearLlmChat(model) : model
+
+const acceptSelectedLlmSlashCommand = (model: Model): Model => {
+  const getSelected = (
+    llmChatInput: string,
+    llmChatState: LlmChatState,
+    isLlmSlashMenuDismissed: boolean,
+    llmSlashMenuSelectedIndex: number,
+  ): ChatSlashCommand | undefined => {
+    const commands = getOpenSlashCommands(llmChatInput, llmChatState, isLlmSlashMenuDismissed)
+    if (commands.length === 0) {
+      return undefined
+    }
+    return commands[clampSlashIndex(llmSlashMenuSelectedIndex, commands.length)]
+  }
+  const selected = Model.match(model, {
+    CreateFile: (state) =>
+      getSelected(
+        state.llmChatInput,
+        state.llmChatState,
+        state.isLlmSlashMenuDismissed ?? false,
+        state.llmSlashMenuSelectedIndex ?? 0,
+      ),
+    EditFile: (state) =>
+      getSelected(
+        state.llmChatInput,
+        state.llmChatState,
+        state.isLlmSlashMenuDismissed ?? false,
+        state.llmSlashMenuSelectedIndex ?? 0,
+      ),
+    CreateFolder: () => undefined,
+    EditFolder: () => undefined,
+    ConfirmOverwrite: () => undefined,
+  })
+  return selected ? executeChatSlashCommand(selected.name, model) : model
+}
+
+const viewLlmSlashCommandMenu = (
+  commands: ReadonlyArray<ChatSlashCommand>,
+  selectedIndex: number,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
+  Array.isReadonlyArrayNonEmpty(commands)
+    ? h.div(
+        [
+          h.Id("modal-llm-slash-menu"),
+          h.Class("modal-llm-slash-menu"),
+          h.Role("listbox"),
+          h.AriaLabel("Verfügbare Chat-Befehle"),
+        ],
+        Array.map(commands, (cmd, index) => {
+          const isSelected = index === selectedIndex
+          return h.button(
+            [
+              h.Type("button"),
+              h.Class(isSelected ? "modal-llm-slash-item is-selected" : "modal-llm-slash-item"),
+              h.Role("option"),
+              h.AriaSelected(isSelected),
+              h.OnClick(Message.ClickedLlmSlashCommand({ command: cmd.name })),
+            ],
+            [
+              h.span([h.Class("modal-llm-slash-name")], [cmd.name]),
+              h.span([h.Class("modal-llm-slash-desc")], [cmd.description]),
+            ],
+          )
+        }),
+      )
+    : h.empty
+
 const viewLlmChatBar = (
   llmChatInput: string,
+  llmSlashMenuSelectedIndex: number,
+  isLlmSlashMenuDismissed: boolean,
   llmChatState: LlmChatState,
   llmChatMessages: ReadonlyArray<LlmChatMessage>,
   llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>,
@@ -4557,6 +4807,8 @@ const viewLlmChatBar = (
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
+  const slashCommands = getOpenSlashCommands(llmChatInput, llmChatState, isLlmSlashMenuDismissed)
+  const selectedSlashIndex = clampSlashIndex(llmSlashMenuSelectedIndex, slashCommands.length)
 
   return h.div(
     [h.Id("modal-llm-chat-bar"), h.Class("modal-llm-chat-bar")],
@@ -4578,6 +4830,7 @@ const viewLlmChatBar = (
       h.div(
         [h.Class("modal-llm-chat-input-row")],
         [
+          viewLlmSlashCommandMenu(slashCommands, selectedSlashIndex, h),
           h.div(
             [h.Class("modal-llm-chat-input-wrap"), h.DataAttribute("value", llmChatInput)],
             [
@@ -4590,11 +4843,33 @@ const viewLlmChatBar = (
                 h.Autocomplete("off"),
                 h.Value(llmChatInput),
                 h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
-                h.OnKeyDownPreventDefault((key, modifiers) =>
-                  key === "Enter" && !modifiers.shiftKey
-                    ? Option.some(Message.SubmittedLlmChat())
-                    : Option.none(),
-                ),
+                h.OnKeyDownPreventDefault((key, modifiers) => {
+                  if (slashCommands.length > 0) {
+                    if (key === "ArrowDown") {
+                      return Option.some(Message.NavigatedLlmSlashMenu({ delta: 1 }))
+                    }
+                    if (key === "ArrowUp") {
+                      return Option.some(Message.NavigatedLlmSlashMenu({ delta: -1 }))
+                    }
+                    if (key === "Escape") {
+                      return Option.some(Message.DismissedLlmSlashMenu())
+                    }
+                    if (key === "Enter" && !modifiers.shiftKey) {
+                      return Option.some(Message.AcceptedLlmSlashCommand())
+                    }
+                    if (key === "Tab") {
+                      return Option.some(
+                        Message.UpdatedLlmChatInput({
+                          value: slashCommands[selectedSlashIndex].name,
+                        }),
+                      )
+                    }
+                  }
+                  if (key === "Enter" && !modifiers.shiftKey) {
+                    return Option.some(Message.SubmittedLlmChat())
+                  }
+                  return Option.none()
+                }),
               ]),
             ],
           ),
@@ -4669,6 +4944,8 @@ const viewEditorModal = (
     llmBarMode,
     isLlmModeMenuOpen: isLlmModeMenuOpenProp = false,
     llmChatInput,
+    llmSlashMenuSelectedIndex = 0,
+    isLlmSlashMenuDismissed = false,
     llmChatState,
     llmChatMessages,
     llmChatDisplay,
@@ -4695,6 +4972,8 @@ const viewEditorModal = (
     readonly llmBarMode: LlmBarMode
     readonly isLlmModeMenuOpen?: boolean
     readonly llmChatInput: string
+    readonly llmSlashMenuSelectedIndex?: number
+    readonly isLlmSlashMenuDismissed?: boolean
     readonly llmChatState: LlmChatState
     readonly llmChatMessages: ReadonlyArray<LlmChatMessage>
     readonly llmChatDisplay: ReadonlyArray<LlmChatDisplayEntry>
@@ -4890,6 +5169,8 @@ const viewEditorModal = (
               effectiveLlmBarMode === "Chat"
                 ? viewLlmChatBar(
                     llmChatInput,
+                    llmSlashMenuSelectedIndex,
+                    isLlmSlashMenuDismissed,
                     llmChatState,
                     llmChatMessages,
                     llmChatDisplay,
@@ -5573,6 +5854,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmBarMode: state.llmBarMode,
                 isLlmModeMenuOpen: state.isLlmModeMenuOpen ?? false,
                 llmChatInput: state.llmChatInput,
+                llmSlashMenuSelectedIndex: state.llmSlashMenuSelectedIndex ?? 0,
+                isLlmSlashMenuDismissed: state.isLlmSlashMenuDismissed ?? false,
                 llmChatState: state.llmChatState,
                 llmChatMessages: state.llmChatMessages,
                 llmChatDisplay: state.llmChatDisplay,
@@ -5703,6 +5986,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         llmBarMode,
         isLlmModeMenuOpen: isLlmModeMenuOpenFlag,
         llmChatInput,
+        llmSlashMenuSelectedIndex,
+        isLlmSlashMenuDismissed,
         llmChatState,
         llmChatMessages,
         llmChatDisplay,
@@ -5752,6 +6037,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmBarMode,
                 isLlmModeMenuOpen: isLlmModeMenuOpenFlag ?? false,
                 llmChatInput,
+                llmSlashMenuSelectedIndex: llmSlashMenuSelectedIndex ?? 0,
+                isLlmSlashMenuDismissed: isLlmSlashMenuDismissed ?? false,
                 llmChatState,
                 llmChatMessages,
                 llmChatDisplay,
