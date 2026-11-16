@@ -481,6 +481,13 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       sceneExpect(selector("#modal-btn-send-llm")).toBeEnabled(),
       sceneExpect(selector("#modal-btn-send-llm.btn-danger")).toExist(),
+      type(selector("#modal-llm-chat-input"), "/"),
+      sceneExpect(selector("#modal-llm-slash-menu")).toContainText("/clear"),
+      keydown(selector("#modal-llm-chat-input"), "Enter"),
+      sceneExpect(selector("#modal-llm-chat-input")).toHaveValue("/clear"),
+      sceneExpect(selector("#modal-llm-slash-menu")).toBeAbsent(),
+      sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
+      type(selector("#modal-llm-chat-input"), ""),
       Subscription.emit(
         Message.UpdatedEditorLlmChatStream({
           completedTurns: [],

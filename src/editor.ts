@@ -4622,12 +4622,10 @@ const matchingChatSlashCommands = (input: string): ReadonlyArray<ChatSlashComman
 
 const getOpenSlashCommands = (
   llmChatInput: string,
-  llmChatState: LlmChatState,
+  _llmChatState: LlmChatState,
   isLlmSlashMenuDismissed: boolean,
 ): ReadonlyArray<ChatSlashCommand> =>
-  llmChatState._tag === "Sending" || isLlmSlashMenuDismissed
-    ? []
-    : matchingChatSlashCommands(llmChatInput)
+  isLlmSlashMenuDismissed ? [] : matchingChatSlashCommands(llmChatInput)
 
 const clampSlashIndex = (index: number, length: number): number =>
   length > 0 ? ((index % length) + length) % length : 0
@@ -4728,8 +4726,40 @@ const clearLlmChat = (model: Model): Model => {
   })
 }
 
-const executeChatSlashCommand = (command: string, model: Model): Model =>
-  command.trim().toLowerCase() === "/clear" ? clearLlmChat(model) : model
+const autocompleteChatSlashCommand = (command: string, model: Model): Model =>
+  Model.match(model, {
+    CreateFile: (state) =>
+      Model.CreateFile({
+        ...state,
+        llmChatInput: command,
+        llmSlashMenuSelectedIndex: 0,
+        isLlmSlashMenuDismissed: true,
+      }),
+    EditFile: (state) =>
+      Model.EditFile({
+        ...state,
+        llmChatInput: command,
+        llmSlashMenuSelectedIndex: 0,
+        isLlmSlashMenuDismissed: true,
+      }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+const executeChatSlashCommand = (command: string, model: Model): Model => {
+  const isSending = Model.match(model, {
+    CreateFile: (state) => state.llmChatState._tag === "Sending",
+    EditFile: (state) => state.llmChatState._tag === "Sending",
+    CreateFolder: () => false,
+    EditFolder: () => false,
+    ConfirmOverwrite: () => false,
+  })
+  if (isSending) {
+    return autocompleteChatSlashCommand(command, model)
+  }
+  return command.trim().toLowerCase() === "/clear" ? clearLlmChat(model) : model
+}
 
 const acceptSelectedLlmSlashCommand = (model: Model): Model => {
   const getSelected = (
