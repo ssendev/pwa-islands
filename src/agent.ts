@@ -13,6 +13,7 @@ import {
   executeReadTool,
   executeSearchTool,
   executeWriteTool,
+  extractTextToolCalls,
   formatToolResultForFormat,
   getEditorToolsForFormat,
   parseEditToolArguments,
@@ -867,6 +868,9 @@ export const detectLanguageModelAvailability = async (): Promise<boolean> => {
 const resolveProvider = (config: LlmRequestConfig): LlmProvider =>
   config.provider ?? (isLanguageModelSelection(config.model) ? "language-model" : "openai")
 
+const shouldUseToolCalls = (config: LlmRequestConfig): boolean =>
+  resolveProvider(config) !== "language-model" && config.toolCalls
+
 const isReadableStream = (
   value: AsyncIterable<string> | ReadableStream<string>,
 ): value is ReadableStream<string> =>
@@ -1282,6 +1286,7 @@ export const EDITOR_EDIT_TOOL = {
 
 const toOpenAiEditorMessages = (
   messages: ReadonlyArray<EditorChatMessage>,
+  useToolCalls = true,
 ): ReadonlyArray<Record<string, unknown>> =>
   messages.map((msg) => {
     if (msg._tag === "System") {
@@ -1291,7 +1296,12 @@ const toOpenAiEditorMessages = (
       return { role: "user", content: msg.content }
     }
     if (msg._tag === "Tool") {
-      return { role: "tool", tool_call_id: msg.toolCallId, content: msg.content }
+      return useToolCalls
+        ? { role: "tool", tool_call_id: msg.toolCallId, content: msg.content }
+        : { role: "user", content: msg.content }
+    }
+    if (!useToolCalls) {
+      return { role: "assistant", content: msg.content }
     }
     return {
       role: "assistant",
@@ -1400,10 +1410,15 @@ export const requestEditorChatCompletion = async (
   if (activeModel === "") {
     throw new Error("Kein Modell ausgewählt oder angegeben")
   }
+  const useToolCalls = shouldUseToolCalls(config)
   const requestBody = buildChatRequestBody({ ...config, model: activeModel }, "", {
-    messages: toOpenAiEditorMessages(messages),
-    tools: getEditorToolsForFormat(config.editFormat),
-    tool_choice: "auto",
+    messages: toOpenAiEditorMessages(messages, useToolCalls),
+    ...(useToolCalls
+      ? {
+          tools: getEditorToolsForFormat(config.editFormat),
+          tool_choice: "auto",
+        }
+      : {}),
   })
   const response = await fetch(joinUrl(config.baseUrl, "/chat/completions"), {
     method: "POST",
@@ -1798,10 +1813,18 @@ export const runEditorChatTurn = async ({
         }
       : undefined
     const reply = await requestEditorChatCompletion(config, messages, turnOnUpdate, signal)
+    const useToolCalls = shouldUseToolCalls(config)
+    const parsedTextCalls: ReadonlyArray<EditorChatToolCall> =
+      !useToolCalls && EffectArray.isReadonlyArrayEmpty(reply.toolCalls)
+        ? extractTextToolCalls(reply.content)
+        : []
+    const effectiveToolCalls = EffectArray.isReadonlyArrayNonEmpty(reply.toolCalls)
+      ? reply.toolCalls
+      : parsedTextCalls
     const assistantMsg: EditorChatMessage = {
       _tag: "Assistant",
       content: reply.content,
-      toolCalls: reply.toolCalls,
+      toolCalls: effectiveToolCalls,
     }
     const toolSummary = formatToolCallsSummary(reply.toolCalls)
     const replyContent = joinNonEmptyParts([reply.content, toolSummary])
@@ -1811,10 +1834,9 @@ export const runEditorChatTurn = async ({
         ? [{ content: replyContent, reasoning: replyReasoning, isError: false }]
         : []
 
-    if (EffectArray.isReadonlyArrayEmpty(reply.toolCalls)) {
+    if (EffectArray.isReadonlyArrayEmpty(effectiveToolCalls)) {
       const hasInlineEdit =
-        resolveProvider(config) === "language-model" &&
-        hasEditAttemptForFormat(config.editFormat, reply.content)
+        !useToolCalls && hasEditAttemptForFormat(config.editFormat, reply.content)
       if (!hasInlineEdit) {
         return {
           messages: [...messages, assistantMsg],
@@ -1882,7 +1904,7 @@ export const runEditorChatTurn = async ({
     }
 
     const batch = EffectArray.reduce(
-      reply.toolCalls,
+      effectiveToolCalls,
       {
         content: currentContent,
         appliedCount: 0,
@@ -1893,7 +1915,7 @@ export const runEditorChatTurn = async ({
       executeToolCall,
     )
     const nextMessages = [...messages, assistantMsg, ...batch.toolMessages]
-    const toolDetails: ReadonlyArray<EditorChatToolDetail> = reply.toolCalls.map((call) => {
+    const toolDetails: ReadonlyArray<EditorChatToolDetail> = effectiveToolCalls.map((call) => {
       const toolMsg = batch.toolMessages.find(
         (msg) => msg._tag === "Tool" && msg.toolCallId === call.id,
       )

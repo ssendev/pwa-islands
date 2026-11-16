@@ -591,7 +591,7 @@ describe("runEditorChatTurn", () => {
     const original = "<p>Alt</p>"
     const h1 = hashLine(original)
     const fetchMock = vi.fn(
-      async () =>
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(
           JSON.stringify({
             choices: [
@@ -967,7 +967,7 @@ describe("runEditorChatTurn", () => {
 
   it("wendet write-Tool-Aufruf an, schreibt Datei neu und stoppt bis zur nächsten User-Nachricht", async () => {
     const fetchMock = vi.fn(
-      async () =>
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(
           JSON.stringify({
             choices: [
@@ -1241,6 +1241,84 @@ describe("LanguageModel-API", () => {
     expect(result.updatedContent).toBeUndefined()
     expect(result.appliedCount).toBe(0)
     expect(result.turns[0]?.content).toBe("Diese Datei enthält einen Absatz.")
+  })
+
+  it("unterstützt search, read und write als Markdown-Codeblöcke über LanguageModel-API", async () => {
+    const destroy = vi.fn()
+    const prompt = vi
+      .fn()
+      .mockResolvedValueOnce("```search\nAlt\n```")
+      .mockResolvedValueOnce("```write\nfoo\nbar\n```")
+    const create = vi.fn(async () => ({ prompt, promptStreaming: vi.fn(), destroy }))
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "available"),
+      create,
+    })
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        editFormat: "hashline",
+        enabled: true,
+        provider: "language-model",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: "<p>Alt</p>",
+      initialMessages: [
+        { _tag: "System", content: "sys" },
+        { _tag: "User", content: "Suche Alt und schreibe neu" },
+      ],
+    })
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(prompt).toHaveBeenNthCalledWith(1, "Suche Alt und schreibe neu", undefined)
+    expect(prompt).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining("Treffer für „Alt“ in `index.html` (1):"),
+      undefined,
+    )
+    expect(result.updatedContent).toBe("foo\nbar")
+    expect(result.appliedCount).toBe(1)
+    expect(result.turns).toHaveLength(2)
+    expect(result.turns[0]?.toolDetails?.[0]?.name).toBe("search")
+    expect(result.turns[1]?.toolDetails?.[0]?.name).toBe("write")
+  })
+
+  it("nutzt im OpenAI-Text-Only-Modus (toolCalls: false) keine nativen tools und führt ```write``` aus", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "```write\nfoo\nbar\n```" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        baseUrl: "https://example.com/v1",
+        model: "gpt-test",
+        editFormat: "unified-diff",
+        enabled: true,
+        streaming: false,
+        toolCalls: false,
+      },
+      fileName: "index.html",
+      initialContent: "<p>Alt</p>",
+      initialMessages: [{ _tag: "User", content: "Schreibe foo bar" }],
+    })
+
+    const reqInit = fetchMock.mock.calls[0]?.[1] as { body?: string } | undefined
+    const parsedBody = JSON.parse(reqInit?.body ?? "{}") as Record<string, unknown>
+    expect(parsedBody.tools).toBeUndefined()
+    expect(result.updatedContent).toBe("foo\nbar")
+    expect(result.appliedCount).toBe(1)
   })
 })
 

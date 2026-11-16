@@ -5370,7 +5370,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                             _tag: "System" as const,
                             content: formatSystemPromptForFormat(
                               deps.editFormat,
-                              !isLanguageModelSelection(deps.model),
+                              deps.toolCalls && !isLanguageModelSelection(deps.model),
                             ),
                           },
                           { _tag: "User" as const, content: formatApiDtsMessage(apiDts) },

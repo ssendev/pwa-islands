@@ -98,13 +98,17 @@ export const formatFileMessageForFormat = (
     Match.exhaustive,
   )
 
-const SEARCH_REPLACE_INSTRUCTIONS = [
+const SEARCH_REPLACE_RULES = [
   "- Gib Änderungen als `SEARCH`/`REPLACE`-Blöcke an.",
   "- Der `SEARCH`-Teil muss exakt (inkl. Einrückung) in der Datei vorkommen und eindeutig sein.",
   "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
+]
+
+const formatSearchReplaceInstructions = (fenceLang: string): ReadonlyArray<string> => [
+  ...SEARCH_REPLACE_RULES,
   "",
   "Beispiel:",
-  "```",
+  `\`\`\`${fenceLang}`,
   "<<<<<<< SEARCH",
   "  <p>Alter Text</p>",
   "=======",
@@ -113,14 +117,18 @@ const SEARCH_REPLACE_INSTRUCTIONS = [
   "```",
 ]
 
-const UNIFIED_DIFF_INSTRUCTIONS = [
+const UNIFIED_DIFF_RULES = [
   "- Jeder Block beginnt mit `@@` (Zeilennummern sind optional).",
   "- Unveränderte Kontextzeilen beginnen mit einem Leerzeichen (` `).",
   "- Entfernte Zeilen beginnen mit `-`, hinzugefügte Zeilen mit `+`.",
   "- Gib nur die geänderten Stellen mit genug Kontextzeilen aus, nicht die ganze Datei.",
+]
+
+const formatUnifiedDiffInstructions = (fenceLang: string): ReadonlyArray<string> => [
+  ...UNIFIED_DIFF_RULES,
   "",
   "Beispiel:",
-  "```diff",
+  `\`\`\`${fenceLang}`,
   "@@",
   " <main>",
   "-  <p>Alter Text</p>",
@@ -137,6 +145,23 @@ const ADDITIONAL_TOOLS_INSTRUCTIONS = [
   "- `write`: Schreibt die gesamte aktuelle Datei komplett neu (`content`) – nur verwenden, wenn umfangreiche Änderungen nötig sind.",
 ]
 
+const ADDITIONAL_TEXT_TOOLS_INSTRUCTIONS = [
+  "",
+  "Weitere verfügbare Werkzeuge (als Markdown-Codeblock):",
+  "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after`):",
+  "```search",
+  '{"query": "Suchbegriff"}',
+  "```",
+  "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (optional `startLine`, `endLine`):",
+  "```read",
+  '{"startLine": 1, "endLine": 100}',
+  "```",
+  "- `write`: Schreibt die gesamte aktuelle Datei komplett neu – nur verwenden, wenn umfangreiche Änderungen nötig sind:",
+  "```write",
+  "<vollständiger neuer Dateiinhalt>",
+  "```",
+]
+
 export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = true): string => {
   const basePrompt = Match.value(format).pipe(
     Match.when("hashline", () => formatHashlineSystemPrompt(useToolCalls)),
@@ -146,9 +171,9 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
         "",
         useToolCalls
           ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit `SEARCH`/`REPLACE`-Blöcken:"
-          : "Antworte **nur** mit einem Markdown-Codeblock mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
+          : "Verwende für Änderungen an der Datei einen Markdown-Codeblock (` ```edit `) mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
         "",
-        ...SEARCH_REPLACE_INSTRUCTIONS,
+        ...formatSearchReplaceInstructions(useToolCalls ? "" : "edit"),
       ].join("\n"),
     ),
     Match.when("unified-diff", () =>
@@ -157,14 +182,17 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
         "",
         useToolCalls
           ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit einem vereinfachten Unified Diff:"
-          : "Antworte **nur** mit einem Markdown-Codeblock (` ```diff `) im vereinfachten Unified-Diff-Format:",
+          : "Verwende für Änderungen an der Datei einen Markdown-Codeblock (` ```edit `) im vereinfachten Unified-Diff-Format:",
         "",
-        ...UNIFIED_DIFF_INSTRUCTIONS,
+        ...formatUnifiedDiffInstructions(useToolCalls ? "diff" : "edit"),
       ].join("\n"),
     ),
     Match.exhaustive,
   )
-  return useToolCalls ? [basePrompt, ...ADDITIONAL_TOOLS_INSTRUCTIONS].join("\n") : basePrompt
+  return [
+    basePrompt,
+    ...(useToolCalls ? ADDITIONAL_TOOLS_INSTRUCTIONS : ADDITIONAL_TEXT_TOOLS_INSTRUCTIONS),
+  ].join("\n")
 }
 
 export const formatLlmContextForFormat = (
@@ -181,7 +209,7 @@ export const formatLlmContextForFormat = (
         "",
         "Antworte **nur** mit einem Markdown-Codeblock mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
         "",
-        ...SEARCH_REPLACE_INSTRUCTIONS,
+        ...formatSearchReplaceInstructions(""),
         "",
         formatApiDtsMessage(apiDts),
         "",
@@ -194,7 +222,7 @@ export const formatLlmContextForFormat = (
         "",
         "Antworte **nur** mit einem Markdown-Codeblock (` ```diff `) im vereinfachten Unified-Diff-Format:",
         "",
-        ...UNIFIED_DIFF_INSTRUCTIONS,
+        ...formatUnifiedDiffInstructions("diff"),
         "",
         formatApiDtsMessage(apiDts),
         "",
@@ -678,6 +706,111 @@ export const executeWriteTool = (fileName: string, rawArgs: string): EditorWrite
     message: `Datei \`${fileName}\` wurde neu geschrieben (${lineCount} Zeilen).`,
   })
 }
+
+export interface ParsedTextToolCall {
+  readonly id: string
+  readonly name: "edit" | "read" | "search" | "write"
+  readonly arguments: string
+}
+
+interface FencedCodeBlock {
+  readonly lang: string
+  readonly body: string
+}
+
+const OPENING_FENCE_PATTERN = /^\s*(`{3,}|~{3,})\s*([^\s`~]*)\s*$/
+
+const parseFencedCodeBlocks = (text: string): ReadonlyArray<FencedCodeBlock> => {
+  const lines = text.replace(/\r\n/g, "\n").split("\n")
+  const blocks: FencedCodeBlock[] = []
+  let activeFence:
+    | {
+        readonly char: string
+        readonly len: number
+        readonly lang: string
+        readonly lines: string[]
+      }
+    | undefined
+
+  for (const line of lines) {
+    if (!activeFence) {
+      const openMatch = OPENING_FENCE_PATTERN.exec(line)
+      if (openMatch && openMatch[1]) {
+        activeFence = {
+          char: openMatch[1][0] ?? "`",
+          len: openMatch[1].length,
+          lang: (openMatch[2] ?? "").trim().toLowerCase(),
+          lines: [],
+        }
+      }
+      continue
+    }
+
+    const trimmed = line.trim()
+    const isClosing =
+      trimmed.length >= activeFence.len && [...trimmed].every((ch) => ch === activeFence?.char)
+    if (isClosing) {
+      blocks.push({ lang: activeFence.lang, body: activeFence.lines.join("\n") })
+      activeFence = undefined
+    } else {
+      activeFence.lines.push(line)
+    }
+  }
+
+  return blocks
+}
+
+const normalizeReadTextArgs = (body: string): string => {
+  const trimmed = body.trim()
+  if (trimmed === "") {
+    return "{}"
+  }
+  if (trimmed.startsWith("{")) {
+    return trimmed
+  }
+  const rangeMatch = /^(\d+)\s*[-–:]\s*(\d+)$/.exec(trimmed)
+  if (rangeMatch) {
+    return JSON.stringify({
+      startLine: Number(rangeMatch[1]),
+      endLine: Number(rangeMatch[2]),
+    })
+  }
+  return trimmed
+}
+
+const normalizeSearchTextArgs = (body: string): string => {
+  const trimmed = body.trim()
+  if (trimmed.startsWith("{")) {
+    return trimmed
+  }
+  return JSON.stringify({ query: trimmed })
+}
+
+const normalizeEditTextArgs = (body: string): string => {
+  const trimmed = body.trim()
+  if (trimmed.startsWith("{")) {
+    return trimmed
+  }
+  return JSON.stringify({ edits: body })
+}
+
+export const extractTextToolCalls = (text: string): ReadonlyArray<ParsedTextToolCall> =>
+  parseFencedCodeBlocks(text).flatMap<ParsedTextToolCall>((block, index) => {
+    const id = `text_call_${index}`
+    if (block.lang === "write") {
+      return [{ id, name: "write" as const, arguments: JSON.stringify({ content: block.body }) }]
+    }
+    if (block.lang === "read") {
+      return [{ id, name: "read" as const, arguments: normalizeReadTextArgs(block.body) }]
+    }
+    if (block.lang === "search") {
+      return [{ id, name: "search" as const, arguments: normalizeSearchTextArgs(block.body) }]
+    }
+    if (block.lang === "edit") {
+      return [{ id, name: "edit" as const, arguments: normalizeEditTextArgs(block.body) }]
+    }
+    return []
+  })
 
 export const formatToolResultForFormat = (
   format: EditFormat,

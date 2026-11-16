@@ -10,6 +10,7 @@ import {
   executeReadTool,
   executeSearchTool,
   executeWriteTool,
+  extractTextToolCalls,
   formatFencedFileForFormat,
   formatLlmContextForFormat,
   formatSystemPromptForFormat,
@@ -497,5 +498,49 @@ describe("edit-format", () => {
         updatedSnippet: "",
       }),
     )
+  })
+
+  it("includes fake text tool instructions in system prompt when useToolCalls is false", () => {
+    for (const format of ["hashline", "search-replace", "unified-diff"] as const) {
+      const textPrompt = formatSystemPromptForFormat(format, false)
+      expect(textPrompt).toContain("```edit")
+      expect(textPrompt).toContain("```search")
+      expect(textPrompt).toContain("```read")
+      expect(textPrompt).toContain("```write")
+
+      const nativePrompt = formatSystemPromptForFormat(format, true)
+      expect(nativePrompt).not.toContain("```search")
+      expect(nativePrompt).not.toContain("```read")
+      expect(nativePrompt).not.toContain("```write")
+    }
+  })
+
+  it("extracts write, read, search, and edit calls from fenced text-only blocks", () => {
+    const text = [
+      "Hier ist der Plan:",
+      "```html",
+      "<div>ignoriert</div>",
+      "```",
+      "```search",
+      "renderApp",
+      "```",
+      "```read",
+      "1-20",
+      "```",
+      "```read",
+      "```",
+      "```write",
+      "foo",
+      "bar",
+      "```",
+    ].join("\n")
+
+    expect(extractTextToolCalls(text)).toEqual([
+      { id: "text_call_1", name: "search", arguments: '{"query":"renderApp"}' },
+      { id: "text_call_2", name: "read", arguments: '{"startLine":1,"endLine":20}' },
+      { id: "text_call_3", name: "read", arguments: "{}" },
+      { id: "text_call_4", name: "write", arguments: '{"content":"foo\\nbar"}' },
+    ])
+    expect(extractTextToolCalls("```write\nunclosed")).toEqual([])
   })
 })

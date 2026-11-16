@@ -24,7 +24,7 @@ export const formatFencedHashlineFile = (_fileName: string, content: string): st
   return ["```", hashedFile, "```"].join("\n") + "\n\n"
 }
 
-const HASHLINE_COMMAND_LINES = [
+const HASHLINE_COMMAND_RULES = [
   "- `REPLACE <zeile>:<hash>` oder `REPLACE <start>:<hash>..<ende>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
   "- `INSERT_AFTER <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
   "- `INSERT_BEFORE <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
@@ -36,9 +36,13 @@ const HASHLINE_COMMAND_LINES = [
   "- Verwende exakt die Zeilennummern und Hashes aus der Datei unten.",
   "- Alle Anker eines Aufrufs beziehen sich auf den Dateistand **vor** diesem Aufruf (Zeilennummern nicht selbst verschieben).",
   "- Bearbeitungen innerhalb eines Aufrufs dürfen sich nicht überlappen.",
+]
+
+const formatHashlineCommandLines = (fenceLang: string): ReadonlyArray<string> => [
+  ...HASHLINE_COMMAND_RULES,
   "",
   "Beispiel:",
-  "```hashline",
+  `\`\`\`${fenceLang}`,
   "REPLACE 12:a3f..13:b4c",
   "  <p>Neuer Text</p>",
   "END",
@@ -56,9 +60,9 @@ export const formatHashlineSystemPrompt = (useToolCalls = true): string =>
     "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
     useToolCalls
       ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:"
-      : "Antworte **nur** mit einem Markdown-Codeblock (` ```hashline `) mit folgenden Befehlen:",
+      : "Verwende für Änderungen an der Datei einen Markdown-Codeblock (` ```edit `) mit folgenden Befehlen:",
     "",
-    ...HASHLINE_COMMAND_LINES,
+    ...formatHashlineCommandLines(useToolCalls ? "hashline" : "edit"),
   ].join("\n")
 
 export const formatApiDtsMessage = (apiDts: string): string =>
@@ -74,7 +78,7 @@ export const formatLlmContext = (fileName: string, content: string, apiDts: stri
     "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
     "Antworte **nur** mit einem Markdown-Codeblock (` ```hashline `) mit folgenden Befehlen:",
     "",
-    ...HASHLINE_COMMAND_LINES,
+    ...formatHashlineCommandLines("hashline"),
     "",
     formatApiDtsMessage(apiDts),
     "",
