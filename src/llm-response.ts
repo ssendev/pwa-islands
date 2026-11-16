@@ -110,11 +110,12 @@ const viewHeaderCopyButton = <Message>(
 export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<Message>) => {
   const toolDetails = props.toolDetails ?? []
   const hasToolDetails = Array.isReadonlyArrayNonEmpty(toolDetails)
-  const displayContent = hasToolDetails ? (props.assistantContent ?? "") : props.content
-  const hasReasoning = props.reasoning.trim() !== ""
-  const hasContent = displayContent.trim() !== ""
   const isThinkingMarkdown = props.isThinkingMarkdown ?? true
   const isContentMarkdown = props.isContentMarkdown ?? true
+  const displayContent =
+    hasToolDetails && isContentMarkdown ? (props.assistantContent ?? "") : props.content
+  const hasReasoning = props.reasoning.trim() !== ""
+  const hasContent = displayContent.trim() !== ""
   const rawToolKeys = props.rawToolKeys ?? []
   const toolKeyPrefix = props.toolKeyPrefix ?? "tool"
 

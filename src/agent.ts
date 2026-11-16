@@ -17,6 +17,7 @@ import {
   formatToolResultForFormat,
   getEditorToolsForFormat,
   parseEditToolArguments,
+  stripTextToolCalls,
 } from "./edit-format"
 import { formatToolArguments } from "./tool-format"
 
@@ -1815,6 +1816,7 @@ export const runEditorChatTurn = async ({
       !useToolCalls && EffectArray.isReadonlyArrayEmpty(reply.toolCalls)
         ? extractTextToolCalls(reply.content)
         : []
+    const hasParsedTextCalls = EffectArray.isReadonlyArrayNonEmpty(parsedTextCalls)
     const effectiveToolCalls = EffectArray.isReadonlyArrayNonEmpty(reply.toolCalls)
       ? reply.toolCalls
       : parsedTextCalls
@@ -1823,11 +1825,14 @@ export const runEditorChatTurn = async ({
       content: reply.content,
       toolCalls: effectiveToolCalls,
     }
+    const cleanedReplyContent = hasParsedTextCalls
+      ? stripTextToolCalls(reply.content)
+      : reply.content
     const toolSummary = formatToolCallsSummary(reply.toolCalls)
     const replyContent = joinNonEmptyParts([reply.content, toolSummary])
     const replyReasoning = reply.reasoning.trim()
     const replyTurns: ReadonlyArray<EditorChatTurnBlock> =
-      replyContent !== "" || replyReasoning !== ""
+      replyContent !== "" || replyReasoning !== "" || hasParsedTextCalls
         ? [{ content: replyContent, reasoning: replyReasoning, isError: false }]
         : []
 
@@ -1928,7 +1933,7 @@ export const runEditorChatTurn = async ({
     })
     const enrichedReplyTurns: ReadonlyArray<EditorChatTurnBlock> = replyTurns.map((turn) => ({
       ...turn,
-      assistantContent: reply.content.trim(),
+      assistantContent: cleanedReplyContent.trim(),
       toolDetails,
     }))
 

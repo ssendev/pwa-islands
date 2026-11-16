@@ -1283,7 +1283,9 @@ describe("LanguageModel-API", () => {
     expect(result.appliedCount).toBe(1)
     expect(result.turns).toHaveLength(2)
     expect(result.turns[0]?.toolDetails?.[0]?.name).toBe("search")
+    expect(result.turns[0]?.assistantContent).toBe("")
     expect(result.turns[1]?.toolDetails?.[0]?.name).toBe("write")
+    expect(result.turns[1]?.assistantContent).toBe("")
   })
 
   it("nutzt im OpenAI-Text-Only-Modus (toolCalls: false) keine nativen tools und führt ```write``` aus", async () => {

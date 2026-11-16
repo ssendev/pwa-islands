@@ -293,5 +293,30 @@ describe("llm-response markdown", () => {
         '{"edits":"@@\\n-    <title>Alt</title>\\n+    <title>Neu</title>"}',
       ),
     )
+
+    scene(
+      { update: testUpdate, view: testView },
+      given({
+        content: "Ich schaue nach:\n\ntoolcall search\n```search\nAlt\n```",
+        reasoning: "",
+        isStreaming: false,
+        isContentMarkdown: true,
+        assistantContent: "Ich schaue nach:",
+        toolDetails: [
+          {
+            summary: "Tool-Aufruf: search",
+            name: "search",
+            arguments: '{"query":"Alt"}',
+            result: "Treffer",
+          },
+        ],
+      }),
+      sceneExpect(selector(".llm-response-content")).toContainText("Ich schaue nach:"),
+      sceneExpect(selector(".llm-response-content")).not.toContainText("toolcall search"),
+      sceneExpect(selector(".llm-tool-details")).toExist(),
+      click(selector('button[aria-label="Antwort-Markdown umschalten"]')),
+      sceneExpect(selector(".llm-response-text")).toContainText("toolcall search"),
+      sceneExpect(selector(".llm-tool-details")).toExist(),
+    )
   })
 })

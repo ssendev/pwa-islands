@@ -15,6 +15,7 @@ import {
   formatLlmContextForFormat,
   formatSystemPromptForFormat,
   getEditorToolsForFormat,
+  stripTextToolCalls,
 } from "./edit-format"
 import { hashLine } from "./hashline"
 
@@ -579,5 +580,23 @@ describe("edit-format", () => {
       { id: "text_call_4", name: "write", arguments: '{"content":"body { color: blue; }"}' },
       { id: "text_call_5", name: "edit", arguments: '{"edits":"bar"}' },
     ])
+
+    expect(
+      stripTextToolCalls(
+        [
+          "Ich schaue zuerst nach:",
+          "",
+          "toolcall search",
+          "```search",
+          "Alt",
+          "```",
+          "",
+          "```css",
+          "body { color: red; }",
+          "```",
+        ].join("\n"),
+      ),
+    ).toBe(["Ich schaue zuerst nach:", "", "```css", "body { color: red; }", "```"].join("\n"))
+    expect(stripTextToolCalls("toolcall write\n```write\nfoo\n```")).toBe("")
   })
 })

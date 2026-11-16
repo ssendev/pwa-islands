@@ -746,50 +746,93 @@ const TOOLCALL_MENTION_PATTERN =
 const INLINE_TOOLCALL_FENCE_PATTERN =
   /(?:^|[\s*_`])tool[\s_-]*call[*_`]*\b[\s\S]*?\b(edit|read|search|write)\b[\s\S]*?(`{3,}|~{3,})\s*([^\s`~]*)\s*$/i
 
-const parseFencedCodeBlocks = (text: string): ReadonlyArray<FencedCodeBlock> => {
+const isToolCallLang = (lang: string): boolean =>
+  lang === "edit" || lang === "read" || lang === "search" || lang === "write"
+
+interface FencedScanResult {
+  readonly blocks: ReadonlyArray<FencedCodeBlock>
+  readonly strippedText: string
+}
+
+const scanFencedCodeBlocks = (text: string): FencedScanResult => {
   const lines = text.replace(/\r\n/g, "\n").split("\n")
   const blocks: FencedCodeBlock[] = []
+  const keptLines: string[] = []
   let pendingToolCall: string | undefined
+  let pendingHeaderLines: string[] = []
   let activeFence:
     | {
         readonly char: string
         readonly len: number
         readonly lang: string
+        readonly isTool: boolean
+        readonly openingLine: string
         readonly lines: string[]
       }
     | undefined
+
+  const flushPendingHeader = () => {
+    if (pendingHeaderLines.length > 0) {
+      keptLines.push(...pendingHeaderLines)
+      pendingHeaderLines = []
+    }
+    pendingToolCall = undefined
+  }
 
   for (const line of lines) {
     if (!activeFence) {
       const inlineMatch = INLINE_TOOLCALL_FENCE_PATTERN.exec(line)
       if (inlineMatch && inlineMatch[1] && inlineMatch[2]) {
+        flushPendingHeader()
+        const prefix = line.slice(0, inlineMatch.index).replace(/[*_`\s]+$/, "")
+        if (prefix !== "") {
+          keptLines.push(prefix)
+        }
         activeFence = {
           char: inlineMatch[2][0] ?? "`",
           len: inlineMatch[2].length,
           lang: inlineMatch[1].toLowerCase(),
+          isTool: true,
+          openingLine: line,
           lines: [],
         }
-        pendingToolCall = undefined
         continue
       }
       const headerMatch = TOOLCALL_MENTION_PATTERN.exec(line)
       if (headerMatch && headerMatch[1]) {
+        flushPendingHeader()
         pendingToolCall = headerMatch[1].toLowerCase()
+        pendingHeaderLines = [line]
         continue
       }
       const openMatch = OPENING_FENCE_PATTERN.exec(line)
       if (openMatch && openMatch[1]) {
+        const lang = pendingToolCall ?? (openMatch[2] ?? "").trim().toLowerCase()
+        const isTool = isToolCallLang(lang)
+        if (!isTool) {
+          flushPendingHeader()
+          keptLines.push(line)
+        } else {
+          pendingToolCall = undefined
+          pendingHeaderLines = []
+        }
         activeFence = {
           char: openMatch[1][0] ?? "`",
           len: openMatch[1].length,
-          lang: pendingToolCall ?? (openMatch[2] ?? "").trim().toLowerCase(),
+          lang,
+          isTool,
+          openingLine: line,
           lines: [],
         }
-        pendingToolCall = undefined
         continue
       }
       if (line.trim() !== "") {
-        pendingToolCall = undefined
+        flushPendingHeader()
+        keptLines.push(line)
+      } else if (pendingToolCall !== undefined) {
+        pendingHeaderLines.push(line)
+      } else {
+        keptLines.push(line)
       }
       continue
     }
@@ -799,14 +842,30 @@ const parseFencedCodeBlocks = (text: string): ReadonlyArray<FencedCodeBlock> => 
       trimmed.length >= activeFence.len && [...trimmed].every((ch) => ch === activeFence?.char)
     if (isClosing) {
       blocks.push({ lang: activeFence.lang, body: activeFence.lines.join("\n") })
+      if (!activeFence.isTool) {
+        keptLines.push(...activeFence.lines, line)
+      }
       activeFence = undefined
     } else {
       activeFence.lines.push(line)
     }
   }
 
-  return blocks
+  flushPendingHeader()
+  if (activeFence) {
+    keptLines.push(activeFence.openingLine, ...activeFence.lines)
+  }
+
+  return {
+    blocks,
+    strippedText: keptLines
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim(),
+  }
 }
+
+export const stripTextToolCalls = (text: string): string => scanFencedCodeBlocks(text).strippedText
 
 const normalizeReadTextArgs = (body: string): string => {
   const trimmed = body.trim()
@@ -843,7 +902,7 @@ const normalizeEditTextArgs = (body: string): string => {
 }
 
 export const extractTextToolCalls = (text: string): ReadonlyArray<ParsedTextToolCall> =>
-  parseFencedCodeBlocks(text).flatMap<ParsedTextToolCall>((block, index) => {
+  scanFencedCodeBlocks(text).blocks.flatMap<ParsedTextToolCall>((block, index) => {
     const id = `text_call_${index}`
     if (block.lang === "write") {
       return [{ id, name: "write" as const, arguments: JSON.stringify({ content: block.body }) }]
