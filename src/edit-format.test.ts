@@ -542,5 +542,42 @@ describe("edit-format", () => {
       { id: "text_call_4", name: "write", arguments: '{"content":"foo\\nbar"}' },
     ])
     expect(extractTextToolCalls("```write\nunclosed")).toEqual([])
+
+    const headerText = [
+      "toolcall edit",
+      "```diff",
+      "@@",
+      "-alt",
+      "+neu",
+      "```",
+      "Tool_Call: `write`",
+      "",
+      "```html",
+      "<p>neu</p>",
+      "```",
+      "toolcall edit",
+      "Doch nur ein CSS-Beispiel:",
+      "```css",
+      "body { color: red; }",
+      "```",
+      "hmm i need to edit the styles **toolcall** edit: ```",
+      "foo",
+      "```",
+      "hmm **toolcall** write:",
+      "```css",
+      "body { color: blue; }",
+      "```",
+      "jetzt **toolcall** edit -> bitte so anwenden: ```",
+      "bar",
+      "```",
+    ].join("\n")
+
+    expect(extractTextToolCalls(headerText)).toEqual([
+      { id: "text_call_0", name: "edit", arguments: '{"edits":"@@\\n-alt\\n+neu"}' },
+      { id: "text_call_1", name: "write", arguments: '{"content":"<p>neu</p>"}' },
+      { id: "text_call_3", name: "edit", arguments: '{"edits":"foo"}' },
+      { id: "text_call_4", name: "write", arguments: '{"content":"body { color: blue; }"}' },
+      { id: "text_call_5", name: "edit", arguments: '{"edits":"bar"}' },
+    ])
   })
 })

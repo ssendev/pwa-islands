@@ -104,10 +104,15 @@ const SEARCH_REPLACE_RULES = [
   "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
 ]
 
-const formatSearchReplaceInstructions = (fenceLang: string): ReadonlyArray<string> => [
+const formatSearchReplaceInstructions = (
+  fenceLang: string,
+  toolHeader?: string,
+): ReadonlyArray<string> => [
   ...SEARCH_REPLACE_RULES,
   "",
   "Beispiel:",
+  "",
+  ...(toolHeader ? [toolHeader] : []),
   `\`\`\`${fenceLang}`,
   "<<<<<<< SEARCH",
   "  <p>Alter Text</p>",
@@ -124,10 +129,15 @@ const UNIFIED_DIFF_RULES = [
   "- Gib nur die geänderten Stellen mit genug Kontextzeilen aus, nicht die ganze Datei.",
 ]
 
-const formatUnifiedDiffInstructions = (fenceLang: string): ReadonlyArray<string> => [
+const formatUnifiedDiffInstructions = (
+  fenceLang: string,
+  toolHeader?: string,
+): ReadonlyArray<string> => [
   ...UNIFIED_DIFF_RULES,
   "",
   "Beispiel:",
+  "",
+  ...(toolHeader ? [toolHeader] : []),
   `\`\`\`${fenceLang}`,
   "@@",
   " <main>",
@@ -147,16 +157,22 @@ const ADDITIONAL_TOOLS_INSTRUCTIONS = [
 
 const ADDITIONAL_TEXT_TOOLS_INSTRUCTIONS = [
   "",
-  "Weitere verfügbare Werkzeuge (als Markdown-Codeblock):",
+  "Weitere verfügbare Werkzeuge:",
   "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after`):",
+  "",
+  "toolcall search",
   "```search",
   '{"query": "Suchbegriff"}',
   "```",
   "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (optional `startLine`, `endLine`):",
+  "",
+  "toolcall read",
   "```read",
   '{"startLine": 1, "endLine": 100}',
   "```",
   "- `write`: Schreibt die gesamte aktuelle Datei komplett neu – nur verwenden, wenn umfangreiche Änderungen nötig sind:",
+  "",
+  "toolcall write",
   "```write",
   "<vollständiger neuer Dateiinhalt>",
   "```",
@@ -171,9 +187,12 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
         "",
         useToolCalls
           ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit `SEARCH`/`REPLACE`-Blöcken:"
-          : "Verwende für Änderungen an der Datei einen Markdown-Codeblock (` ```edit `) mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
+          : "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
         "",
-        ...formatSearchReplaceInstructions(useToolCalls ? "" : "edit"),
+        ...formatSearchReplaceInstructions(
+          useToolCalls ? "" : "edit",
+          useToolCalls ? undefined : "toolcall edit",
+        ),
       ].join("\n"),
     ),
     Match.when("unified-diff", () =>
@@ -182,9 +201,12 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
         "",
         useToolCalls
           ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit einem vereinfachten Unified Diff:"
-          : "Verwende für Änderungen an der Datei einen Markdown-Codeblock (` ```edit `) im vereinfachten Unified-Diff-Format:",
+          : "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) im vereinfachten Unified-Diff-Format:",
         "",
-        ...formatUnifiedDiffInstructions(useToolCalls ? "diff" : "edit"),
+        ...formatUnifiedDiffInstructions(
+          useToolCalls ? "diff" : "edit",
+          useToolCalls ? undefined : "toolcall edit",
+        ),
       ].join("\n"),
     ),
     Match.exhaustive,
@@ -719,10 +741,15 @@ interface FencedCodeBlock {
 }
 
 const OPENING_FENCE_PATTERN = /^\s*(`{3,}|~{3,})\s*([^\s`~]*)\s*$/
+const TOOLCALL_MENTION_PATTERN =
+  /(?:^|[\s*_`])tool[\s_-]*call[*_`]*\b[\s\S]*?\b(edit|read|search|write)\b/i
+const INLINE_TOOLCALL_FENCE_PATTERN =
+  /(?:^|[\s*_`])tool[\s_-]*call[*_`]*\b[\s\S]*?\b(edit|read|search|write)\b[\s\S]*?(`{3,}|~{3,})\s*([^\s`~]*)\s*$/i
 
 const parseFencedCodeBlocks = (text: string): ReadonlyArray<FencedCodeBlock> => {
   const lines = text.replace(/\r\n/g, "\n").split("\n")
   const blocks: FencedCodeBlock[] = []
+  let pendingToolCall: string | undefined
   let activeFence:
     | {
         readonly char: string
@@ -734,14 +761,35 @@ const parseFencedCodeBlocks = (text: string): ReadonlyArray<FencedCodeBlock> => 
 
   for (const line of lines) {
     if (!activeFence) {
+      const inlineMatch = INLINE_TOOLCALL_FENCE_PATTERN.exec(line)
+      if (inlineMatch && inlineMatch[1] && inlineMatch[2]) {
+        activeFence = {
+          char: inlineMatch[2][0] ?? "`",
+          len: inlineMatch[2].length,
+          lang: inlineMatch[1].toLowerCase(),
+          lines: [],
+        }
+        pendingToolCall = undefined
+        continue
+      }
+      const headerMatch = TOOLCALL_MENTION_PATTERN.exec(line)
+      if (headerMatch && headerMatch[1]) {
+        pendingToolCall = headerMatch[1].toLowerCase()
+        continue
+      }
       const openMatch = OPENING_FENCE_PATTERN.exec(line)
       if (openMatch && openMatch[1]) {
         activeFence = {
           char: openMatch[1][0] ?? "`",
           len: openMatch[1].length,
-          lang: (openMatch[2] ?? "").trim().toLowerCase(),
+          lang: pendingToolCall ?? (openMatch[2] ?? "").trim().toLowerCase(),
           lines: [],
         }
+        pendingToolCall = undefined
+        continue
+      }
+      if (line.trim() !== "") {
+        pendingToolCall = undefined
       }
       continue
     }

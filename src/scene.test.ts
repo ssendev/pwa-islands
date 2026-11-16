@@ -1481,6 +1481,47 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
+  it("blendet den Tools-JSON-Block in System-Nachricht & Kontext aus, wenn toolCalls deaktiviert ist", () => {
+    const baseModal = ModalState.Editor({
+      editor: {
+        ...Editor.makeCreateFile(),
+        llmBarMode: "Chat",
+        llmChatMessages: [
+          Editor.LlmChatMessage.System({ content: "sys" }),
+          Editor.LlmChatMessage.User({ content: "dts" }),
+          Editor.LlmChatMessage.User({ content: "file" }),
+          Editor.LlmChatMessage.User({ content: "Hi" }),
+        ],
+      },
+    })
+
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        llmEnabled: true,
+        llmBaseUrl: "https://api.example.com/v1",
+        llmModel: "gpt-test",
+        llmToolCalls: false,
+        modalState: baseModal,
+      }),
+      sceneExpect(selector(".modal-llm-chat-details.is-system")).not.toContainText("Tools"),
+    )
+
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        llmEnabled: true,
+        llmBaseUrl: "https://api.example.com/v1",
+        llmModel: "gpt-test",
+        llmToolCalls: true,
+        modalState: baseModal,
+      }),
+      sceneExpect(selector(".modal-llm-chat-details.is-system")).toContainText("Tools"),
+    )
+  })
+
   it("zeigt Streaming-Chunks sofort während der laufenden Antwort an", () => {
     scene(
       { update, view },

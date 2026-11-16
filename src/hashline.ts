@@ -38,10 +38,15 @@ const HASHLINE_COMMAND_RULES = [
   "- Bearbeitungen innerhalb eines Aufrufs dürfen sich nicht überlappen.",
 ]
 
-const formatHashlineCommandLines = (fenceLang: string): ReadonlyArray<string> => [
+const formatHashlineCommandLines = (
+  fenceLang: string,
+  toolHeader?: string,
+): ReadonlyArray<string> => [
   ...HASHLINE_COMMAND_RULES,
   "",
   "Beispiel:",
+  "",
+  ...(toolHeader ? [toolHeader] : []),
   `\`\`\`${fenceLang}`,
   "REPLACE 12:a3f..13:b4c",
   "  <p>Neuer Text</p>",
@@ -60,9 +65,12 @@ export const formatHashlineSystemPrompt = (useToolCalls = true): string =>
     "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
     useToolCalls
       ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:"
-      : "Verwende für Änderungen an der Datei einen Markdown-Codeblock (` ```edit `) mit folgenden Befehlen:",
+      : "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden Befehlen:",
     "",
-    ...formatHashlineCommandLines(useToolCalls ? "hashline" : "edit"),
+    ...formatHashlineCommandLines(
+      useToolCalls ? "hashline" : "edit",
+      useToolCalls ? undefined : "toolcall edit",
+    ),
   ].join("\n")
 
 export const formatApiDtsMessage = (apiDts: string): string =>

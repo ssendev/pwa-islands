@@ -1635,9 +1635,6 @@ const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): s
     .join("\n\n")
 
 const hasEditAttemptForFormat = (format: EditFormat, text: string): boolean => {
-  if (/```[a-zA-Z0-9_-]*\r?\n[\s\S]*?```/.test(text)) {
-    return true
-  }
   if (format === "hashline") {
     return /^(REPLACE|INSERT_AFTER|INSERT_BEFORE|DELETE)\s+\d+:/m.test(text)
   }

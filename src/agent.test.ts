@@ -1320,6 +1320,35 @@ describe("LanguageModel-API", () => {
     expect(result.updatedContent).toBe("foo\nbar")
     expect(result.appliedCount).toBe(1)
   })
+
+  it("versucht bei normalen Codeblöcken wie ```css im Text-Only-Modus keinen Edit anzuwenden", async () => {
+    const destroy = vi.fn()
+    const cssReply = "Hier ist ein Beispiel:\n```css\nbody { color: red; }\n```"
+    const prompt = vi.fn(async () => cssReply)
+    vi.stubGlobal("LanguageModel", {
+      availability: vi.fn(async () => "available"),
+      create: vi.fn(async () => ({ prompt, promptStreaming: vi.fn(), destroy })),
+    })
+
+    const result = await runEditorChatTurn({
+      config: {
+        ...emptyLlmSettings,
+        ...emptyLlmSelection,
+        editFormat: "unified-diff",
+        enabled: true,
+        provider: "language-model",
+        streaming: false,
+      },
+      fileName: "index.html",
+      initialContent: "<p>Alt</p>",
+      initialMessages: [{ _tag: "User", content: "Zeig mir ein CSS-Beispiel" }],
+    })
+
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect(result.updatedContent).toBeUndefined()
+    expect(result.appliedCount).toBe(0)
+    expect(result.turns[0]?.content).toBe(cssReply)
+  })
 })
 
 describe("Modellfilter und Sortierung", () => {

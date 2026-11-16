@@ -4198,6 +4198,7 @@ export type ViewInputs = {
   readonly monacoSettings: MonacoSettings
   readonly appTheme: AppTheme
   readonly llmEditFormat?: EditFormat
+  readonly llmToolCalls?: boolean
   readonly llmChatAiName?: string
   readonly llmChatUserName?: string
 }
@@ -4213,6 +4214,7 @@ const viewLlmChatHistory = (
   aiName: string,
   userName: string,
   editFormat: EditFormat,
+  showTools: boolean,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const systemMessages = Array.filter(llmChatMessages, (msg) => msg._tag === "System")
@@ -4253,13 +4255,17 @@ const viewLlmChatHistory = (
                       ],
                     ),
                   ),
-                  h.div(
-                    [h.Class("modal-llm-chat-context-block")],
-                    [
-                      h.span([h.Class("llm-response-label")], ["Tools"]),
-                      viewMarkdown(toolsMarkdown, { onCopyCode, codeblocksOpen: false }, h),
-                    ],
-                  ),
+                  ...(showTools
+                    ? [
+                        h.div(
+                          [h.Class("modal-llm-chat-context-block")],
+                          [
+                            h.span([h.Class("llm-response-label")], ["Tools"]),
+                            viewMarkdown(toolsMarkdown, { onCopyCode, codeblocksOpen: false }, h),
+                          ],
+                        ),
+                      ]
+                    : []),
                   ...Array.map(autoUserMessages, (msg) =>
                     h.div(
                       [h.Class("modal-llm-chat-context-block")],
@@ -4547,6 +4553,7 @@ const viewLlmChatBar = (
   aiName: string,
   userName: string,
   editFormat: EditFormat,
+  showTools: boolean,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isSending = llmChatState._tag === "Sending"
@@ -4565,6 +4572,7 @@ const viewLlmChatBar = (
         aiName,
         userName,
         editFormat,
+        showTools,
         h,
       ),
       h.div(
@@ -4892,6 +4900,8 @@ const viewEditorModal = (
                     llmViewInputs.llmChatAiName?.trim() || "KI",
                     llmViewInputs.llmChatUserName?.trim() || "Du",
                     llmViewInputs.llmEditFormat ?? "hashline",
+                    llmViewInputs.llmToolCalls ??
+                      !isLanguageModelSelection(llmViewInputs.llmSelectedModel),
                     h,
                   )
                 : h.empty,
