@@ -94,12 +94,18 @@ void initMarkdown()
       registerSW({
         immediate: true,
         onNeedReload() {
+          if (import.meta.env.DEV) {
+            return
+          }
           dispatchServiceWorkerToast({
             message: "Update bereit – bitte Seite neu laden.",
             variant: "info",
           })
         },
         onOfflineReady() {
+          if (import.meta.env.DEV) {
+            return
+          }
           dispatchServiceWorkerToast({
             message: "App ist bereit für die Offline-Nutzung.",
             variant: "info",
