@@ -273,7 +273,16 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
             }),
           )
         : h.empty,
-      props.isStreaming ? h.span([h.Class("llm-response-streaming")], ["Schreibt …"]) : h.empty,
+      props.isStreaming
+        ? h.span(
+            [h.Class("llm-response-streaming"), h.Role("status"), h.AriaLabel("Schreibt …")],
+            [
+              h.span([h.Class("llm-response-streaming-dot")]),
+              h.span([h.Class("llm-response-streaming-dot")]),
+              h.span([h.Class("llm-response-streaming-dot")]),
+            ],
+          )
+        : h.empty,
     ],
   )
 }

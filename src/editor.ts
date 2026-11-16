@@ -343,7 +343,10 @@ const sendingEntriesToDisplay = (chatState: LlmChatState): ReadonlyArray<LlmChat
       ...(turn.toolDetails !== undefined ? { toolDetails: turn.toolDetails } : {}),
     }),
   )
-  const hasActive = chatState.streamContent !== "" || chatState.streamReasoning !== ""
+  const hasActive =
+    chatState.streamContent !== "" ||
+    chatState.streamReasoning !== "" ||
+    (chatState.streamToolDetails?.length ?? 0) > 0
   return hasActive
     ? [
         ...completed,
@@ -351,6 +354,12 @@ const sendingEntriesToDisplay = (chatState: LlmChatState): ReadonlyArray<LlmChat
           content: chatState.streamContent,
           reasoning: chatState.streamReasoning,
           isError: false,
+          ...(chatState.streamAssistantContent !== undefined
+            ? { assistantContent: chatState.streamAssistantContent }
+            : {}),
+          ...(chatState.streamToolDetails !== undefined
+            ? { toolDetails: chatState.streamToolDetails }
+            : {}),
         }),
       ]
     : completed

@@ -474,7 +474,10 @@ describe("PWA Islands Scene Tests", () => {
       sceneExpect(selector(".modal-overlay")).toExist(),
       sceneExpect(selector("#modal-llm-chat-input")).toHaveValue(""),
       sceneExpect(selector("#modal-llm-chat-history")).toContainText("Füge Titel hinzu"),
-      sceneExpect(selector("#modal-llm-chat-history")).toContainText("Schreibt …"),
+      sceneExpect(selector("#modal-llm-chat-history .llm-response-streaming")).toHaveAttr(
+        "aria-label",
+        "Schreibt …",
+      ),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       sceneExpect(selector("#modal-btn-send-llm")).toBeEnabled(),
       sceneExpect(selector("#modal-btn-send-llm.btn-danger")).toExist(),
@@ -1564,7 +1567,10 @@ describe("PWA Islands Scene Tests", () => {
       }),
       sceneExpect(selector("#llm-test-result .llm-response-thinking")).toContainText("Denke"),
       sceneExpect(selector("#llm-test-result .llm-response-content")).toContainText("Hal"),
-      sceneExpect(selector("#llm-test-result .llm-response-streaming")).toContainText("Schreibt …"),
+      sceneExpect(selector("#llm-test-result .llm-response-streaming")).toHaveAttr(
+        "aria-label",
+        "Schreibt …",
+      ),
     )
   })
 

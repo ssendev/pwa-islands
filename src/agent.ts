@@ -1487,8 +1487,6 @@ export const requestEditorChatCompletion = async (
         return
       }
       const streamingCalls = state.calls.filter((call) => call.name.trim() !== "")
-      const toolSummary = formatToolCallsSummary(streamingCalls)
-      const streamContent = joinNonEmptyParts([state.content, toolSummary])
       const toolDetails: ReadonlyArray<EditorChatToolDetail> = streamingCalls.map((call) => {
         const name = call.name.trim()
         const summary =
@@ -1503,7 +1501,7 @@ export const requestEditorChatCompletion = async (
         }
       })
       onUpdate({
-        content: streamContent,
+        content: state.content,
         reasoning: state.reasoning,
         ...(toolDetails.length > 0 ? { assistantContent: state.content.trim(), toolDetails } : {}),
       })
@@ -1551,12 +1549,6 @@ export type EditorChatTurnResult = {
 
 const MAX_EDIT_ERROR_RETRIES = 4
 const MAX_TOOL_STEPS = 12
-
-const joinNonEmptyParts = (parts: ReadonlyArray<string>): string =>
-  parts
-    .map((part) => part.trim())
-    .filter((part) => part !== "")
-    .join("\n\n")
 
 const parseToolArgsRecord = (rawArguments: string): Record<string, unknown> | undefined => {
   try {
@@ -1628,12 +1620,6 @@ const formatSingleToolCallSummary = (call: EditorChatToolCall): string => {
   }
   return name !== "" ? `Tool-Aufruf: ${name}` : ""
 }
-
-const formatToolCallsSummary = (toolCalls: ReadonlyArray<EditorChatToolCall>): string =>
-  toolCalls
-    .map(formatSingleToolCallSummary)
-    .filter((entry) => entry !== "")
-    .join("\n\n")
 
 const hasEditAttemptForFormat = (format: EditFormat, text: string): boolean => {
   if (format === "hashline") {
@@ -1828,11 +1814,11 @@ export const runEditorChatTurn = async ({
     const cleanedReplyContent = hasParsedTextCalls
       ? stripTextToolCalls(reply.content)
       : reply.content
-    const toolSummary = formatToolCallsSummary(reply.toolCalls)
-    const replyContent = joinNonEmptyParts([reply.content, toolSummary])
+    const hasToolCalls = EffectArray.isReadonlyArrayNonEmpty(effectiveToolCalls)
+    const replyContent = reply.content
     const replyReasoning = reply.reasoning.trim()
     const replyTurns: ReadonlyArray<EditorChatTurnBlock> =
-      replyContent !== "" || replyReasoning !== "" || hasParsedTextCalls
+      replyContent !== "" || replyReasoning !== "" || hasToolCalls
         ? [{ content: replyContent, reasoning: replyReasoning, isError: false }]
         : []
 

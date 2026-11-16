@@ -740,7 +740,7 @@ describe("runEditorChatTurn", () => {
     expect(
       result.turns.map((turn) => ({
         isError: turn.isError,
-        hasEdit: turn.content.includes("Tool-Aufruf: edit"),
+        hasEdit: turn.toolDetails?.some((d) => d.name === "edit") ?? false,
         hasToolErr:
           turn.toolDetails?.[0]?.result.includes("Fehler beim Anwenden der Änderungen") ?? false,
       })),
@@ -958,7 +958,8 @@ describe("runEditorChatTurn", () => {
       toolCallId: "call_read",
       content: expect.stringContaining("Zeilen 2–3 von 3"),
     })
-    expect(result.turns.map((turn) => turn.content)).toEqual([
+    expect(result.turns.map((turn) => turn.content)).toEqual(["", "", ""])
+    expect(result.turns.map((turn) => turn.toolDetails?.[0]?.summary)).toEqual([
       'Tool-Aufruf: search ("Alt")',
       "Tool-Aufruf: read (Zeilen 2–3)",
       expect.stringContaining("Tool-Aufruf: edit"),
@@ -1017,7 +1018,8 @@ describe("runEditorChatTurn", () => {
       toolCallId: "call_write",
       content: "Datei `index.html` wurde neu geschrieben (2 Zeilen).",
     })
-    expect(result.turns[0]?.content).toBe("Tool-Aufruf: write (2 Zeilen)")
+    expect(result.turns[0]?.content).toBe("")
+    expect(result.turns[0]?.toolDetails?.[0]?.summary).toBe("Tool-Aufruf: write (2 Zeilen)")
   })
 })
 

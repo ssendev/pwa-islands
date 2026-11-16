@@ -3290,9 +3290,59 @@ code {
 }
 
 .llm-response-streaming {
-  font-size: 12px;
-  color: var(--text);
-  opacity: 0.75;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 8px 12px;
+  margin-left: 6px;
+  border-radius: 14px 14px 14px 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.llm-response-streaming::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  bottom: 0;
+  width: 6px;
+  height: 6px;
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-bottom-left-radius: 6px;
+}
+
+.llm-response-streaming-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text);
+  opacity: 0.4;
+  animation: llm-typing-dot 1.2s infinite ease-in-out;
+}
+
+.llm-response-streaming-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.llm-response-streaming-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes llm-typing-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 
 .editor-history-nav {

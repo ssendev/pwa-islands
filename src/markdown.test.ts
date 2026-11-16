@@ -124,7 +124,8 @@ describe("llm-response markdown", () => {
         isStreaming: true,
       }),
       sceneExpect(selector(".llm-markdown strong")).toContainText("Welt"),
-      sceneExpect(selector(".llm-response-streaming")).toContainText("Schreibt …"),
+      sceneExpect(selector(".llm-response-streaming")).toHaveAttr("aria-label", "Schreibt …"),
+      sceneExpect(selector(".llm-response-streaming-dot")).toExist(),
     )
   })
 
