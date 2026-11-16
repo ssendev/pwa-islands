@@ -213,7 +213,6 @@ describe("parseExtraArgs & buildChatRequestBody", () => {
     ).toEqual({
       model: "qwen3",
       messages: [{ role: "user", content: "Hi" }],
-      max_tokens: 500,
       stream: true,
       chat_template_kwargs: {
         add_generation_prompt: true,

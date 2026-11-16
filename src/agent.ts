@@ -644,7 +644,6 @@ export const buildChatRequestBody = (
   const baseBody: Record<string, unknown> = {
     model: config.model,
     messages: [{ role: "user", content: prompt }],
-    max_tokens: 500,
     stream: config.streaming,
     ...overrides,
     ...extra,
@@ -1403,7 +1402,6 @@ export const requestEditorChatCompletion = async (
   }
   const requestBody = buildChatRequestBody({ ...config, model: activeModel }, "", {
     messages: toOpenAiEditorMessages(messages),
-    max_tokens: 4096,
     tools: getEditorToolsForFormat(config.editFormat),
     tool_choice: "auto",
   })
