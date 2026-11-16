@@ -1,5 +1,4 @@
-import "monaco-editor/nls/lang/de"
-import * as monaco from "monaco-editor"
+import type * as Monaco from "monaco-editor"
 import CssWorker from "monaco-editor/language/css/css.worker?worker"
 import EditorWorker from "monaco-editor/editor/editor.worker?worker"
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker"
@@ -19,16 +18,33 @@ const WORKER_BY_LABEL: Readonly<Record<string, new () => Worker>> = {
 }
 
 const globalWithMonaco = globalThis as typeof globalThis & {
-  MonacoEnvironment?: monaco.Environment
+  MonacoEnvironment?: Monaco.Environment
 }
 
-if (globalWithMonaco.MonacoEnvironment === undefined) {
-  globalWithMonaco.MonacoEnvironment = {
-    getWorker(_workerId: string, label: string): Worker {
-      const WorkerConstructor = WORKER_BY_LABEL[label] ?? EditorWorker
-      return new WorkerConstructor()
-    },
+let monacoPromise: Promise<typeof Monaco> | undefined
+
+/**
+ * Lädt Monaco mit deutscher Lokalisierung.
+ *
+ * `monaco-editor/nls/lang/de` muss zwingend vor `monaco-editor` ausgewertet werden,
+ * da Monaco bereits bei der Modul-Initialisierung `localize()` aufruft. Bei einem
+ * statischen Import kann Vite/Rolldown die Chunks so aufteilen, dass `editor.api`
+ * vor `de` ausgeführt wird.
+ */
+export function loadMonaco(): Promise<typeof Monaco> {
+  if (monacoPromise === undefined) {
+    monacoPromise = (async () => {
+      if (globalWithMonaco.MonacoEnvironment === undefined) {
+        globalWithMonaco.MonacoEnvironment = {
+          getWorker(_workerId: string, label: string): Worker {
+            const WorkerConstructor = WORKER_BY_LABEL[label] ?? EditorWorker
+            return new WorkerConstructor()
+          },
+        }
+      }
+      await import("monaco-editor/nls/lang/de")
+      return import("monaco-editor")
+    })()
   }
+  return monacoPromise
 }
-
-export { monaco }

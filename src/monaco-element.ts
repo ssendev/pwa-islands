@@ -551,7 +551,8 @@ export const registerMonacoEditorElement = (): void => {
     }
 
     private async mountEditor(container: HTMLDivElement): Promise<void> {
-      const { monaco: monacoApi } = await import("./monaco-runtime")
+      const { loadMonaco } = await import("./monaco-runtime")
+      const monacoApi = await loadMonaco()
       if (this.isDisconnected || !this.isConnected) {
         return
       }
