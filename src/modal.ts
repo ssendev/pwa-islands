@@ -222,7 +222,6 @@ export const openCreate = (
   target: NewTarget | "file" | "folder",
   templates: ReadonlyArray<StarterTemplate> = [],
   defaults?: {
-    readonly isMaximized?: boolean
     readonly llmBarMode?: Editor.LlmBarMode
     readonly editorSplitPercent?: number
   },
@@ -268,7 +267,6 @@ export const isEditingEntry = (state: ModalState, name: string): boolean =>
 export const applyEditorPreferences = (
   modalState: ModalState,
   prefs: {
-    readonly isMaximized: boolean
     readonly llmBarMode: Editor.LlmBarMode
     readonly editorSplitPercent: number
   },
@@ -359,7 +357,6 @@ export const openDeletedEntryHistory = (
       isLlmContentMarkdown: true,
       llmToolRawKeys: [],
       isLlmUserMarkdown: true,
-      isMaximized: false,
       isEditingName: false,
       isPreviewOpen: false,
       editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -530,7 +527,6 @@ export const resolveModalForRoute = async (
               isLlmContentMarkdown: true,
               llmToolRawKeys: [],
               isLlmUserMarkdown: true,
-              isMaximized: false,
               isEditingName: false,
               isPreviewOpen: false,
               editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -606,7 +602,6 @@ export const resolveModalForRoute = async (
                   isLlmContentMarkdown: true,
                   llmToolRawKeys: [],
                   isLlmUserMarkdown: true,
-                  isMaximized: false,
                   isEditingName: false,
                   isPreviewOpen: false,
                   editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -695,9 +690,6 @@ export const OutMessage = defineTaggedUnion({
   },
   ChangedLlmBarMode: {
     llmBarMode: Editor.LlmBarMode,
-  },
-  ChangedMaximize: {
-    isMaximized: Schema.Boolean,
   },
   ChangedEditorSplitPercent: {
     editorSplitPercent: Schema.Number,
@@ -869,7 +861,6 @@ export const update = (
     readonly llmEnabled: boolean
     readonly llmEditFormat: EditFormat
     readonly editorDefaults?: {
-      readonly isMaximized: boolean
       readonly llmBarMode: Editor.LlmBarMode
       readonly editorSplitPercent: number
     }
@@ -958,11 +949,6 @@ export const update = (
               model: ModalState.Editor({ editor: editorResult.model }),
               commands: mappedCommands,
               outMessage: OutMessage.ChangedLlmBarMode({ llmBarMode }),
-            }),
-            ChangedMaximize: ({ isMaximized }) => ({
-              model: ModalState.Editor({ editor: editorResult.model }),
-              commands: mappedCommands,
-              outMessage: OutMessage.ChangedMaximize({ isMaximized }),
             }),
             ChangedEditorSplitPercent: ({ editorSplitPercent }) => ({
               model: ModalState.Editor({ editor: editorResult.model }),
@@ -1068,7 +1054,6 @@ export const update = (
           isLlmContentMarkdown: true,
           llmToolRawKeys: [],
           isLlmUserMarkdown: true,
-          isMaximized: context.editorDefaults?.isMaximized ?? false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent:

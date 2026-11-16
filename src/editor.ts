@@ -217,7 +217,6 @@ export const Model = defineTaggedUnion({
     isLlmContentMarkdown: Schema.optionalKey(Schema.Boolean),
     llmToolRawKeys: Schema.optionalKey(Schema.Array(Schema.String)),
     isLlmUserMarkdown: Schema.optionalKey(Schema.Boolean),
-    isMaximized: Schema.Boolean,
     isPreviewOpen: Schema.Boolean,
     editorSplitPercent: Schema.Number,
     editorSplitDrag: Schema.Option(EditorSplitDrag),
@@ -248,7 +247,6 @@ export const Model = defineTaggedUnion({
     isLlmContentMarkdown: Schema.optionalKey(Schema.Boolean),
     llmToolRawKeys: Schema.optionalKey(Schema.Array(Schema.String)),
     isLlmUserMarkdown: Schema.optionalKey(Schema.Boolean),
-    isMaximized: Schema.Boolean,
     isEditingName: Schema.Boolean,
     isPreviewOpen: Schema.Boolean,
     editorSplitPercent: Schema.Number,
@@ -276,7 +274,6 @@ type BinaryFileMode = Extract<EditorFileMode, { readonly _tag: "Binary" }>
 export const makeCreateFile = (
   userTemplates: ReadonlyArray<StarterTemplate> = [],
   defaults?: {
-    readonly isMaximized?: boolean
     readonly llmBarMode?: LlmBarMode
     readonly editorSplitPercent?: number
   },
@@ -301,7 +298,6 @@ export const makeCreateFile = (
   isLlmContentMarkdown: true,
   llmToolRawKeys: [],
   isLlmUserMarkdown: true,
-  isMaximized: defaults?.isMaximized ?? false,
   isPreviewOpen: false,
   editorSplitPercent: defaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
   editorSplitDrag: Option.none(),
@@ -310,7 +306,6 @@ export const makeCreateFile = (
 export const applyPreferences = (
   model: Model,
   prefs: {
-    readonly isMaximized: boolean
     readonly llmBarMode: LlmBarMode
     readonly editorSplitPercent: number
   },
@@ -318,13 +313,11 @@ export const applyPreferences = (
   Model.match(model, {
     CreateFile: (state) =>
       modifyFields(state, {
-        isMaximized: () => prefs.isMaximized,
         llmBarMode: () => prefs.llmBarMode,
         editorSplitPercent: () => prefs.editorSplitPercent,
       }),
     EditFile: (state) =>
       modifyFields(state, {
-        isMaximized: () => prefs.isMaximized,
         llmBarMode: () => prefs.llmBarMode,
         editorSplitPercent: () => prefs.editorSplitPercent,
       }),
@@ -648,7 +641,6 @@ export const cancelOverwrite = (model: Model): Model =>
             isLlmThinkingMarkdown: true,
             isLlmContentMarkdown: true,
             isLlmUserMarkdown: true,
-            isMaximized: false,
             isPreviewOpen: false,
             editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
             editorSplitDrag: Option.none(),
@@ -669,7 +661,6 @@ export const cancelOverwrite = (model: Model): Model =>
             isLlmThinkingMarkdown: true,
             isLlmContentMarkdown: true,
             isLlmUserMarkdown: true,
-            isMaximized: false,
             isEditingName: false,
             isPreviewOpen: false,
             editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -850,7 +841,6 @@ export const Message = defineMessageUnion({
   SelectedLlmThinkingLevel: {
     value: Schema.String,
   },
-  ClickedToggleMaximize: {},
   ClickedCopyDts: {},
   SucceededCopyApiDtsToClipboard: {},
   FailedCopyApiDtsToClipboard: {
@@ -1013,7 +1003,6 @@ export const OutMessage = defineTaggedUnion({
   SelectedLlmModel: { value: Schema.String },
   SelectedLlmThinkingLevel: { value: Schema.String },
   ChangedLlmBarMode: { llmBarMode: LlmBarMode },
-  ChangedMaximize: { isMaximized: Schema.Boolean },
   ChangedEditorSplitPercent: { editorSplitPercent: Schema.Number },
   RequestedSettings: {},
 })
@@ -2610,44 +2599,6 @@ export const update = (
       outMessage: OutMessage.SelectedLlmThinkingLevel({ value }),
     }),
 
-    ClickedToggleMaximize: () => {
-      const nextModel = Model.match(model, {
-        CreateFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
-        EditFile: (state) => modifyFields(state, { isMaximized: (max) => !max }),
-        CreateFolder: () => model,
-        EditFolder: () => model,
-        ConfirmOverwrite: () => model,
-      })
-      const maybeMax = Model.match(nextModel, {
-        CreateFile: (state) => Option.some(state.isMaximized),
-        EditFile: (state) => Option.some(state.isMaximized),
-        CreateFolder: () => Option.none(),
-        EditFolder: () => Option.none(),
-        ConfirmOverwrite: () => Option.none(),
-      })
-      const isChatOpen = Model.match(nextModel, {
-        CreateFile: (state) => state.llmBarMode === "Chat",
-        EditFile: (state) => state.llmBarMode === "Chat",
-        CreateFolder: () => false,
-        EditFolder: () => false,
-        ConfirmOverwrite: () => false,
-      })
-      const outMessage = Option.match(maybeMax, {
-        onNone: () => OutMessage.None(),
-        onSome: (isMaximized) => OutMessage.ChangedMaximize({ isMaximized }),
-      })
-      return isChatOpen
-        ? {
-            model: nextModel,
-            commands: [ScrollLlmChatToBottomIfAtBottom()],
-            outMessage,
-          }
-        : {
-            model: nextModel,
-            outMessage,
-          }
-    },
-
     StartedResizeEditorSplit: ({ startScreenX, startScreenY, pointerId }) => {
       const drag = Option.some({
         axis: "horizontal" as const,
@@ -3190,7 +3141,7 @@ export const update = (
     }),
 
     SucceededSaveChanges: ({ entries }) => {
-      if (model._tag === "EditFile" && model.isMaximized) {
+      if (model._tag === "EditFile") {
         const savedName = model.name.trim()
         return {
           model: modifyFields(model, {
@@ -3208,7 +3159,7 @@ export const update = (
           }),
         }
       }
-      if (model._tag === "CreateFile" && model.isMaximized) {
+      if (model._tag === "CreateFile") {
         const savedName = model.name.trim()
         return {
           model: Model.EditFile({
@@ -3226,7 +3177,6 @@ export const update = (
             isLlmThinkingMarkdown: model.isLlmThinkingMarkdown ?? true,
             isLlmContentMarkdown: model.isLlmContentMarkdown ?? true,
             isLlmUserMarkdown: model.isLlmUserMarkdown ?? true,
-            isMaximized: true,
             isEditingName: false,
             isPreviewOpen: model.isPreviewOpen,
             editorSplitPercent: model.editorSplitPercent,
@@ -4707,7 +4657,6 @@ const viewEditorModal = (
     llmToolRawKeys = [],
     isLlmUserMarkdown = true,
     llmViewInputs,
-    isMaximized,
     isNameToggleable,
     isNameInputVisible,
     editorSplitPercent,
@@ -4734,7 +4683,6 @@ const viewEditorModal = (
     readonly llmToolRawKeys?: ReadonlyArray<string>
     readonly isLlmUserMarkdown?: boolean
     readonly llmViewInputs: ViewInputs
-    readonly isMaximized: boolean
     readonly isNameToggleable: boolean
     readonly isNameInputVisible: boolean
     readonly editorSplitPercent: number
@@ -4791,14 +4739,14 @@ const viewEditorModal = (
 
   return h.div(
     [
-      h.Class(isMaximized ? "modal-overlay modal-overlay-maximized" : "modal-overlay"),
+      h.Class(!isFolder ? "modal-overlay modal-overlay-maximized" : "modal-overlay"),
       h.Role("dialog"),
       h.AriaModal(true),
       h.AriaLabelledBy("modal-title"),
     ],
     [
       h.div(
-        [h.Class(isMaximized ? "modal-content is-maximized" : "modal-content")],
+        [h.Class(!isFolder ? "modal-content is-maximized" : "modal-content")],
         [
           h.header(
             [h.Class("modal-header")],
@@ -4838,20 +4786,6 @@ const viewEditorModal = (
                         ),
                       ]
                     : []),
-                  !isFolder
-                    ? h.button(
-                        [
-                          h.Type("button"),
-                          h.Id("modal-btn-maximize"),
-                          h.Class("modal-close-btn modal-header-btn"),
-                          h.AriaLabel(isMaximized ? "Wiederherstellen" : "Maximieren"),
-                          h.AriaPressed(isMaximized ? "true" : "false"),
-                          h.Title(isMaximized ? "Wiederherstellen" : "Maximieren"),
-                          h.OnClick(Message.ClickedToggleMaximize()),
-                        ],
-                        [viewIcon(isMaximized ? "restore" : "maximize", h)],
-                      )
-                    : h.empty,
                   h.button(
                     [
                       h.Type("button"),
@@ -5625,7 +5559,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmToolRawKeys: state.llmToolRawKeys ?? [],
                 isLlmUserMarkdown: state.isLlmUserMarkdown ?? true,
                 llmViewInputs: context,
-                isMaximized: state.isMaximized,
                 isNameToggleable: false,
                 isNameInputVisible: true,
                 editorSplitPercent: state.editorSplitPercent,
@@ -5690,7 +5623,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             llmChatMessages: [],
             llmChatDisplay: [],
             llmViewInputs: context,
-            isMaximized: false,
             isNameToggleable: false,
             isNameInputVisible: true,
             editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -5724,7 +5656,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmChatMessages: [],
                 llmChatDisplay: [],
                 llmViewInputs: context,
-                isMaximized: false,
                 isNameToggleable: false,
                 isNameInputVisible: true,
                 editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
@@ -5757,7 +5688,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         isLlmContentMarkdown,
         llmToolRawKeys,
         isLlmUserMarkdown,
-        isMaximized,
         isEditingName,
         isPreviewOpen: previewOpen,
         editorSplitPercent,
@@ -5808,7 +5738,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmToolRawKeys: llmToolRawKeys ?? [],
                 isLlmUserMarkdown: isLlmUserMarkdown ?? true,
                 llmViewInputs: context,
-                isMaximized,
                 isNameToggleable: true,
                 isNameInputVisible: isEditingName,
                 editorSplitPercent,

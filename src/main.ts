@@ -380,7 +380,6 @@ export const Model = Schema.Struct({
   llmChatUserName: Schema.String,
   llmDiscoveredModels: Schema.Array(Schema.String),
   hasLoadedEditorLlmModels: Schema.Boolean,
-  editorIsMaximized: Schema.Boolean,
   editorLlmBarMode: Editor.LlmBarMode,
   editorSplitPercent: Schema.Number,
   llmDraftEnabled: Schema.Boolean,
@@ -647,7 +646,6 @@ export const Message = defineMessageUnion({
   },
   CompletedSaveLlmSettings: {},
   CompletedLoadEditorPreferences: {
-    isMaximized: Schema.Boolean,
     llmBarMode: Editor.LlmBarMode,
     llmModel: Schema.String,
     llmThinkingLevel: Schema.String,
@@ -1118,7 +1116,6 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
     Effect.map(
       ([prefs, historyEnabled, apiHistoryEnabled, monacoSettings, appTheme, llmChatNames]) =>
         Message.CompletedLoadEditorPreferences({
-          isMaximized: prefs.isMaximized,
           llmBarMode: prefs.llmBarMode,
           llmModel: prefs.llmModel,
           llmThinkingLevel: prefs.llmThinkingLevel,
@@ -1135,7 +1132,6 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
 
 export const SaveEditorPreferences = Command.define("SaveEditorPreferences", {
   args: {
-    isMaximized: Schema.Boolean,
     llmBarMode: Editor.LlmBarMode,
     llmModel: Schema.String,
     llmThinkingLevel: Schema.String,
@@ -1146,7 +1142,6 @@ export const SaveEditorPreferences = Command.define("SaveEditorPreferences", {
     Effect.tryPromise({
       try: () =>
         storeEditorPreferences({
-          isMaximized: args.isMaximized,
           llmBarMode: args.llmBarMode,
           llmModel: args.llmModel,
           llmThinkingLevel: args.llmThinkingLevel,
@@ -2120,7 +2115,6 @@ export const init = (
         llmChatUserName: DEFAULT_LLM_CHAT_USER_NAME,
         llmDiscoveredModels: [],
         hasLoadedEditorLlmModels: false,
-        editorIsMaximized: false,
         editorLlmBarMode: "Closed",
         editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
         llmDraftEnabled: false,
@@ -2207,7 +2201,6 @@ export const init = (
       llmChatUserName: DEFAULT_LLM_CHAT_USER_NAME,
       llmDiscoveredModels: [],
       hasLoadedEditorLlmModels: false,
-      editorIsMaximized: false,
       editorLlmBarMode: "Closed",
       editorSplitPercent: DEFAULT_EDITOR_SPLIT_PERCENT,
       llmDraftEnabled: false,
@@ -2421,7 +2414,6 @@ const handleStorageActivated = (
         onNone: () => model.modalState,
         onSome: (modal) =>
           Modal.applyEditorPreferences(modal, {
-            isMaximized: model.editorIsMaximized,
             llmBarMode: model.editorLlmBarMode,
             editorSplitPercent: model.editorSplitPercent,
           }),
@@ -3141,7 +3133,6 @@ export const update = (
           }
 
           const baseModalState = Modal.openCreate(target, [], {
-            isMaximized: modelWithRoute.editorIsMaximized,
             llmBarMode: modelWithRoute.editorLlmBarMode,
             editorSplitPercent: modelWithRoute.editorSplitPercent,
           })
@@ -4140,7 +4131,6 @@ export const update = (
     CompletedSaveLlmSettings: () => ({ model }),
 
     CompletedLoadEditorPreferences: ({
-      isMaximized,
       llmBarMode,
       llmModel,
       llmThinkingLevel,
@@ -4154,7 +4144,6 @@ export const update = (
       const nextAppTheme = appTheme ?? model.appTheme
       return {
         model: modifyFields(model, {
-          editorIsMaximized: () => isMaximized,
           editorLlmBarMode: () => llmBarMode,
           editorSplitPercent: () => editorSplitPercent,
           historyEnabled: () => historyEnabled ?? model.historyEnabled,
@@ -4179,7 +4168,6 @@ export const update = (
           llmDraftThinkingLevel: (current) => (current === "" ? llmThinkingLevel : current),
           modalState: (current) =>
             Modal.applyEditorPreferences(current, {
-              isMaximized,
               llmBarMode,
               editorSplitPercent,
             }),
@@ -4430,7 +4418,6 @@ export const update = (
         modifyFields(model, {
           modalState: () =>
             Modal.openCreate("file", [], {
-              isMaximized: model.editorIsMaximized,
               llmBarMode: model.editorLlmBarMode,
               editorSplitPercent: model.editorSplitPercent,
             }),
@@ -4674,7 +4661,6 @@ export const update = (
         llmEnabled: isChatAvailable(model),
         llmEditFormat: model.llmEditFormat,
         editorDefaults: {
-          isMaximized: model.editorIsMaximized,
           llmBarMode: model.editorLlmBarMode,
           editorSplitPercent: model.editorSplitPercent,
         },
@@ -4821,7 +4807,6 @@ export const update = (
             commands: [
               ...mappedCommands,
               SaveEditorPreferences({
-                isMaximized: model.editorIsMaximized,
                 llmBarMode: model.editorLlmBarMode,
                 llmModel: value,
                 llmThinkingLevel: nextThinkingLevel,
@@ -4840,7 +4825,6 @@ export const update = (
           commands: [
             ...mappedCommands,
             SaveEditorPreferences({
-              isMaximized: model.editorIsMaximized,
               llmBarMode: model.editorLlmBarMode,
               llmModel: model.llmModel,
               llmThinkingLevel: value,
@@ -4857,25 +4841,7 @@ export const update = (
           commands: [
             ...mappedCommands,
             SaveEditorPreferences({
-              isMaximized: model.editorIsMaximized,
               llmBarMode,
-              llmModel: model.llmModel,
-              llmThinkingLevel: model.llmThinkingLevel,
-              editorSplitPercent: model.editorSplitPercent,
-            }),
-          ],
-        }),
-
-        ChangedMaximize: ({ isMaximized }) => ({
-          model: modifyFields(model, {
-            modalState: () => modalResult.model,
-            editorIsMaximized: () => isMaximized,
-          }),
-          commands: [
-            ...mappedCommands,
-            SaveEditorPreferences({
-              isMaximized,
-              llmBarMode: model.editorLlmBarMode,
               llmModel: model.llmModel,
               llmThinkingLevel: model.llmThinkingLevel,
               editorSplitPercent: model.editorSplitPercent,
@@ -4891,7 +4857,6 @@ export const update = (
           commands: [
             ...mappedCommands,
             SaveEditorPreferences({
-              isMaximized: model.editorIsMaximized,
               llmBarMode: model.editorLlmBarMode,
               llmModel: model.llmModel,
               llmThinkingLevel: model.llmThinkingLevel,

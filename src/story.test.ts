@@ -132,7 +132,6 @@ const readyModel: Model = {
   llmChatUserName: "Du",
   llmDiscoveredModels: [],
   hasLoadedEditorLlmModels: false,
-  editorIsMaximized: false,
   editorLlmBarMode: "Closed",
   editorSplitPercent: 62,
   llmDraftEnabled: false,
@@ -1098,7 +1097,6 @@ describe("PWA Islands Story Tests", () => {
         llmChatMessages: [],
         llmChatDisplay: [],
         llmChatState: Editor.LlmChatState.Idle(),
-        isMaximized: false,
         isEditingName: true,
         isPreviewOpen: false,
         editorSplitPercent: 62,
@@ -1155,7 +1153,7 @@ describe("PWA Islands Story Tests", () => {
           SaveChanges,
           Editor.Message.SucceededSaveChanges({ entries: sampleEntries }),
         ),
-        Command.resolve(ReplaceUrl, Message.CompletedReplaceUrl()),
+        Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
       )
     })
 
@@ -1298,7 +1296,6 @@ describe("PWA Islands Story Tests", () => {
             llmChatMessages: [],
             llmChatDisplay: [],
             llmChatState: Editor.LlmChatState.Idle(),
-            isMaximized: false,
             isEditingName: false,
             isPreviewOpen: false,
             editorSplitPercent: 62,
@@ -1363,7 +1360,6 @@ describe("PWA Islands Story Tests", () => {
             llmChatMessages: [],
             llmChatDisplay: [],
             llmChatState: Editor.LlmChatState.Idle(),
-            isMaximized: false,
             isEditingName: false,
             isPreviewOpen: false,
             editorSplitPercent: 62,
@@ -1411,7 +1407,6 @@ describe("PWA Islands Story Tests", () => {
             llmChatMessages: [],
             llmChatDisplay: [],
             llmChatState: Editor.LlmChatState.Idle(),
-            isMaximized: false,
             isEditingName: false,
             isPreviewOpen: false,
             editorSplitPercent: 62,
@@ -2749,7 +2744,6 @@ describe("PWA Islands Story Tests", () => {
         given(modelWithOpenEditor),
         message(
           Message.CompletedLoadEditorPreferences({
-            isMaximized: true,
             llmBarMode: "Chat",
             llmModel: "qwen3",
             llmThinkingLevel: "high",
@@ -2757,7 +2751,6 @@ describe("PWA Islands Story Tests", () => {
           }),
         ),
         model((m) => {
-          expect(m.editorIsMaximized).toBe(true)
           expect(m.editorLlmBarMode).toBe("Chat")
           expect(m.llmModel).toBe("qwen3")
           expect(m.llmThinkingLevel).toBe("high")
@@ -2782,7 +2775,7 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
-    it("übernimmt gespeichertes isMaximized und llmBarMode auch wenn SucceededInitializeStorage nach CompletedLoadEditorPreferences und CompletedLoadLlmSettings eintrifft", () => {
+    it("übernimmt gespeichertes llmBarMode und editorSplitPercent auch wenn SucceededInitializeStorage nach CompletedLoadEditorPreferences und CompletedLoadLlmSettings eintrifft", () => {
       story(
         update,
         given(readyModel),
@@ -2804,7 +2797,6 @@ describe("PWA Islands Story Tests", () => {
         ),
         message(
           Message.CompletedLoadEditorPreferences({
-            isMaximized: true,
             llmBarMode: "Copy",
             llmModel: "",
             llmThinkingLevel: "",
@@ -2831,7 +2823,6 @@ describe("PWA Islands Story Tests", () => {
                   llmChatMessages: [],
                   llmChatDisplay: [],
                   llmChatState: Editor.LlmChatState.Idle(),
-                  isMaximized: false,
                   isEditingName: false,
                   isPreviewOpen: false,
                   editorSplitPercent: 62,
@@ -2852,7 +2843,6 @@ describe("PWA Islands Story Tests", () => {
           if (m.modalState._tag === "Editor") {
             expect(m.modalState.editor._tag).toBe("EditFile")
             if (m.modalState.editor._tag === "EditFile") {
-              expect(m.modalState.editor.isMaximized).toBe(true)
               expect(m.modalState.editor.llmBarMode).toBe("Copy")
               expect(m.modalState.editor.editorSplitPercent).toBe(70)
             }
@@ -2863,7 +2853,6 @@ describe("PWA Islands Story Tests", () => {
 
     it("merkt sich die angepasste Editor-Breite beim Ziehen des Trennbalkens", () => {
       const editorModel = Editor.makeCreateFile([], {
-        isMaximized: true,
         llmBarMode: "Chat",
         editorSplitPercent: 62,
       })
@@ -2930,12 +2919,10 @@ describe("PWA Islands Story Tests", () => {
         modalState: () =>
           ModalState.Editor({
             editor: Editor.makeCreateFile([], {
-              isMaximized: true,
               llmBarMode: "Chat",
               editorSplitPercent: 50,
             }),
           }),
-        editorIsMaximized: () => true,
         editorLlmBarMode: () => "Chat",
       })
 
@@ -2951,7 +2938,6 @@ describe("PWA Islands Story Tests", () => {
         ),
         Command.expectExact(
           SaveEditorPreferences({
-            isMaximized: true,
             llmBarMode: "Chat",
             llmModel: "",
             llmThinkingLevel: "",

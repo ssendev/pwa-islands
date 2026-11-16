@@ -119,7 +119,6 @@ const readyModel: Model = {
   llmChatUserName: "Du",
   llmDiscoveredModels: [],
   hasLoadedEditorLlmModels: false,
-  editorIsMaximized: false,
   editorLlmBarMode: "Closed",
   editorSplitPercent: 62,
   llmDraftEnabled: false,
@@ -187,9 +186,18 @@ describe("PWA Islands Scene Tests", () => {
         value: "<h1>Hallo Welt</h1>",
       }),
       click(selector("#modal-btn-save")),
+      Command.resolve(
+        Editor.SaveChanges,
+        Editor.Message.SucceededSaveChanges({ entries: updatedEntries }),
+      ),
+      sceneExpect(selector(".modal-overlay")).toExist(),
+      sceneExpect(selector(".modal-title")).toContainText("Datei bearbeiten: hallo.html"),
+      sceneExpect(selector("#toast-container .toast.alert-info")).toContainText("Gespeichert."),
+      Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
+      click(selector(".modal-header .modal-close-btn")),
       Command.resolveAll(
-        [Editor.SaveChanges, Editor.Message.SucceededSaveChanges({ entries: updatedEntries })],
         [ReplaceUrl, Message.CompletedReplaceUrl()],
+        [Modal.RevokeActivePreviewUrl, Modal.Message.CompletedRevokeActivePreviewUrl()],
       ),
       sceneExpect(selector(".modal-overlay")).toBeAbsent(),
       sceneExpect(text("hallo.html")).toExist(),
@@ -214,7 +222,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -739,7 +746,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -794,7 +800,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -841,7 +846,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -890,7 +894,6 @@ describe("PWA Islands Scene Tests", () => {
       llmChatMessages: [],
       llmChatDisplay: [],
       llmChatState: Editor.LlmChatState.Idle(),
-      isMaximized: false,
       isEditingName: false,
       isPreviewOpen: false,
       editorSplitPercent: 62,
@@ -969,7 +972,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -1048,25 +1050,17 @@ describe("PWA Islands Scene Tests", () => {
     scene(
       { update, view },
       given(modelWithCreateFile),
-      sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Maximieren"),
-      sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
-      sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
-      click(selector("#modal-btn-maximize")),
-      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
-      sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Wiederherstellen"),
+      sceneExpect(selector("#modal-btn-maximize")).toBeAbsent(),
       sceneExpect(selector(".modal-content.is-maximized")).toExist(),
       sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toExist(),
-      click(selector("#modal-btn-maximize")),
-      Command.resolve(SaveEditorPreferences, Message.CompletedSaveEditorPreferences()),
-      sceneExpect(selector("#modal-btn-maximize")).toHaveAttr("aria-label", "Maximieren"),
-      sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
-      sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
     )
 
     scene(
       { update, view },
       given(modelWithFolderModal),
       sceneExpect(selector("#modal-btn-maximize")).toBeAbsent(),
+      sceneExpect(selector(".modal-content.is-maximized")).toBeAbsent(),
+      sceneExpect(selector(".modal-overlay.modal-overlay-maximized")).toBeAbsent(),
     )
   })
 
@@ -1571,7 +1565,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -1629,7 +1622,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -1760,7 +1752,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 42,
@@ -1800,8 +1791,8 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
-  it("schließt den Editor beim Speichern nicht, wenn er maximiert ist", () => {
-    const modelWithMaximizedEditFile: Model = {
+  it("schließt den Editor beim Speichern nicht", () => {
+    const modelWithEditFile: Model = {
       ...readyModel,
       modalState: ModalState.Editor({
         editor: Editor.Model.EditFile({
@@ -1815,7 +1806,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: true,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -1830,7 +1820,7 @@ describe("PWA Islands Scene Tests", () => {
 
     scene(
       { update, view },
-      given(modelWithMaximizedEditFile),
+      given(modelWithEditFile),
       click(selector("#modal-btn-save")),
       Command.resolve(Editor.SaveChanges, Editor.Message.SucceededSaveChanges({ entries: [] })),
       sceneExpect(selector(".modal-overlay")).toExist(),
@@ -1842,7 +1832,7 @@ describe("PWA Islands Scene Tests", () => {
   })
 
   it("speichert die Datei bei save-requested aus dem Monaco-Editor (Strg+S)", () => {
-    const modelWithMaximizedEditFile: Model = {
+    const modelWithEditFile: Model = {
       ...readyModel,
       modalState: ModalState.Editor({
         editor: Editor.Model.EditFile({
@@ -1856,7 +1846,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: true,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,
@@ -1871,7 +1860,7 @@ describe("PWA Islands Scene Tests", () => {
 
     scene(
       { update, view },
-      given(modelWithMaximizedEditFile),
+      given(modelWithEditFile),
       CustomElement.emit(
         monacoEditorElement,
         selector("#modal-file-content"),
@@ -1964,7 +1953,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: readyModel.editorSplitPercent,
@@ -2033,7 +2021,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: readyModel.editorSplitPercent,
@@ -2136,7 +2123,6 @@ describe("PWA Islands Scene Tests", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: readyModel.editorSplitPercent,
@@ -2405,7 +2391,6 @@ describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
           llmChatMessages: [],
           llmChatDisplay: [],
           llmChatState: Editor.LlmChatState.Idle(),
-          isMaximized: false,
           isEditingName: false,
           isPreviewOpen: false,
           editorSplitPercent: 62,

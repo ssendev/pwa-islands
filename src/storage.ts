@@ -366,7 +366,6 @@ export const clampEditorSplitPercent = (value: number): number =>
   Math.min(85, Math.max(20, Math.round(value * 10) / 10))
 
 export type EditorPreferences = {
-  isMaximized: boolean
   llmBarMode: "Closed" | "Chat" | "Copy"
   llmModel: string
   llmThinkingLevel: string
@@ -374,7 +373,6 @@ export type EditorPreferences = {
 }
 
 export const emptyEditorPreferences: EditorPreferences = {
-  isMaximized: false,
   llmBarMode: "Closed",
   llmModel: "",
   llmThinkingLevel: "",
@@ -392,10 +390,6 @@ export async function getStoredEditorPreferences(): Promise<EditorPreferences> {
       req.onsuccess = () => {
         const value: unknown = req.result
         const record = typeof value === "object" && value !== null ? value : {}
-        const isMaximized =
-          "isMaximized" in record && typeof record.isMaximized === "boolean"
-            ? record.isMaximized
-            : false
         const llmBarMode =
           "llmBarMode" in record &&
           (record.llmBarMode === "Closed" ||
@@ -416,7 +410,6 @@ export async function getStoredEditorPreferences(): Promise<EditorPreferences> {
             ? clampEditorSplitPercent(record.editorSplitPercent)
             : DEFAULT_EDITOR_SPLIT_PERCENT
         resolve({
-          isMaximized,
           llmBarMode,
           llmModel,
           llmThinkingLevel,
