@@ -318,5 +318,30 @@ describe("llm-response markdown", () => {
       sceneExpect(selector(".llm-response-text")).toContainText("toolcall search"),
       sceneExpect(selector(".llm-tool-details")).toExist(),
     )
+
+    scene(
+      { update: testUpdate, view: testView },
+      given({
+        content: "toolcall write\n```write\n<h1>Hallo</h1>\n```",
+        reasoning: "",
+        isStreaming: false,
+        isContentMarkdown: true,
+        assistantContent: "",
+        toolDetails: [
+          {
+            summary: "Tool-Aufruf: write (1 Zeilen)",
+            name: "write",
+            arguments: '{"content":"<h1>Hallo</h1>"}',
+            result: "Gespeichert",
+          },
+        ],
+      }),
+      sceneExpect(selector('button[aria-label="Antwort-Markdown umschalten"]')).toExist(),
+      sceneExpect(selector(".llm-response-content .llm-markdown")).toBeAbsent(),
+      click(selector('button[aria-label="Antwort-Markdown umschalten"]')),
+      sceneExpect(selector(".llm-response-text")).toContainText(
+        "toolcall write\n```write\n<h1>Hallo</h1>\n```",
+      ),
+    )
   })
 })

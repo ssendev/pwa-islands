@@ -119,7 +119,11 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
   const rawToolKeys = props.rawToolKeys ?? []
   const toolKeyPrefix = props.toolKeyPrefix ?? "tool"
 
-  if (!hasReasoning && !hasContent && !hasToolDetails && !props.isStreaming) {
+  const hasRawContent = props.content.trim() !== ""
+  const showContentSection =
+    hasContent || (hasToolDetails && hasRawContent && props.onToggleContentMarkdown !== undefined)
+
+  if (!hasReasoning && !showContentSection && !hasToolDetails && !props.isStreaming) {
     return h.empty
   }
 
@@ -166,7 +170,7 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
             ],
           )
         : h.empty,
-      hasContent
+      showContentSection
         ? h.div(
             [h.Class("llm-response-content")],
             [
@@ -178,12 +182,14 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                       h.div(
                         [h.Class("llm-response-section-actions")],
                         [
-                          viewHeaderCopyButton(
-                            displayContent,
-                            props.onCopyCode,
-                            "Antwort kopieren",
-                            h,
-                          ),
+                          hasContent
+                            ? viewHeaderCopyButton(
+                                displayContent,
+                                props.onCopyCode,
+                                "Antwort kopieren",
+                                h,
+                              )
+                            : h.empty,
                           viewMarkdownToggleButton(
                             isContentMarkdown,
                             props.onToggleContentMarkdown,
@@ -195,13 +201,15 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                     ],
                   )
                 : h.empty,
-              isContentMarkdown
-                ? viewMarkdown(
-                    displayContent,
-                    { heal: props.isStreaming, onCopyCode: props.onCopyCode },
-                    h,
-                  )
-                : h.p([h.Class("llm-response-text")], [displayContent]),
+              hasContent
+                ? isContentMarkdown
+                  ? viewMarkdown(
+                      displayContent,
+                      { heal: props.isStreaming, onCopyCode: props.onCopyCode },
+                      h,
+                    )
+                  : h.p([h.Class("llm-response-text")], [displayContent])
+                : h.empty,
             ],
           )
         : h.empty,
