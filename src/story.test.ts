@@ -1153,7 +1153,10 @@ describe("PWA Islands Story Tests", () => {
           SaveChanges,
           Editor.Message.SucceededSaveChanges({ entries: sampleEntries }),
         ),
-        Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
+        Command.resolveAll(
+          [ReplaceUrl, Message.CompletedReplaceUrl()],
+          [WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })],
+        ),
       )
     })
 

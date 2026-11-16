@@ -4724,7 +4724,12 @@ export const update = (
           commands: [...mappedCommands, ReplaceUrl({ url })],
         }),
 
-        EntriesUpdated: ({ entries, maybeAlertBanner, replaceUrl: shouldReplaceUrl }) => {
+        EntriesUpdated: ({
+          entries,
+          maybeAlertBanner,
+          replaceUrl: shouldReplaceUrl,
+          maybeReplaceUrl,
+        }) => {
           const nextStorageState = Match.value(model.storageState).pipe(
             Match.tag("Ready", (readyState) => {
               const nextEntries = Array.isReadonlyArrayEmpty(entries)
@@ -4747,9 +4752,17 @@ export const update = (
             modalState: () => modalResult.model,
           })
           const toastResult = enqueueMaybeToast(baseModel, maybeAlertBanner)
+          const replaceUrlCommands: ReadonlyArray<Command.Command<Message>> = Option.match(
+            maybeReplaceUrl,
+            {
+              onSome: (url) => [ReplaceUrl({ url })],
+              onNone: () =>
+                shouldReplaceUrl ? [ReplaceUrl({ url: buildFolderUrl(subPath) })] : [],
+            },
+          )
           const commands: ReadonlyArray<Command.Command<Message>> = [
             ...mappedCommands,
-            ...(shouldReplaceUrl ? [ReplaceUrl({ url: buildFolderUrl(subPath) })] : []),
+            ...replaceUrlCommands,
             ...(toastResult.commands ?? []),
           ]
 

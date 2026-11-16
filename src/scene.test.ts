@@ -190,10 +190,16 @@ describe("PWA Islands Scene Tests", () => {
         Editor.SaveChanges,
         Editor.Message.SucceededSaveChanges({ entries: updatedEntries }),
       ),
+      Command.expectExact(
+        ReplaceUrl({ url: "/hallo.html?pwaislands=edit" }),
+        WaitBeforeDismissToast({ id: 1 }),
+      ),
+      Command.resolveAll(
+        [ReplaceUrl, Message.CompletedReplaceUrl()],
+        [WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })],
+      ),
       sceneExpect(selector(".modal-overlay")).toExist(),
       sceneExpect(selector(".modal-title")).toContainText("Datei bearbeiten: hallo.html"),
-      sceneExpect(selector("#toast-container .toast.alert-info")).toContainText("Gespeichert."),
-      Command.resolve(WaitBeforeDismissToast, Message.CompletedWaitBeforeDismissToast({ id: 1 })),
       click(selector(".modal-header .modal-close-btn")),
       Command.resolveAll(
         [ReplaceUrl, Message.CompletedReplaceUrl()],

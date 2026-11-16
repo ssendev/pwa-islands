@@ -674,6 +674,7 @@ export const OutMessage = defineTaggedUnion({
     entries: Schema.Array(FileEntry),
     maybeAlertBanner: Schema.Option(AlertBanner),
     replaceUrl: Schema.Boolean,
+    maybeReplaceUrl: Schema.Option(Schema.String),
   },
   FileHistoryCleared: {
     fileName: Schema.String,
@@ -909,7 +910,7 @@ export const update = (
               commands: mappedCommands,
               outMessage: OutMessage.NavigateBack(),
             }),
-            EntriesUpdated: ({ entries, closeModal, maybeAlertBanner }) => ({
+            EntriesUpdated: ({ entries, closeModal, maybeAlertBanner, maybeReplaceUrl }) => ({
               model: closeModal
                 ? ModalState.Closed()
                 : ModalState.Editor({ editor: editorResult.model }),
@@ -918,6 +919,7 @@ export const update = (
                 entries,
                 maybeAlertBanner,
                 replaceUrl: closeModal,
+                maybeReplaceUrl,
               }),
             }),
             FileHistoryCleared: ({ fileName }) => ({
@@ -1259,6 +1261,7 @@ export const update = (
         entries,
         maybeAlertBanner,
         replaceUrl: false,
+        maybeReplaceUrl: Option.none(),
       }),
     }),
 

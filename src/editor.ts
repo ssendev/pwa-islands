@@ -991,6 +991,7 @@ export const OutMessage = defineTaggedUnion({
     entries: Schema.Array(FileEntry),
     closeModal: Schema.Boolean,
     maybeAlertBanner: Schema.Option(AlertBanner),
+    maybeReplaceUrl: Schema.Option(Schema.String),
   },
   FileHistoryCleared: {
     fileName: Schema.String,
@@ -3143,6 +3144,10 @@ export const update = (
     SucceededSaveChanges: ({ entries }) => {
       if (model._tag === "EditFile") {
         const savedName = model.name.trim()
+        const maybeReplaceUrl =
+          model.originalName !== savedName
+            ? Option.some(buildEditUrl(context.subPath, savedName, model.isPreviewOpen))
+            : Option.none()
         return {
           model: modifyFields(model, {
             originalName: () => savedName,
@@ -3156,6 +3161,7 @@ export const update = (
               message: "Gespeichert.",
               variant: "info",
             }),
+            maybeReplaceUrl,
           }),
         }
       }
@@ -3193,6 +3199,9 @@ export const update = (
               message: "Gespeichert.",
               variant: "info",
             }),
+            maybeReplaceUrl: Option.some(
+              buildEditUrl(context.subPath, savedName, model.isPreviewOpen),
+            ),
           }),
         }
       }
@@ -3202,6 +3211,7 @@ export const update = (
           entries,
           closeModal: true,
           maybeAlertBanner: Option.none(),
+          maybeReplaceUrl: Option.none(),
         }),
       }
     },
@@ -3224,6 +3234,7 @@ export const update = (
         entries,
         closeModal: true,
         maybeAlertBanner: Option.none(),
+        maybeReplaceUrl: Option.none(),
       }),
     }),
 
@@ -3527,6 +3538,7 @@ export const update = (
               message: "Version wiederhergestellt.",
               variant: "info",
             }),
+            maybeReplaceUrl: Option.none(),
           }),
         }),
       })
