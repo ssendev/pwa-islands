@@ -5409,7 +5409,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                   ? streamToolCallParts(requestConfig, onChunk, controller.signal)
                   : streamChatParts(
                       requestConfig,
-                      "Antworte nur mit: ok",
+                      t(getDocumentLanguage()).agent.chatTestPrompt,
                       onChunk,
                       controller.signal,
                     )

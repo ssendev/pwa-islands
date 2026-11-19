@@ -1,6 +1,7 @@
 import { Array, Match, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
 import { extractFencedLines } from "./edit-match"
+import { getDocumentLanguage, t } from "./i18n"
 
 const FNV_OFFSET_BASIS = 0x811c9dc5
 const FNV_PRIME = 0x01000193
@@ -24,67 +25,61 @@ export const formatFencedHashlineFile = (_fileName: string, content: string): st
   return ["```", hashedFile, "```"].join("\n") + "\n\n"
 }
 
-const HASHLINE_COMMAND_RULES = [
-  "- `REPLACE <zeile>:<hash>` oder `REPLACE <start>:<hash>..<ende>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
-  "- `INSERT_AFTER <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
-  "- `INSERT_BEFORE <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
-  "- `DELETE <zeile>:<hash>` oder `DELETE <start>:<hash>..<ende>:<hash>`",
-  "",
-  "Wichtig:",
-  "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
-  "- Schreibe in den neuen Zeilen **keine** `ZEILE:HASH|`-Präfixe.",
-  "- Verwende exakt die Zeilennummern und Hashes aus der Datei unten.",
-  "- Alle Anker eines Aufrufs beziehen sich auf den Dateistand **vor** diesem Aufruf (Zeilennummern nicht selbst verschieben).",
-  "- Bearbeitungen innerhalb eines Aufrufs dürfen sich nicht überlappen.",
-]
-
 const formatHashlineCommandLines = (
   fenceLang: string,
   toolHeader?: string,
-): ReadonlyArray<string> => [
-  ...HASHLINE_COMMAND_RULES,
-  "",
-  "Beispiel:",
-  "",
-  ...(toolHeader ? [toolHeader] : []),
-  `\`\`\`${fenceLang}`,
-  "REPLACE 12:a3f..13:b4c",
-  "  <p>Neuer Text</p>",
-  "END",
-  "INSERT_AFTER 20:c1d",
-  "  <script>console.log('ok')</script>",
-  "END",
-  "DELETE 30:e2f",
-  "```",
-]
-
-export const formatHashlineSystemPrompt = (useToolCalls = true): string =>
-  [
-    "## Anleitung für die Antwort (Hash-Anchored Line Edits)",
+): ReadonlyArray<string> => {
+  const hl = t(getDocumentLanguage()).hashline
+  return [
+    ...hl.commandRules,
     "",
-    "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
-    useToolCalls
-      ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:"
-      : "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden Befehlen:",
+    hl.exampleHeading,
+    "",
+    ...(toolHeader ? [toolHeader] : []),
+    `\`\`\`${fenceLang}`,
+    "REPLACE 12:a3f..13:b4c",
+    hl.exampleNewText,
+    "END",
+    "INSERT_AFTER 20:c1d",
+    "  <script>console.log('ok')</script>",
+    "END",
+    "DELETE 30:e2f",
+    "```",
+  ]
+}
+
+export const formatHashlineSystemPrompt = (useToolCalls = true): string => {
+  const hl = t(getDocumentLanguage()).hashline
+  return [
+    hl.systemHeading,
+    "",
+    hl.systemFileFormat,
+    useToolCalls ? hl.systemUseToolCalls : hl.systemUseTextToolCall,
     "",
     ...formatHashlineCommandLines(
       useToolCalls ? "hashline" : "edit",
       useToolCalls ? undefined : "toolcall edit",
     ),
   ].join("\n")
+}
 
 export const formatApiDtsMessage = (apiDts: string): string =>
   ["## /api.d.ts", "", "```ts", apiDts.trimEnd(), "```"].join("\n")
 
 export const formatHashedFileMessage = (fileName: string, content: string): string =>
-  [`## Datei: \`${fileName}\``, "", formatFencedHashlineFile(fileName, content)].join("\n")
+  [
+    t(getDocumentLanguage()).hashline.fileHeading(fileName),
+    "",
+    formatFencedHashlineFile(fileName, content),
+  ].join("\n")
 
 export const formatLlmContext = (fileName: string, content: string, apiDts: string): string => {
+  const hl = t(getDocumentLanguage()).hashline
   return [
-    "## Anleitung für die Antwort (Hash-Anchored Line Edits)",
+    hl.systemHeading,
     "",
-    "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
-    "Antworte **nur** mit einem Markdown-Codeblock (` ```hashline `) mit folgenden Befehlen:",
+    hl.systemFileFormat,
+    hl.contextReplyOnly,
     "",
     ...formatHashlineCommandLines("hashline"),
     "",
@@ -95,13 +90,9 @@ export const formatLlmContext = (fileName: string, content: string, apiDts: stri
 }
 
 export const formatUpdatedHashlines = (fileName: string, changedLines: string): string =>
-  [
-    `Änderungen angewendet. Geänderte Zeilen in \`${fileName}\`:`,
-    "",
-    "```",
-    changedLines,
-    "```",
-  ].join("\n") + "\n\n"
+  [t(getDocumentLanguage()).hashline.updatedHeading(fileName), "", "```", changedLines, "```"].join(
+    "\n",
+  ) + "\n\n"
 
 export const HashlineApplyResult = defineTaggedUnion({
   Ok: {
@@ -266,13 +257,10 @@ const finishCollecting = (
       : state.kind === "INSERT_AFTER"
         ? { _tag: "InsertAfter", source: state.source, anchor: state.start, lines: body.lines }
         : { _tag: "InsertBefore", source: state.source, anchor: state.start, lines: body.lines }
+  const hl = t(getDocumentLanguage()).hashline
   const notes = [
-    ...(body.isStripped
-      ? [`[${state.source}] Kopierte \`ZEILE:HASH|\`-Präfixe in den neuen Zeilen wurden entfernt.`]
-      : []),
-    ...(isImplicitEnd
-      ? [`[${state.source}] Fehlendes END ergänzt (nächster Befehl folgte direkt).`]
-      : []),
+    ...(body.isStripped ? [hl.noteStrippedPrefixes(state.source)] : []),
+    ...(isImplicitEnd ? [hl.noteImplicitEnd(state.source)] : []),
   ]
   return {
     _tag: "Idle",
@@ -289,26 +277,22 @@ const startCommand = (
   keyword: string,
   rawTarget: string,
 ): ParseState => {
+  const hl = t(getDocumentLanguage()).hashline
   const kind = keywordToKind(keyword)
   const source = preview(commandLine)
   const allowsRange = kind === "REPLACE" || kind === "DELETE"
-  const formatExample = allowsRange
-    ? `\`${kind} 12:a3f\` oder \`${kind} 12:a3f..14:b4c\``
-    : `\`${kind} 12:a3f\``
+  const formatExample = allowsRange ? hl.formatExampleRange(kind) : hl.formatExampleSingle(kind)
   const withError = (message: string): ParseState => ({
     ...state,
     errors: [...state.errors, `[${source}] ${message}`],
   })
 
   if (rawTarget === "") {
-    return withError(`Zielangabe fehlt. Erwartet z. B. ${formatExample}.`)
+    return withError(hl.errMissingTarget(formatExample))
   }
 
   return Option.match(parseTarget(rawTarget), {
-    onNone: () =>
-      withError(
-        `Ungültige Zielangabe „${preview(rawTarget)}“. Erwartet ${formatExample} (Zeilennummer und Hash aus der Dateiansicht, ohne den Zeileninhalt). Neue Zeilen gehören in die Folgezeilen, nicht in die Befehlszeile.`,
-      ),
+    onNone: () => withError(hl.errInvalidTarget(preview(rawTarget), formatExample)),
     onSome: ({ start, maybeEnd }): ParseState => {
       if (kind === "DELETE") {
         return {
@@ -320,9 +304,7 @@ const startCommand = (
         }
       }
       if (kind !== "REPLACE" && Option.isSome(maybeEnd)) {
-        return withError(
-          `${kind} erwartet genau einen Anker, keinen Bereich. Erwartet z. B. ${formatExample}.`,
-        )
+        return withError(hl.errSingleAnchorOnly(kind, formatExample))
       }
       return {
         _tag: "Collecting",
@@ -362,9 +344,10 @@ const describeUnknownLines = (
     .slice(0, MAX_LISTED_UNKNOWN_LINES)
     .map((line) => `„${preview(line)}“`)
     .join(", ")
+  const hl = t(getDocumentLanguage()).hashline
   const more =
     unknownLines.length > MAX_LISTED_UNKNOWN_LINES
-      ? ` und ${unknownLines.length - MAX_LISTED_UNKNOWN_LINES} weitere`
+      ? hl.unknownMoreCount(unknownLines.length - MAX_LISTED_UNKNOWN_LINES)
       : ""
   const looksCopied = unknownLines.some((line) => COPIED_PREFIX_PATTERN.test(line))
   const followsDelete = Option.match(lastOp, {
@@ -372,17 +355,11 @@ const describeUnknownLines = (
     onSome: (op) => op._tag === "Delete",
   })
   const hints = [
-    "Außerhalb eines Befehls sind nur Befehlszeilen (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE mit `ZEILE:HASH`) erlaubt; neue Zeilen stehen zwischen Befehlszeile und END.",
-    ...(looksCopied
-      ? [
-          "Zeilen im Format `ZEILE:HASH|INHALT` stammen aus der Dateiansicht – verwende nur `ZEILE:HASH` als Anker in einem Befehl.",
-        ]
-      : []),
-    ...(followsDelete
-      ? ["DELETE hat keinen Inhaltsblock – zum Ersetzen von Zeilen REPLACE … END verwenden."]
-      : []),
+    hl.unknownHintGeneral,
+    ...(looksCopied ? [hl.unknownHintCopied] : []),
+    ...(followsDelete ? [hl.unknownHintAfterDelete] : []),
   ]
-  return [`Unbekannte Zeile(n) außerhalb eines Befehls: ${listed}${more}. ${hints.join(" ")}`]
+  return [hl.errUnknownLines(listed, more, hints.join(" "))]
 }
 
 const parseEditOps = (
@@ -427,7 +404,7 @@ const parseEditOps = (
       errors: [
         ...finalState.errors,
         ...unknownErrors,
-        `[${finalState.source}] Unvollständiger ${finalState.kind}-Block: fehlendes END. Schließe die neuen Zeilen mit einer eigenen Zeile \`END\` ab.`,
+        t(getDocumentLanguage()).hashline.errIncompleteBlock(finalState.source, finalState.kind),
       ],
       notes: finalState.notes,
     }
@@ -461,17 +438,21 @@ const validateAnchor = (
   originalLines: ReadonlyArray<string>,
   originalHashes: ReadonlyArray<string>,
 ): Option.Option<string> => {
+  const hl = t(getDocumentLanguage()).hashline
   const lineCount = originalLines.length
   if (!Number.isInteger(anchor.line) || anchor.line < 1 || anchor.line > lineCount) {
-    return Option.some(
-      `[${source}] Zeile ${anchor.line} existiert nicht – die Datei hat ${lineCount} Zeilen (gültig: 1–${lineCount}).`,
-    )
+    return Option.some(hl.errLineNotFound(source, anchor.line, lineCount))
   }
   const actualHash = originalHashes[anchor.line - 1] ?? ""
   return Option.match(anchor.maybeHash, {
     onNone: () =>
       Option.some(
-        `[${source}] Hash für Zeile ${anchor.line} fehlt. Korrekter Anker: \`${anchor.line}:${actualHash}\` (aktueller Inhalt: ${describeFileLine(originalLines, originalHashes, anchor.line)}).`,
+        hl.errHashMissing(
+          source,
+          anchor.line,
+          actualHash,
+          describeFileLine(originalLines, originalHashes, anchor.line),
+        ),
       ),
     onSome: (givenHash) => {
       if (givenHash === actualHash) {
@@ -485,10 +466,20 @@ const validateAnchor = (
       )
       const relocationHint =
         relocated.length === 1 && relocated[0] !== undefined
-          ? ` Der angegebene Hash passt zu Zeile ${relocated[0]}: ${describeFileLine(originalLines, originalHashes, relocated[0])} – vermutlich ist die Zeilennummer verschoben. Alle Anker beziehen sich auf den Dateistand vor diesem Aufruf.`
-          : " Die Zeile hat sich vermutlich geändert – lies die betroffenen Zeilen erneut, um aktuelle Hashes zu erhalten."
+          ? hl.relocationHintFound(
+              relocated[0],
+              describeFileLine(originalLines, originalHashes, relocated[0]),
+            )
+          : hl.relocationHintChanged
       return Option.some(
-        `[${source}] Zeile ${anchor.line}: Hash stimmt nicht überein (erwartet ${actualHash}, angegeben ${givenHash}). Aktueller Inhalt: ${describeFileLine(originalLines, originalHashes, anchor.line)}.${relocationHint}`,
+        hl.errHashMismatch(
+          source,
+          anchor.line,
+          actualHash,
+          givenHash,
+          describeFileLine(originalLines, originalHashes, anchor.line),
+          relocationHint,
+        ),
       )
     },
   })
@@ -507,9 +498,7 @@ const validateRange = (
       ? validateAnchor(source, end, originalLines, originalHashes)
       : Option.none(),
     start.line > end.line
-      ? Option.some(
-          `[${source}] Ungültiger Bereich: Endzeile ${end.line} liegt vor Startzeile ${start.line}.`,
-        )
+      ? Option.some(t(getDocumentLanguage()).hashline.errInvalidRange(source, end.line, start.line))
       : Option.none(),
   ])
 
@@ -600,7 +589,7 @@ export const applyHashlineEdits = (
 ): HashlineApplyResult => {
   if (responseText.trim() === "") {
     return HashlineApplyResult.Error({
-      message: "Keine Bearbeitungsbefehle gefunden – die Eingabe ist leer.",
+      message: t(getDocumentLanguage()).hashline.errEmptyInput,
     })
   }
 
@@ -610,12 +599,7 @@ export const applyHashlineEdits = (
   }
   if (Array.isReadonlyArrayEmpty(parsed.ops)) {
     return HashlineApplyResult.Error({
-      message: [
-        "Keine gültigen Bearbeitungsbefehle gefunden. Erwartet z. B.:",
-        "REPLACE 12:a3f",
-        "  <neuer Inhalt>",
-        "END",
-      ].join("\n"),
+      message: t(getDocumentLanguage()).hashline.errNoValidCommands,
     })
   }
 
@@ -639,7 +623,7 @@ export const applyHashlineEdits = (
           }
           return splicesOverlap(a, b)
             ? Option.some(
-                `[${a.description}] und [${b.description}] überlappen sich. Alle Anker beziehen sich auf den Dateistand vor diesem Aufruf – fasse überlappende Bearbeitungen zu einem einzigen Befehl zusammen.`,
+                t(getDocumentLanguage()).hashline.errOverlap(a.description, b.description),
               )
             : Option.none()
         }),
@@ -674,7 +658,7 @@ export const applyHashlineEdits = (
             splice.insertLines,
             (line, i) => `${newStart + i + 1}:${hashLine(line)}|${line}`,
           ).join("\n")
-        : `// ab Zeile ${newStart + 1} gelöscht`
+        : t(getDocumentLanguage()).hashline.deletedFromLine(newStart + 1)
       return {
         offset: state.offset + splice.insertLines.length - splice.deleteCount,
         hunks: [...state.hunks, hunk],

@@ -705,26 +705,29 @@ export const resolveTestModel = (config: LlmRequestConfig): string => {
   return config.model.trim() !== "" ? config.model.trim() : (manualModels[0] ?? "")
 }
 
-const PING_TOOL_PROMPT = "Rufe das Tool ping_test mit token='ok' auf."
+const getPingToolPrompt = (): string => t(getDocumentLanguage()).agent.pingToolPrompt
 
-const PING_TOOL_OVERRIDES: Record<string, unknown> = {
-  tools: [
-    {
-      type: "function",
-      function: {
-        name: "ping_test",
-        description: "Bestätigt, dass Tool-Aufrufe funktionieren.",
-        parameters: {
-          type: "object",
-          properties: {
-            token: { type: "string", description: "Ein beliebiger Text, z. B. ok" },
+const getPingToolOverrides = (): Record<string, unknown> => {
+  const a = t(getDocumentLanguage()).agent
+  return {
+    tools: [
+      {
+        type: "function",
+        function: {
+          name: "ping_test",
+          description: a.pingToolDescription,
+          parameters: {
+            type: "object",
+            properties: {
+              token: { type: "string", description: a.pingToolTokenDescription },
+            },
+            required: ["token"],
           },
-          required: ["token"],
         },
       },
-    },
-  ],
-  tool_choice: "auto",
+    ],
+    tool_choice: "auto",
+  }
 }
 
 const readSseStream = async <T>(
@@ -1060,8 +1063,8 @@ export const streamToolCallParts = async (
   }
   const requestBody = buildChatRequestBody(
     { ...config, model: activeModel, streaming: true },
-    PING_TOOL_PROMPT,
-    PING_TOOL_OVERRIDES,
+    getPingToolPrompt(),
+    getPingToolOverrides(),
   )
   const response = await fetch(joinUrl(config.baseUrl, "/chat/completions"), {
     method: "POST",
@@ -1164,8 +1167,8 @@ export const testToolCall = async (config: LlmRequestConfig): Promise<LlmTestRes
   }
   const requestBody = buildChatRequestBody(
     { ...config, model: activeModel, streaming: false },
-    PING_TOOL_PROMPT,
-    PING_TOOL_OVERRIDES,
+    getPingToolPrompt(),
+    getPingToolOverrides(),
   )
   const response = await fetch(joinUrl(config.baseUrl, "/chat/completions"), {
     method: "POST",
@@ -1196,7 +1199,10 @@ const runChatTest = async (config: LlmRequestConfig): Promise<LlmTestResult> => 
   if (activeModel === "") {
     throw new Error(t(getDocumentLanguage()).agent.errNoModelSelected)
   }
-  const parts = await chatOnceParts({ ...config, model: activeModel }, "Antworte nur mit: ok")
+  const parts = await chatOnceParts(
+    { ...config, model: activeModel },
+    t(getDocumentLanguage()).agent.chatTestPrompt,
+  )
   if (parts.content.trim() === "" && parts.reasoning.trim() === "") {
     throw new Error(t(getDocumentLanguage()).agent.errEmptyChatResponse)
   }
@@ -1227,7 +1233,7 @@ export const testLlmConnection = async (
     }
     const content = await runLanguageModelPrompt({
       initialPrompts: [],
-      prompt: "Antworte nur mit: ok",
+      prompt: t(getDocumentLanguage()).agent.chatTestPrompt,
       streaming: config.streaming,
     })
     if (content.trim() === "") {
@@ -1689,7 +1695,7 @@ export const runEditorChatTurn = async ({
             ],
           }),
           Error: ({ message: errorMessage }) => {
-            const fullError = `Fehler beim Anwenden der Änderungen: ${errorMessage}`
+            const fullError = t(getDocumentLanguage()).agent.errApplyingEdits(errorMessage)
             return {
               ...state,
               toolMessages: [
@@ -1718,7 +1724,7 @@ export const runEditorChatTurn = async ({
             ],
           }),
           Error: ({ message: errorMessage }) => {
-            const fullError = `Fehler beim Neuschreiben der Datei: ${errorMessage}`
+            const fullError = t(getDocumentLanguage()).agent.errRewritingFile(errorMessage)
             return {
               ...state,
               toolMessages: [
@@ -1744,7 +1750,7 @@ export const runEditorChatTurn = async ({
             ],
           }),
           Error: ({ message: errorMessage }) => {
-            const fullError = `Fehler beim Lesen der Datei: ${errorMessage}`
+            const fullError = t(getDocumentLanguage()).agent.errReadingFile(errorMessage)
             return {
               ...state,
               toolMessages: [
@@ -1770,7 +1776,7 @@ export const runEditorChatTurn = async ({
             ],
           }),
           Error: ({ message: errorMessage }) => {
-            const fullError = `Fehler beim Suchen in der Datei: ${errorMessage}`
+            const fullError = t(getDocumentLanguage()).agent.errSearchingFile(errorMessage)
             return {
               ...state,
               toolMessages: [
@@ -1784,7 +1790,7 @@ export const runEditorChatTurn = async ({
       )
     }
 
-    const unknownError = `Unbekanntes Werkzeug: ${call.name}`
+    const unknownError = t(getDocumentLanguage()).agent.errUnknownTool(call.name)
     return {
       ...state,
       toolMessages: [
@@ -1865,7 +1871,7 @@ export const runEditorChatTurn = async ({
             }
           },
           Error: ({ message: errorMessage }) => {
-            const fullError = `Fehler beim Anwenden der Änderungen: ${errorMessage}`
+            const fullError = t(getDocumentLanguage()).agent.errApplyingEdits(errorMessage)
             const toolMsg: EditorChatMessage = {
               _tag: "Tool",
               toolCallId: feedbackToolCallId,

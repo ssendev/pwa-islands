@@ -1,4 +1,5 @@
 import { Array, Option, Order } from "effect"
+import { getDocumentLanguage, t } from "./i18n"
 
 export const extractFencedLines = (lines: ReadonlyArray<string>): ReadonlyArray<string> => {
   interface FenceState {
@@ -82,24 +83,27 @@ interface MatchStrategy {
   readonly reindents: boolean
 }
 
-const MATCH_STRATEGIES: ReadonlyArray<MatchStrategy> = [
-  { normalize: (line) => line, maybeNote: Option.none(), reindents: false },
-  {
-    normalize: (line) => line.trimEnd(),
-    maybeNote: Option.some("Leerzeichen am Zeilenende ignoriert"),
-    reindents: false,
-  },
-  {
-    normalize: (line) => line.trim(),
-    maybeNote: Option.some("abweichende Einrückung erkannt und angepasst"),
-    reindents: true,
-  },
-  {
-    normalize: (line) => line.replace(/\s+/g, " ").trim(),
-    maybeNote: Option.some("abweichende Leerzeichen innerhalb der Zeilen ignoriert"),
-    reindents: true,
-  },
-]
+const getMatchStrategies = (): ReadonlyArray<MatchStrategy> => {
+  const em = t(getDocumentLanguage()).editMatch
+  return [
+    { normalize: (line) => line, maybeNote: Option.none(), reindents: false },
+    {
+      normalize: (line) => line.trimEnd(),
+      maybeNote: Option.some(em.noteTrailingWhitespace),
+      reindents: false,
+    },
+    {
+      normalize: (line) => line.trim(),
+      maybeNote: Option.some(em.noteIndentAdjusted),
+      reindents: true,
+    },
+    {
+      normalize: (line) => line.replace(/\s+/g, " ").trim(),
+      maybeNote: Option.some(em.noteInnerWhitespace),
+      reindents: true,
+    },
+  ]
+}
 
 const MAX_PREVIEW_CHARS = 160
 const MAX_REGION_PREVIEW_LINES = 12
@@ -143,7 +147,7 @@ const trimBlankEdges = (block: LineEditBlock): Option.Option<SearchCandidate> =>
       replaceLeading,
       block.replaceLines.length - replaceTrailing,
     ),
-    maybeNote: Option.some("Leerzeilen am Anfang/Ende des Suchblocks ignoriert"),
+    maybeNote: Option.some(t(getDocumentLanguage()).editMatch.noteTrimmedBlankEdges),
   })
 }
 
@@ -276,19 +280,25 @@ export const describeClosestRegion = (
             onSome: (actual) =>
               actual.replace(/\s+/g, "") === expected.replace(/\s+/g, "") && actual !== expected,
           })
+          const em = t(getDocumentLanguage()).editMatch
           return [
-            `  Erste Abweichung in Zeile ${firstDiffOffset + 1} des Suchblocks${onlyWhitespace ? " (nur Leerzeichen/Einrückung unterschiedlich)" : ""}:`,
-            `    erwartet: \`${previewLine(expected)}\``,
+            em.firstDiffLine(firstDiffOffset + 1, onlyWhitespace),
+            em.expectedLine(previewLine(expected)),
             Option.match(maybeActual, {
-              onNone: () => "    Datei:    (Dateiende erreicht)",
+              onNone: () => em.fileEof,
               onSome: (actual) =>
-                `    Datei:    \`${previewLine(actual)}\` (Zeile ${best.start + firstDiffOffset + 1})`,
+                em.fileActualLine(previewLine(actual), best.start + firstDiffOffset + 1),
             }),
           ].join("\n")
         })()
   return Option.some(
     [
-      `  Ähnlichste Stelle: Zeilen ${best.start + 1}–${best.start + regionLength} (${best.score} von ${contentCount} Zeilen stimmen überein). Aktueller Inhalt dort:`,
+      t(getDocumentLanguage()).editMatch.closestRegion(
+        best.start + 1,
+        best.start + regionLength,
+        best.score,
+        contentCount,
+      ),
       formatNumbered(fileLines, best.start, regionLength),
       differenceText,
     ]
@@ -302,15 +312,15 @@ const notFoundError = (
   fileLines: ReadonlyArray<string>,
   notFoundText: string,
 ): string => {
+  const em = t(getDocumentLanguage()).editMatch
   const firstContentLine = block.searchLines.find((line) => !isBlank(line)) ?? ""
   const hint = Option.match(describeClosestRegion(fileLines, block.searchLines), {
-    onNone: () =>
-      "  Keine ähnliche Stelle in der Datei gefunden – prüfe, ob der Inhalt aus der aktuellen Dateiversion stammt.",
+    onNone: () => em.noSimilarRegion,
     onSome: (text) => text,
   })
   return [
     `${block.label} ${notFoundText}`,
-    `  Gesucht (${block.searchLines.length} Zeilen, erste Zeile): \`${previewLine(firstContentLine)}\``,
+    em.searchedLines(block.searchLines.length, previewLine(firstContentLine)),
     hint,
   ].join("\n")
 }
@@ -344,7 +354,7 @@ const applyBlock = (
   ) {
     return {
       _tag: "Unchanged",
-      note: `${block.label}: Such- und Ersetzungsteil sind identisch – übersprungen.`,
+      note: t(getDocumentLanguage()).editMatch.identicalSearchReplace(block.label),
     }
   }
 
@@ -363,7 +373,7 @@ const applyBlock = (
           index,
           0,
           block.replaceLines,
-          Option.some(`ohne Kontext anhand der Zeilenangabe vor Zeile ${index + 1} eingefügt`),
+          Option.some(t(getDocumentLanguage()).editMatch.insertedWithoutContext(index + 1)),
         )
       },
     })
@@ -390,7 +400,11 @@ const applyBlock = (
         onNone: () =>
           Option.some<BlockOutcome>({
             _tag: "Failed",
-            error: `${block.label} ist mehrdeutig (${charIndices.length} Treffer in Zeilen ${formatLineNumbers(lineIndices)}) – bitte mehr Kontextzeilen angeben, damit genau eine Stelle passt.`,
+            error: t(getDocumentLanguage()).editMatch.ambiguousMatch(
+              block.label,
+              charIndices.length,
+              formatLineNumbers(lineIndices),
+            ),
           }),
         onSome: (pickedLine) => {
           const charIndex = charIndices[lineIndices.indexOf(pickedLine)] ?? 0
@@ -419,7 +433,7 @@ const applyBlock = (
     ...Option.toArray(trimBlankEdges(block)),
   ]
 
-  const attempts = Array.flatMap(MATCH_STRATEGIES, (strategy) =>
+  const attempts = Array.flatMap(getMatchStrategies(), (strategy) =>
     Array.map(candidates, (candidate) => ({ strategy, candidate })),
   )
 
@@ -453,7 +467,11 @@ const applyBlock = (
       Option.match(pickClosestMatch(matches, maybeHintIndex), {
         onNone: () => ({
           _tag: "Failed",
-          error: `${block.label} ist mehrdeutig (${matches.length} Treffer in Zeilen ${formatLineNumbers(matches)}) – bitte mehr Kontextzeilen angeben, damit genau eine Stelle passt.`,
+          error: t(getDocumentLanguage()).editMatch.ambiguousMatch(
+            block.label,
+            matches.length,
+            formatLineNumbers(matches),
+          ),
         }),
         onSome: (start) => {
           const replaceLines = strategy.reindents
@@ -536,7 +554,11 @@ export const applyLineEditBlocks = (
     const summary =
       blocks.length > 1
         ? [
-            `${failedCount} von ${blocks.length} Blöcken konnten nicht angewendet werden${finalState.appliedCount > 0 ? `; die übrigen ${finalState.appliedCount} wären anwendbar gewesen, wurden aber ebenfalls verworfen` : ""}.`,
+            t(getDocumentLanguage()).editMatch.blocksFailedSummary(
+              failedCount,
+              blocks.length,
+              finalState.appliedCount,
+            ),
           ]
         : []
     return { _tag: "Error", errors: [...finalState.errors, ...summary] }
@@ -545,10 +567,7 @@ export const applyLineEditBlocks = (
   if (finalState.appliedCount === 0) {
     return {
       _tag: "Error",
-      errors: [
-        ...finalState.notes,
-        "Keine Änderung: Alle Blöcke haben identischen Such- und Ersetzungsteil. Gib im Ersetzungsteil den neuen Inhalt an.",
-      ],
+      errors: [...finalState.notes, t(getDocumentLanguage()).editMatch.noChangeAllIdentical],
     }
   }
 

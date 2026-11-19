@@ -215,6 +215,204 @@ const de = {
       "Tool-Calls werden von der Browser-KI (LanguageModel-API) nicht unterstützt.",
     errMaxToolSteps: "Maximale Anzahl an Werkzeugschritten erreicht.",
     editFormatUnifiedDiff: "Vereinfachter Unified Diff",
+    pingToolPrompt: "Rufe das Tool ping_test mit token='ok' auf.",
+    pingToolDescription: "Bestätigt, dass Tool-Aufrufe funktionieren.",
+    pingToolTokenDescription: "Ein beliebiger Text, z. B. ok",
+    chatTestPrompt: "Antworte nur mit: ok",
+    errApplyingEdits: (detail: string) => `Fehler beim Anwenden der Änderungen: ${detail}`,
+    errRewritingFile: (detail: string) => `Fehler beim Neuschreiben der Datei: ${detail}`,
+    errReadingFile: (detail: string) => `Fehler beim Lesen der Datei: ${detail}`,
+    errSearchingFile: (detail: string) => `Fehler beim Suchen in der Datei: ${detail}`,
+    errUnknownTool: (name: string) => `Unbekanntes Werkzeug: ${name}`,
+  },
+  editMatch: {
+    noteTrailingWhitespace: "Leerzeichen am Zeilenende ignoriert",
+    noteIndentAdjusted: "abweichende Einrückung erkannt und angepasst",
+    noteInnerWhitespace: "abweichende Leerzeichen innerhalb der Zeilen ignoriert",
+    noteTrimmedBlankEdges: "Leerzeilen am Anfang/Ende des Suchblocks ignoriert",
+    firstDiffLine: (lineNum: number, onlyWhitespace: boolean) =>
+      `  Erste Abweichung in Zeile ${lineNum} des Suchblocks${onlyWhitespace ? " (nur Leerzeichen/Einrückung unterschiedlich)" : ""}:`,
+    expectedLine: (preview: string) => `    erwartet: \`${preview}\``,
+    fileEof: "    Datei:    (Dateiende erreicht)",
+    fileActualLine: (preview: string, lineNum: number) =>
+      `    Datei:    \`${preview}\` (Zeile ${lineNum})`,
+    closestRegion: (startLine: number, endLine: number, score: number, total: number) =>
+      `  Ähnlichste Stelle: Zeilen ${startLine}–${endLine} (${score} von ${total} Zeilen stimmen überein). Aktueller Inhalt dort:`,
+    noSimilarRegion:
+      "  Keine ähnliche Stelle in der Datei gefunden – prüfe, ob der Inhalt aus der aktuellen Dateiversion stammt.",
+    searchedLines: (count: number, firstLine: string) =>
+      `  Gesucht (${count} Zeilen, erste Zeile): \`${firstLine}\``,
+    identicalSearchReplace: (label: string) =>
+      `${label}: Such- und Ersetzungsteil sind identisch – übersprungen.`,
+    insertedWithoutContext: (lineNum: number) =>
+      `ohne Kontext anhand der Zeilenangabe vor Zeile ${lineNum} eingefügt`,
+    ambiguousMatch: (label: string, count: number, lines: string) =>
+      `${label} ist mehrdeutig (${count} Treffer in Zeilen ${lines}) – bitte mehr Kontextzeilen angeben, damit genau eine Stelle passt.`,
+    blocksFailedSummary: (failedCount: number, totalCount: number, appliedCount: number) =>
+      `${failedCount} von ${totalCount} Blöcken konnten nicht angewendet werden${appliedCount > 0 ? `; die übrigen ${appliedCount} wären anwendbar gewesen, wurden aber ebenfalls verworfen` : ""}.`,
+    noChangeAllIdentical:
+      "Keine Änderung: Alle Blöcke haben identischen Such- und Ersetzungsteil. Gib im Ersetzungsteil den neuen Inhalt an.",
+  },
+  hashline: {
+    commandRules: [
+      "- `REPLACE <zeile>:<hash>` oder `REPLACE <start>:<hash>..<ende>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
+      "- `INSERT_AFTER <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
+      "- `INSERT_BEFORE <zeile>:<hash>` (gefolgt von den neuen Zeilen und `END`)",
+      "- `DELETE <zeile>:<hash>` oder `DELETE <start>:<hash>..<ende>:<hash>`",
+      "",
+      "Wichtig:",
+      "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
+      "- Schreibe in den neuen Zeilen **keine** `ZEILE:HASH|`-Präfixe.",
+      "- Verwende exakt die Zeilennummern und Hashes aus der Datei unten.",
+      "- Alle Anker eines Aufrufs beziehen sich auf den Dateistand **vor** diesem Aufruf (Zeilennummern nicht selbst verschieben).",
+      "- Bearbeitungen innerhalb eines Aufrufs dürfen sich nicht überlappen.",
+    ],
+    exampleHeading: "Beispiel:",
+    exampleNewText: "  <p>Neuer Text</p>",
+    systemHeading: "## Anleitung für die Antwort (Hash-Anchored Line Edits)",
+    systemFileFormat: "Die zu bearbeitende Datei ist im Format `ZEILE:HASH|INHALT` angegeben.",
+    systemUseToolCalls:
+      "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:",
+    systemUseTextToolCall:
+      "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden Befehlen:",
+    contextReplyOnly:
+      "Antworte **nur** mit einem Markdown-Codeblock (` ```hashline `) mit folgenden Befehlen:",
+    fileHeading: (fileName: string) => `## Datei: \`${fileName}\``,
+    updatedHeading: (fileName: string) =>
+      `Änderungen angewendet. Geänderte Zeilen in \`${fileName}\`:`,
+    noteStrippedPrefixes: (source: string) =>
+      `[${source}] Kopierte \`ZEILE:HASH|\`-Präfixe in den neuen Zeilen wurden entfernt.`,
+    noteImplicitEnd: (source: string) =>
+      `[${source}] Fehlendes END ergänzt (nächster Befehl folgte direkt).`,
+    formatExampleRange: (kind: string) => `\`${kind} 12:a3f\` oder \`${kind} 12:a3f..14:b4c\``,
+    formatExampleSingle: (kind: string) => `\`${kind} 12:a3f\``,
+    errMissingTarget: (example: string) => `Zielangabe fehlt. Erwartet z. B. ${example}.`,
+    errInvalidTarget: (raw: string, example: string) =>
+      `Ungültige Zielangabe „${raw}“. Erwartet ${example} (Zeilennummer und Hash aus der Dateiansicht, ohne den Zeileninhalt). Neue Zeilen gehören in die Folgezeilen, nicht in die Befehlszeile.`,
+    errSingleAnchorOnly: (kind: string, example: string) =>
+      `${kind} erwartet genau einen Anker, keinen Bereich. Erwartet z. B. ${example}.`,
+    unknownMoreCount: (count: number) => ` und ${count} weitere`,
+    unknownHintGeneral:
+      "Außerhalb eines Befehls sind nur Befehlszeilen (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE mit `ZEILE:HASH`) erlaubt; neue Zeilen stehen zwischen Befehlszeile und END.",
+    unknownHintCopied:
+      "Zeilen im Format `ZEILE:HASH|INHALT` stammen aus der Dateiansicht – verwende nur `ZEILE:HASH` als Anker in einem Befehl.",
+    unknownHintAfterDelete:
+      "DELETE hat keinen Inhaltsblock – zum Ersetzen von Zeilen REPLACE … END verwenden.",
+    errUnknownLines: (listed: string, more: string, hints: string) =>
+      `Unbekannte Zeile(n) außerhalb eines Befehls: ${listed}${more}. ${hints}`,
+    errIncompleteBlock: (source: string, kind: string) =>
+      `[${source}] Unvollständiger ${kind}-Block: fehlendes END. Schließe die neuen Zeilen mit einer eigenen Zeile \`END\` ab.`,
+    errLineNotFound: (source: string, line: number, lineCount: number) =>
+      `[${source}] Zeile ${line} existiert nicht – die Datei hat ${lineCount} Zeilen (gültig: 1–${lineCount}).`,
+    errHashMissing: (source: string, line: number, actualHash: string, lineDesc: string) =>
+      `[${source}] Hash für Zeile ${line} fehlt. Korrekter Anker: \`${line}:${actualHash}\` (aktueller Inhalt: ${lineDesc}).`,
+    relocationHintFound: (line: number, lineDesc: string) =>
+      ` Der angegebene Hash passt zu Zeile ${line}: ${lineDesc} – vermutlich ist die Zeilennummer verschoben. Alle Anker beziehen sich auf den Dateistand vor diesem Aufruf.`,
+    relocationHintChanged:
+      " Die Zeile hat sich vermutlich geändert – lies die betroffenen Zeilen erneut, um aktuelle Hashes zu erhalten.",
+    errHashMismatch: (
+      source: string,
+      line: number,
+      actualHash: string,
+      givenHash: string,
+      lineDesc: string,
+      hint: string,
+    ) =>
+      `[${source}] Zeile ${line}: Hash stimmt nicht überein (erwartet ${actualHash}, angegeben ${givenHash}). Aktueller Inhalt: ${lineDesc}.${hint}`,
+    errInvalidRange: (source: string, endLine: number, startLine: number) =>
+      `[${source}] Ungültiger Bereich: Endzeile ${endLine} liegt vor Startzeile ${startLine}.`,
+    errEmptyInput: "Keine Bearbeitungsbefehle gefunden – die Eingabe ist leer.",
+    errNoValidCommands: [
+      "Keine gültigen Bearbeitungsbefehle gefunden. Erwartet z. B.:",
+      "REPLACE 12:a3f",
+      "  <neuer Inhalt>",
+      "END",
+    ].join("\n"),
+    errOverlap: (descA: string, descB: string) =>
+      `[${descA}] und [${descB}] überlappen sich. Alle Anker beziehen sich auf den Dateistand vor diesem Aufruf – fasse überlappende Bearbeitungen zu einem einzigen Befehl zusammen.`,
+    deletedFromLine: (line: number) => `// ab Zeile ${line} gelöscht`,
+  },
+  editFormat: {
+    searchReplaceRules: [
+      "- Gib Änderungen als `SEARCH`/`REPLACE`-Blöcke an.",
+      "- Der `SEARCH`-Teil muss exakt (inkl. Einrückung) in der Datei vorkommen und eindeutig sein.",
+      "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
+    ],
+    exampleOldText: "  <p>Alter Text</p>",
+    unifiedDiffRules: [
+      "- Jeder Block beginnt mit `@@` (Zeilennummern sind optional).",
+      "- Unveränderte Kontextzeilen beginnen mit einem Leerzeichen (` `).",
+      "- Entfernte Zeilen beginnen mit `-`, hinzugefügte Zeilen mit `+`.",
+      "- Gib nur die geänderten Stellen mit genug Kontextzeilen aus, nicht die ganze Datei.",
+    ],
+    additionalToolsInstructions: [
+      "",
+      "Weitere verfügbare Werkzeuge:",
+      "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after` für Kontextzeilen vor/nach Treffern).",
+      "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (`startLine`, `endLine`).",
+      "- `write`: Schreibt die gesamte aktuelle Datei komplett neu (`content`) – nur verwenden, wenn umfangreiche Änderungen nötig sind.",
+    ],
+    additionalTextToolsInstructions: [
+      "",
+      "Weitere verfügbare Werkzeuge:",
+      "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after`):",
+      "",
+      "toolcall search",
+      "```search",
+      '{"query": "Suchbegriff"}',
+      "```",
+      "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (optional `startLine`, `endLine`):",
+      "",
+      "toolcall read",
+      "```read",
+      '{"startLine": 1, "endLine": 100}',
+      "```",
+      "- `write`: Schreibt die gesamte aktuelle Datei komplett neu – nur verwenden, wenn umfangreiche Änderungen nötig sind:",
+      "",
+      "toolcall write",
+      "```write",
+      "<vollständiger neuer Dateiinhalt>",
+      "```",
+    ],
+    srHeading: "## Anleitung für die Antwort (Search & Replace)",
+    srUseToolCalls:
+      "Verwende für Änderungen an der Datei das Werkzeug `edit` mit `SEARCH`/`REPLACE`-Blöcken:",
+    srUseTextToolCall:
+      "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
+    srContextReplyOnly:
+      "Antworte **nur** mit einem Markdown-Codeblock mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
+    udHeading: "## Anleitung für die Antwort (Vereinfachter Unified Diff)",
+    udUseToolCalls:
+      "Verwende für Änderungen an der Datei das Werkzeug `edit` mit einem vereinfachten Unified Diff:",
+    udUseTextToolCall:
+      "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) im vereinfachten Unified-Diff-Format:",
+    udContextReplyOnly:
+      "Antworte **nur** mit einem Markdown-Codeblock (` ```diff `) im vereinfachten Unified-Diff-Format:",
+    toolEditDescHashline:
+      "Wendet Hash-Anchored Line Edits (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE) auf die aktuell geöffnete Datei an.",
+    toolEditDescSr:
+      "Wendet Search-&-Replace-Blöcke (<<<<<<< SEARCH / ======= / >>>>>>> REPLACE) auf die aktuell geöffnete Datei an.",
+    toolEditDescUd:
+      "Wendet einen vereinfachten Unified Diff (@@, Kontext, -, +) auf die aktuell geöffnete Datei an.",
+    toolEditParamHashline: "Die Hashline-Bearbeitungsbefehle für die Datei.",
+    toolEditParamSr: "Die SEARCH/REPLACE-Blöcke für die Datei.",
+    toolEditParamUd: "Der vereinfachte Unified Diff für die Datei.",
+    toolReadDesc:
+      "Liest den Inhalt der aktuell geöffneten Datei oder einen angegebenen Zeilenbereich.",
+    toolReadStartLine: "Optionale 1-basierte Startzeile (Standard: 1).",
+    toolReadEndLine: "Optionale 1-basierte Endzeile (Standard: bis Dateiende).",
+    toolSearchDesc:
+      "Durchsucht die aktuell geöffnete Datei zeilenweise nach einem Suchbegriff oder regulären Ausdruck.",
+    toolSearchQuery: "Der Suchbegriff oder reguläre Ausdruck.",
+    toolSearchIsRegex:
+      "Wenn true, wird query als regulärer Ausdruck interpretiert (Standard: false).",
+    toolSearchCaseSensitive: "Wenn true, wird Groß-/Kleinschreibung beachtet (Standard: false).",
+    toolSearchBefore: "Optionale Anzahl an Kontextzeilen vor jedem Treffer (Standard: 0).",
+    toolSearchAfter: "Optionale Anzahl an Kontextzeilen nach jedem Treffer (Standard: 0).",
+    toolWriteDesc:
+      "Schreibt die aktuell geöffnete Datei komplett neu. Nur verwenden, wenn ein vollständiges Neuschreiben sinnvoller ist als gezielte Edits.",
+    toolWriteContent: "Der vollständige neue Inhalt der Datei.",
+    toolResultApplied: (fileName: string) => `Änderungen in \`${fileName}\` angewendet.`,
   },
   errors: {
     failedWithDetail: (detail: string) => `Fehlgeschlagen: ${detail}`,
@@ -739,6 +937,197 @@ const en: Translations = {
     errBrowserAiNoToolCalls: "Tool calls are not supported by Browser AI (LanguageModel API).",
     errMaxToolSteps: "Maximum number of tool steps reached.",
     editFormatUnifiedDiff: "Simplified Unified Diff",
+    pingToolPrompt: "Call the ping_test tool with token='ok'.",
+    pingToolDescription: "Confirms that tool calls work.",
+    pingToolTokenDescription: "Any text, e.g. ok",
+    chatTestPrompt: "Reply only with: ok",
+    errApplyingEdits: (detail: string) => `Error applying edits: ${detail}`,
+    errRewritingFile: (detail: string) => `Error rewriting file: ${detail}`,
+    errReadingFile: (detail: string) => `Error reading file: ${detail}`,
+    errSearchingFile: (detail: string) => `Error searching file: ${detail}`,
+    errUnknownTool: (name: string) => `Unknown tool: ${name}`,
+  },
+  editMatch: {
+    noteTrailingWhitespace: "trailing whitespace ignored",
+    noteIndentAdjusted: "different indentation detected and adjusted",
+    noteInnerWhitespace: "different whitespace within lines ignored",
+    noteTrimmedBlankEdges: "leading/trailing blank lines of search block ignored",
+    firstDiffLine: (lineNum: number, onlyWhitespace: boolean) =>
+      `  First difference on line ${lineNum} of search block${onlyWhitespace ? " (only whitespace/indentation differs)" : ""}:`,
+    expectedLine: (preview: string) => `    expected: \`${preview}\``,
+    fileEof: "    file:     (end of file reached)",
+    fileActualLine: (preview: string, lineNum: number) =>
+      `    file:     \`${preview}\` (line ${lineNum})`,
+    closestRegion: (startLine: number, endLine: number, score: number, total: number) =>
+      `  Closest region: lines ${startLine}–${endLine} (${score} of ${total} lines match). Current content there:`,
+    noSimilarRegion:
+      "  No similar region found in the file — check whether the content is from the current file version.",
+    searchedLines: (count: number, firstLine: string) =>
+      `  Searched (${count} lines, first line): \`${firstLine}\``,
+    identicalSearchReplace: (label: string) =>
+      `${label}: search and replace parts are identical — skipped.`,
+    insertedWithoutContext: (lineNum: number) =>
+      `inserted without context before line ${lineNum} using line hint`,
+    ambiguousMatch: (label: string, count: number, lines: string) =>
+      `${label} is ambiguous (${count} matches on lines ${lines}) — please include more context lines so that exactly one location matches.`,
+    blocksFailedSummary: (failedCount: number, totalCount: number, appliedCount: number) =>
+      `${failedCount} of ${totalCount} blocks could not be applied${appliedCount > 0 ? `; the remaining ${appliedCount} would have applied, but were also discarded` : ""}.`,
+    noChangeAllIdentical:
+      "No change: all blocks have identical search and replace parts. Provide the new content in the replace part.",
+  },
+  hashline: {
+    commandRules: [
+      "- `REPLACE <line>:<hash>` or `REPLACE <start>:<hash>..<end>:<hash>` (followed by the new lines and `END`)",
+      "- `INSERT_AFTER <line>:<hash>` (followed by the new lines and `END`)",
+      "- `INSERT_BEFORE <line>:<hash>` (followed by the new lines and `END`)",
+      "- `DELETE <line>:<hash>` or `DELETE <start>:<hash>..<end>:<hash>`",
+      "",
+      "Important:",
+      "- Only output the changed parts, not the entire file.",
+      "- Do **not** include `LINE:HASH|` prefixes in the new lines.",
+      "- Use the exact line numbers and hashes from the file below.",
+      "- All anchors in a call refer to the file state **before** this call (do not shift line numbers yourself).",
+      "- Edits within a single call must not overlap.",
+    ],
+    exampleHeading: "Example:",
+    exampleNewText: "  <p>New text</p>",
+    systemHeading: "## Response Instructions (Hash-Anchored Line Edits)",
+    systemFileFormat: "The file to edit is given in `LINE:HASH|CONTENT` format.",
+    systemUseToolCalls: "Use the `edit` tool to modify the file with the following commands:",
+    systemUseTextToolCall:
+      "Use `toolcall edit` with a code block (` ```edit `) containing the following commands to modify the file:",
+    contextReplyOnly:
+      "Reply **only** with a Markdown code block (` ```hashline `) containing the following commands:",
+    fileHeading: (fileName: string) => `## File: \`${fileName}\``,
+    updatedHeading: (fileName: string) => `Edits applied. Changed lines in \`${fileName}\`:`,
+    noteStrippedPrefixes: (source: string) =>
+      `[${source}] Stripped copied \`LINE:HASH|\` prefixes from new lines.`,
+    noteImplicitEnd: (source: string) =>
+      `[${source}] Added missing END (next command followed directly).`,
+    formatExampleRange: (kind: string) => `\`${kind} 12:a3f\` or \`${kind} 12:a3f..14:b4c\``,
+    formatExampleSingle: (kind: string) => `\`${kind} 12:a3f\``,
+    errMissingTarget: (example: string) => `Missing target. Expected e.g. ${example}.`,
+    errInvalidTarget: (raw: string, example: string) =>
+      `Invalid target "${raw}". Expected ${example} (line number and hash from the file view, without line content). New lines belong on the following lines, not on the command line.`,
+    errSingleAnchorOnly: (kind: string, example: string) =>
+      `${kind} expects a single anchor, not a range. Expected e.g. ${example}.`,
+    unknownMoreCount: (count: number) => ` and ${count} more`,
+    unknownHintGeneral:
+      "Outside of a command, only command lines (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE with `LINE:HASH`) are allowed; new lines go between the command line and END.",
+    unknownHintCopied:
+      "Lines in `LINE:HASH|CONTENT` format come from the file view — only use `LINE:HASH` as an anchor in a command.",
+    unknownHintAfterDelete: "DELETE has no content block — use REPLACE … END to replace lines.",
+    errUnknownLines: (listed: string, more: string, hints: string) =>
+      `Unknown line(s) outside of a command: ${listed}${more}. ${hints}`,
+    errIncompleteBlock: (source: string, kind: string) =>
+      `[${source}] Incomplete ${kind} block: missing END. Terminate the new lines with a standalone \`END\` line.`,
+    errLineNotFound: (source: string, line: number, lineCount: number) =>
+      `[${source}] Line ${line} does not exist — the file has ${lineCount} lines (valid: 1–${lineCount}).`,
+    errHashMissing: (source: string, line: number, actualHash: string, lineDesc: string) =>
+      `[${source}] Missing hash for line ${line}. Correct anchor: \`${line}:${actualHash}\` (current content: ${lineDesc}).`,
+    relocationHintFound: (line: number, lineDesc: string) =>
+      ` The given hash matches line ${line}: ${lineDesc} — the line number probably shifted. All anchors refer to the file state before this call.`,
+    relocationHintChanged:
+      " The line has probably changed — re-read the affected lines to get current hashes.",
+    errHashMismatch: (
+      source: string,
+      line: number,
+      actualHash: string,
+      givenHash: string,
+      lineDesc: string,
+      hint: string,
+    ) =>
+      `[${source}] Line ${line}: hash mismatch (expected ${actualHash}, got ${givenHash}). Current content: ${lineDesc}.${hint}`,
+    errInvalidRange: (source: string, endLine: number, startLine: number) =>
+      `[${source}] Invalid range: end line ${endLine} is before start line ${startLine}.`,
+    errEmptyInput: "No edit commands found — input is empty.",
+    errNoValidCommands: [
+      "No valid edit commands found. Expected e.g.:",
+      "REPLACE 12:a3f",
+      "  <new content>",
+      "END",
+    ].join("\n"),
+    errOverlap: (descA: string, descB: string) =>
+      `[${descA}] and [${descB}] overlap. All anchors refer to the file state before this call — combine overlapping edits into a single command.`,
+    deletedFromLine: (line: number) => `// deleted from line ${line}`,
+  },
+  editFormat: {
+    searchReplaceRules: [
+      "- Provide edits as `SEARCH`/`REPLACE` blocks.",
+      "- The `SEARCH` part must match the file exactly (including indentation) and be unique.",
+      "- Only output the changed parts, not the entire file.",
+    ],
+    exampleOldText: "  <p>Old text</p>",
+    unifiedDiffRules: [
+      "- Each block starts with `@@` (line numbers are optional).",
+      "- Unchanged context lines start with a space (` `).",
+      "- Removed lines start with `-`, added lines start with `+`.",
+      "- Only output the changed parts with enough context lines, not the entire file.",
+    ],
+    additionalToolsInstructions: [
+      "",
+      "Additional available tools:",
+      "- `search`: Searches the current file for text or regular expressions (`query`, optional `isRegex`, `caseSensitive`, `before`, `after` for context lines before/after matches).",
+      "- `read`: Reads the current file or a line range (`startLine`, `endLine`).",
+      "- `write`: Rewrites the entire current file (`content`) — only use when extensive changes are needed.",
+    ],
+    additionalTextToolsInstructions: [
+      "",
+      "Additional available tools:",
+      "- `search`: Searches the current file for text or regular expressions (`query`, optional `isRegex`, `caseSensitive`, `before`, `after`):",
+      "",
+      "toolcall search",
+      "```search",
+      '{"query": "search term"}',
+      "```",
+      "- `read`: Reads the current file or a line range (optional `startLine`, `endLine`):",
+      "",
+      "toolcall read",
+      "```read",
+      '{"startLine": 1, "endLine": 100}',
+      "```",
+      "- `write`: Rewrites the entire current file — only use when extensive changes are needed:",
+      "",
+      "toolcall write",
+      "```write",
+      "<complete new file content>",
+      "```",
+    ],
+    srHeading: "## Response Instructions (Search & Replace)",
+    srUseToolCalls: "Use the `edit` tool with `SEARCH`/`REPLACE` blocks to modify the file:",
+    srUseTextToolCall:
+      "Use `toolcall edit` with a code block (` ```edit `) containing the following `SEARCH`/`REPLACE` blocks to modify the file:",
+    srContextReplyOnly:
+      "Reply **only** with a Markdown code block containing the following `SEARCH`/`REPLACE` blocks:",
+    udHeading: "## Response Instructions (Simplified Unified Diff)",
+    udUseToolCalls: "Use the `edit` tool with a simplified unified diff to modify the file:",
+    udUseTextToolCall:
+      "Use `toolcall edit` with a code block (` ```edit `) in simplified unified diff format to modify the file:",
+    udContextReplyOnly:
+      "Reply **only** with a Markdown code block (` ```diff `) in simplified unified diff format:",
+    toolEditDescHashline:
+      "Applies Hash-Anchored Line Edits (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE) to the currently open file.",
+    toolEditDescSr:
+      "Applies Search & Replace blocks (<<<<<<< SEARCH / ======= / >>>>>>> REPLACE) to the currently open file.",
+    toolEditDescUd:
+      "Applies a simplified unified diff (@@, context, -, +) to the currently open file.",
+    toolEditParamHashline: "The hashline edit commands for the file.",
+    toolEditParamSr: "The SEARCH/REPLACE blocks for the file.",
+    toolEditParamUd: "The simplified unified diff for the file.",
+    toolReadDesc: "Reads the content of the currently open file or a specified line range.",
+    toolReadStartLine: "Optional 1-based start line (default: 1).",
+    toolReadEndLine: "Optional 1-based end line (default: end of file).",
+    toolSearchDesc:
+      "Searches the currently open file line by line for a search term or regular expression.",
+    toolSearchQuery: "The search term or regular expression.",
+    toolSearchIsRegex: "If true, query is interpreted as a regular expression (default: false).",
+    toolSearchCaseSensitive: "If true, matching is case-sensitive (default: false).",
+    toolSearchBefore: "Optional number of context lines before each match (default: 0).",
+    toolSearchAfter: "Optional number of context lines after each match (default: 0).",
+    toolWriteDesc:
+      "Rewrites the currently open file completely. Only use when a full rewrite makes more sense than targeted edits.",
+    toolWriteContent: "The complete new content of the file.",
+    toolResultApplied: (fileName: string) => `Edits applied to \`${fileName}\`.`,
   },
   errors: {
     failedWithDetail: (detail: string) => `Failed: ${detail}`,

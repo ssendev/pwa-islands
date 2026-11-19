@@ -98,104 +98,73 @@ export const formatFileMessageForFormat = (
   Match.value(format).pipe(
     Match.when("hashline", () => formatHashedFileMessage(fileName, content)),
     Match.when("search-replace", () =>
-      [`## Datei: \`${fileName}\``, "", formatPlainFencedFile(content)].join("\n"),
+      [
+        t(getDocumentLanguage()).hashline.fileHeading(fileName),
+        "",
+        formatPlainFencedFile(content),
+      ].join("\n"),
     ),
     Match.when("unified-diff", () =>
-      [`## Datei: \`${fileName}\``, "", formatPlainFencedFile(content)].join("\n"),
+      [
+        t(getDocumentLanguage()).hashline.fileHeading(fileName),
+        "",
+        formatPlainFencedFile(content),
+      ].join("\n"),
     ),
     Match.exhaustive,
   )
 
-const SEARCH_REPLACE_RULES = [
-  "- Gib Änderungen als `SEARCH`/`REPLACE`-Blöcke an.",
-  "- Der `SEARCH`-Teil muss exakt (inkl. Einrückung) in der Datei vorkommen und eindeutig sein.",
-  "- Gib nur die geänderten Stellen aus, nicht die ganze Datei.",
-]
-
 const formatSearchReplaceInstructions = (
   fenceLang: string,
   toolHeader?: string,
-): ReadonlyArray<string> => [
-  ...SEARCH_REPLACE_RULES,
-  "",
-  "Beispiel:",
-  "",
-  ...(toolHeader ? [toolHeader] : []),
-  `\`\`\`${fenceLang}`,
-  "<<<<<<< SEARCH",
-  "  <p>Alter Text</p>",
-  "=======",
-  "  <p>Neuer Text</p>",
-  ">>>>>>> REPLACE",
-  "```",
-]
-
-const UNIFIED_DIFF_RULES = [
-  "- Jeder Block beginnt mit `@@` (Zeilennummern sind optional).",
-  "- Unveränderte Kontextzeilen beginnen mit einem Leerzeichen (` `).",
-  "- Entfernte Zeilen beginnen mit `-`, hinzugefügte Zeilen mit `+`.",
-  "- Gib nur die geänderten Stellen mit genug Kontextzeilen aus, nicht die ganze Datei.",
-]
+): ReadonlyArray<string> => {
+  const tr = t(getDocumentLanguage())
+  return [
+    ...tr.editFormat.searchReplaceRules,
+    "",
+    tr.hashline.exampleHeading,
+    "",
+    ...(toolHeader ? [toolHeader] : []),
+    `\`\`\`${fenceLang}`,
+    "<<<<<<< SEARCH",
+    tr.editFormat.exampleOldText,
+    "=======",
+    tr.hashline.exampleNewText,
+    ">>>>>>> REPLACE",
+    "```",
+  ]
+}
 
 const formatUnifiedDiffInstructions = (
   fenceLang: string,
   toolHeader?: string,
-): ReadonlyArray<string> => [
-  ...UNIFIED_DIFF_RULES,
-  "",
-  "Beispiel:",
-  "",
-  ...(toolHeader ? [toolHeader] : []),
-  `\`\`\`${fenceLang}`,
-  "@@",
-  " <main>",
-  "-  <p>Alter Text</p>",
-  "+  <p>Neuer Text</p>",
-  " </main>",
-  "```",
-]
-
-const ADDITIONAL_TOOLS_INSTRUCTIONS = [
-  "",
-  "Weitere verfügbare Werkzeuge:",
-  "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after` für Kontextzeilen vor/nach Treffern).",
-  "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (`startLine`, `endLine`).",
-  "- `write`: Schreibt die gesamte aktuelle Datei komplett neu (`content`) – nur verwenden, wenn umfangreiche Änderungen nötig sind.",
-]
-
-const ADDITIONAL_TEXT_TOOLS_INSTRUCTIONS = [
-  "",
-  "Weitere verfügbare Werkzeuge:",
-  "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after`):",
-  "",
-  "toolcall search",
-  "```search",
-  '{"query": "Suchbegriff"}',
-  "```",
-  "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (optional `startLine`, `endLine`):",
-  "",
-  "toolcall read",
-  "```read",
-  '{"startLine": 1, "endLine": 100}',
-  "```",
-  "- `write`: Schreibt die gesamte aktuelle Datei komplett neu – nur verwenden, wenn umfangreiche Änderungen nötig sind:",
-  "",
-  "toolcall write",
-  "```write",
-  "<vollständiger neuer Dateiinhalt>",
-  "```",
-]
+): ReadonlyArray<string> => {
+  const tr = t(getDocumentLanguage())
+  return [
+    ...tr.editFormat.unifiedDiffRules,
+    "",
+    tr.hashline.exampleHeading,
+    "",
+    ...(toolHeader ? [toolHeader] : []),
+    `\`\`\`${fenceLang}`,
+    "@@",
+    " <main>",
+    `-${tr.editFormat.exampleOldText}`,
+    `+${tr.hashline.exampleNewText}`,
+    " </main>",
+    "```",
+  ]
+}
 
 export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = true): string => {
+  const ef = t(getDocumentLanguage()).editFormat
   const basePrompt = Match.value(format).pipe(
     Match.when("hashline", () => formatHashlineSystemPrompt(useToolCalls)),
     Match.when("search-replace", () =>
       [
-        "## Anleitung für die Antwort (Search & Replace)",
+        ef.srHeading,
         "",
-        useToolCalls
-          ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit `SEARCH`/`REPLACE`-Blöcken:"
-          : "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
+        useToolCalls ? ef.srUseToolCalls : ef.srUseTextToolCall,
         "",
         ...formatSearchReplaceInstructions(
           useToolCalls ? "" : "edit",
@@ -205,11 +174,9 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
     ),
     Match.when("unified-diff", () =>
       [
-        "## Anleitung für die Antwort (Vereinfachter Unified Diff)",
+        ef.udHeading,
         "",
-        useToolCalls
-          ? "Verwende für Änderungen an der Datei das Werkzeug `edit` mit einem vereinfachten Unified Diff:"
-          : "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) im vereinfachten Unified-Diff-Format:",
+        useToolCalls ? ef.udUseToolCalls : ef.udUseTextToolCall,
         "",
         ...formatUnifiedDiffInstructions(
           useToolCalls ? "diff" : "edit",
@@ -221,7 +188,7 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
   )
   return [
     basePrompt,
-    ...(useToolCalls ? ADDITIONAL_TOOLS_INSTRUCTIONS : ADDITIONAL_TEXT_TOOLS_INSTRUCTIONS),
+    ...(useToolCalls ? ef.additionalToolsInstructions : ef.additionalTextToolsInstructions),
   ].join("\n")
 }
 
@@ -230,14 +197,15 @@ export const formatLlmContextForFormat = (
   fileName: string,
   content: string,
   apiDts: string,
-): string =>
-  Match.value(format).pipe(
+): string => {
+  const ef = t(getDocumentLanguage()).editFormat
+  return Match.value(format).pipe(
     Match.when("hashline", () => formatHashlineContext(fileName, content, apiDts)),
     Match.when("search-replace", () =>
       [
-        "## Anleitung für die Antwort (Search & Replace)",
+        ef.srHeading,
         "",
-        "Antworte **nur** mit einem Markdown-Codeblock mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
+        ef.srContextReplyOnly,
         "",
         ...formatSearchReplaceInstructions(""),
         "",
@@ -248,9 +216,9 @@ export const formatLlmContextForFormat = (
     ),
     Match.when("unified-diff", () =>
       [
-        "## Anleitung für die Antwort (Vereinfachter Unified Diff)",
+        ef.udHeading,
         "",
-        "Antworte **nur** mit einem Markdown-Codeblock (` ```diff `) im vereinfachten Unified-Diff-Format:",
+        ef.udContextReplyOnly,
         "",
         ...formatUnifiedDiffInstructions("diff"),
         "",
@@ -261,31 +229,21 @@ export const formatLlmContextForFormat = (
     ),
     Match.exhaustive,
   )
+}
 
 export const getEditorEditToolForFormat = (format: EditFormat) => {
+  const ef = t(getDocumentLanguage()).editFormat
   const description = Match.value(format).pipe(
-    Match.when(
-      "hashline",
-      () =>
-        "Wendet Hash-Anchored Line Edits (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE) auf die aktuell geöffnete Datei an.",
-    ),
-    Match.when(
-      "search-replace",
-      () =>
-        "Wendet Search-&-Replace-Blöcke (<<<<<<< SEARCH / ======= / >>>>>>> REPLACE) auf die aktuell geöffnete Datei an.",
-    ),
-    Match.when(
-      "unified-diff",
-      () =>
-        "Wendet einen vereinfachten Unified Diff (@@, Kontext, -, +) auf die aktuell geöffnete Datei an.",
-    ),
+    Match.when("hashline", () => ef.toolEditDescHashline),
+    Match.when("search-replace", () => ef.toolEditDescSr),
+    Match.when("unified-diff", () => ef.toolEditDescUd),
     Match.exhaustive,
   )
 
   const paramDescription = Match.value(format).pipe(
-    Match.when("hashline", () => "Die Hashline-Bearbeitungsbefehle für die Datei."),
-    Match.when("search-replace", () => "Die SEARCH/REPLACE-Blöcke für die Datei."),
-    Match.when("unified-diff", () => "Der vereinfachte Unified Diff für die Datei."),
+    Match.when("hashline", () => ef.toolEditParamHashline),
+    Match.when("search-replace", () => ef.toolEditParamSr),
+    Match.when("unified-diff", () => ef.toolEditParamUd),
     Match.exhaustive,
   )
 
@@ -309,92 +267,101 @@ export const getEditorEditToolForFormat = (format: EditFormat) => {
   } as const
 }
 
-export const EDITOR_READ_TOOL = {
-  type: "function",
-  function: {
-    name: "read",
-    description:
-      "Liest den Inhalt der aktuell geöffneten Datei oder einen angegebenen Zeilenbereich.",
-    parameters: {
-      type: "object",
-      properties: {
-        startLine: {
-          type: "integer",
-          description: "Optionale 1-basierte Startzeile (Standard: 1).",
+const getEditorReadTool = () => {
+  const ef = t(getDocumentLanguage()).editFormat
+  return {
+    type: "function",
+    function: {
+      name: "read",
+      description: ef.toolReadDesc,
+      parameters: {
+        type: "object",
+        properties: {
+          startLine: {
+            type: "integer",
+            description: ef.toolReadStartLine,
+          },
+          endLine: {
+            type: "integer",
+            description: ef.toolReadEndLine,
+          },
         },
-        endLine: {
-          type: "integer",
-          description: "Optionale 1-basierte Endzeile (Standard: bis Dateiende).",
-        },
+        additionalProperties: false,
       },
-      additionalProperties: false,
     },
-  },
-} as const
+  } as const
+}
 
-export const EDITOR_SEARCH_TOOL = {
-  type: "function",
-  function: {
-    name: "search",
-    description:
-      "Durchsucht die aktuell geöffnete Datei zeilenweise nach einem Suchbegriff oder regulären Ausdruck.",
-    parameters: {
-      type: "object",
-      properties: {
-        query: {
-          type: "string",
-          description: "Der Suchbegriff oder reguläre Ausdruck.",
+const getEditorSearchTool = () => {
+  const ef = t(getDocumentLanguage()).editFormat
+  return {
+    type: "function",
+    function: {
+      name: "search",
+      description: ef.toolSearchDesc,
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: ef.toolSearchQuery,
+          },
+          isRegex: {
+            type: "boolean",
+            description: ef.toolSearchIsRegex,
+          },
+          caseSensitive: {
+            type: "boolean",
+            description: ef.toolSearchCaseSensitive,
+          },
+          before: {
+            type: "integer",
+            description: ef.toolSearchBefore,
+          },
+          after: {
+            type: "integer",
+            description: ef.toolSearchAfter,
+          },
         },
-        isRegex: {
-          type: "boolean",
-          description:
-            "Wenn true, wird query als regulärer Ausdruck interpretiert (Standard: false).",
-        },
-        caseSensitive: {
-          type: "boolean",
-          description: "Wenn true, wird Groß-/Kleinschreibung beachtet (Standard: false).",
-        },
-        before: {
-          type: "integer",
-          description: "Optionale Anzahl an Kontextzeilen vor jedem Treffer (Standard: 0).",
-        },
-        after: {
-          type: "integer",
-          description: "Optionale Anzahl an Kontextzeilen nach jedem Treffer (Standard: 0).",
-        },
+        required: ["query"],
+        additionalProperties: false,
       },
-      required: ["query"],
-      additionalProperties: false,
     },
-  },
-} as const
+  } as const
+}
 
-export const EDITOR_WRITE_TOOL = {
-  type: "function",
-  function: {
-    name: "write",
-    description:
-      "Schreibt die aktuell geöffnete Datei komplett neu. Nur verwenden, wenn ein vollständiges Neuschreiben sinnvoller ist als gezielte Edits.",
-    parameters: {
-      type: "object",
-      properties: {
-        content: {
-          type: "string",
-          description: "Der vollständige neue Inhalt der Datei.",
+const getEditorWriteTool = () => {
+  const ef = t(getDocumentLanguage()).editFormat
+  return {
+    type: "function",
+    function: {
+      name: "write",
+      description: ef.toolWriteDesc,
+      parameters: {
+        type: "object",
+        properties: {
+          content: {
+            type: "string",
+            description: ef.toolWriteContent,
+          },
         },
+        required: ["content"],
+        additionalProperties: false,
       },
-      required: ["content"],
-      additionalProperties: false,
     },
-  },
-} as const
+  } as const
+}
+
+export const EDITOR_READ_TOOL = getEditorReadTool()
+export const EDITOR_SEARCH_TOOL = getEditorSearchTool()
+export const EDITOR_WRITE_TOOL = getEditorWriteTool()
 
 export const getEditorToolsForFormat = (format: EditFormat) =>
   [
     getEditorEditToolForFormat(format),
-    EDITOR_READ_TOOL,
-    EDITOR_SEARCH_TOOL,
-    EDITOR_WRITE_TOOL,
+    getEditorReadTool(),
+    getEditorSearchTool(),
+    getEditorWriteTool(),
   ] as const
 
 export const EditorToolTextResult = defineTaggedUnion({
@@ -934,8 +901,12 @@ export const formatToolResultForFormat = (
 ): string =>
   Match.value(format).pipe(
     Match.when("hashline", () => formatUpdatedHashlines(fileName, updatedSnippet)),
-    Match.when("search-replace", () => `Änderungen in \`${fileName}\` angewendet.`),
-    Match.when("unified-diff", () => `Änderungen in \`${fileName}\` angewendet.`),
+    Match.when("search-replace", () =>
+      t(getDocumentLanguage()).editFormat.toolResultApplied(fileName),
+    ),
+    Match.when("unified-diff", () =>
+      t(getDocumentLanguage()).editFormat.toolResultApplied(fileName),
+    ),
     Match.exhaustive,
   )
 
