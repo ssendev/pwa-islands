@@ -24,7 +24,7 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
-import type { Language } from "./i18n"
+import { type Language, t } from "./i18n"
 import { hasFileHistory } from "./history"
 import { viewIcon } from "./icons"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
@@ -1309,9 +1309,11 @@ const viewImportConflictModal = (
   suggestedName: string,
   queue: ReadonlyArray<PendingImportFile>,
   applyToAll: boolean,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const queueCount = Array.length(queue)
+  const tr = t(language)
 
   return h.div(
     [
@@ -1327,12 +1329,12 @@ const viewImportConflictModal = (
           h.header(
             [h.Class("modal-header")],
             [
-              h.h3([h.Id("modal-title"), h.Class("modal-title")], ["Import-Konflikt"]),
+              h.h3([h.Id("modal-title"), h.Class("modal-title")], [tr.files.importConflictTitle]),
               h.button(
                 [
                   h.Type("button"),
                   h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
+                  h.AriaLabel(tr.common.close),
                   h.OnClick(Message.ClickedCancelImportConflict()),
                 ],
                 [viewIcon("close", h)],
@@ -1342,7 +1344,7 @@ const viewImportConflictModal = (
           h.div(
             [h.Class("modal-body")],
             [
-              h.p([], [`Die Datei „${current.name}“ existiert bereits in diesem Ordner.`]),
+              h.p([], [tr.files.importConflictExists(current.name)]),
               Array.isReadonlyArrayNonEmpty(queue)
                 ? h.div(
                     [h.Class("form-check mt-3")],
@@ -1359,9 +1361,7 @@ const viewImportConflictModal = (
                               }),
                             ),
                           ]),
-                          ` Auswahl auf alle weiteren ${queueCount} ${
-                            queueCount === 1 ? "Konflikt" : "Konflikte"
-                          } anwenden`,
+                          tr.files.importConflictApplyAll(queueCount),
                         ],
                       ),
                     ],
@@ -1382,7 +1382,7 @@ const viewImportConflictModal = (
                       h.Class("btn btn-secondary"),
                       h.OnClick(Message.SelectedImportConflictAction({ action: "skip" })),
                     ],
-                    ["Überspringen"],
+                    [tr.files.skip],
                   ),
                   h.button(
                     [
@@ -1391,7 +1391,7 @@ const viewImportConflictModal = (
                       h.Title(suggestedName),
                       h.OnClick(Message.SelectedImportConflictAction({ action: "rename" })),
                     ],
-                    ["Umbenennen"],
+                    [tr.common.rename],
                   ),
                   h.button(
                     [
@@ -1399,7 +1399,7 @@ const viewImportConflictModal = (
                       h.Class("btn btn-danger"),
                       h.OnClick(Message.SelectedImportConflictAction({ action: "replace" })),
                     ],
-                    ["Ersetzen"],
+                    [tr.files.replace],
                   ),
                 ],
               ),
@@ -1429,7 +1429,7 @@ export const view = Submodel.defineView<ModalState, Message, ViewInputs>(
             }),
 
           ImportConflict: ({ current, suggestedName, queue, applyToAll }) =>
-            viewImportConflictModal(current, suggestedName, queue, applyToAll, h),
+            viewImportConflictModal(current, suggestedName, queue, applyToAll, context.language, h),
 
           Help: ({ help }) =>
             h.submodel({

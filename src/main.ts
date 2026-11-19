@@ -160,7 +160,8 @@ const formatDate = (timestamp: number): string => {
   }).format(timestamp)
 }
 
-const formatSummaryText = (entries: ReadonlyArray<FileEntry>): string => {
+const formatSummaryText = (entries: ReadonlyArray<FileEntry>, language: Language): string => {
+  const tr = t(language).files
   const fileCount = pipe(
     entries,
     Array.filter((entry) => entry.kind === "file"),
@@ -172,8 +173,8 @@ const formatSummaryText = (entries: ReadonlyArray<FileEntry>): string => {
     Array.length,
   )
   const parts: ReadonlyArray<string> = [
-    ...(fileCount > 0 ? [`${fileCount} ${fileCount === 1 ? "Datei" : "Dateien"}`] : []),
-    ...(dirCount > 0 ? [`${dirCount} ${dirCount === 1 ? "Ordner" : "Ordner"}`] : []),
+    ...(fileCount > 0 ? [tr.fileCount(fileCount)] : []),
+    ...(dirCount > 0 ? [tr.folderCount(dirCount)] : []),
   ]
   return Array.join(parts, ", ")
 }
@@ -7382,7 +7383,7 @@ const viewFilesTableContent = (
   return h.div(
     [],
     [
-      h.div([h.Class("files-summary")], [h.span([], [formatSummaryText(entries)])]),
+      h.div([h.Class("files-summary")], [h.span([], [formatSummaryText(entries, language)])]),
       h.div(
         [h.Class("table-responsive")],
         [
@@ -7425,38 +7426,27 @@ const viewFilesTableContent = (
   )
 }
 
-const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
-  h.div(
+const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html => {
+  const tr = t(model.language)
+  return h.div(
     [h.Id("files-content"), h.Class("files-content")],
     [
       StorageState.match(model.storageState, {
         Initializing: () =>
           h.div(
             [h.Class("loading-state")],
-            [
-              h.div([h.Class("spinner"), h.AriaHidden(true)]),
-              h.p([], ["Dateien werden geladen..."]),
-            ],
+            [h.div([h.Class("spinner"), h.AriaHidden(true)]), h.p([], [tr.files.loadingFiles])],
           ),
 
-        Unsupported: () =>
-          h.div(
-            [h.Class("empty-state")],
-            [
-              h.p(
-                [],
-                ["In dieser Umgebung ist keine kompatible lokale Dateisystem-API verfügbar."],
-              ),
-            ],
-          ),
+        Unsupported: () => h.div([h.Class("empty-state")], [h.p([], [tr.files.unsupportedEnv])]),
 
         NoFolderSelected: () =>
           h.div(
             [h.Class("empty-state")],
             [
               h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("folder-open", h)]),
-              h.h3([], ["Kein Ordner ausgewählt"]),
-              h.p([], ["Wähle einen lokalen Ordner, in dem deine Projekte gespeichert werden."]),
+              h.h3([], [tr.files.noFolderSelectedTitle]),
+              h.p([], [tr.files.noFolderSelectedDesc]),
               h.div(
                 [h.Class("empty-actions")],
                 [
@@ -7467,7 +7457,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
                       h.Class("btn btn-primary"),
                       h.OnClick(Message.ClickedSelectFolder()),
                     ],
-                    [viewIcon("folder-open", h), " Ordner wählen"],
+                    [viewIcon("folder-open", h), ` ${tr.settings.selectFolder}`],
                   ),
                 ],
               ),
@@ -7479,15 +7469,8 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
             [h.Class("empty-state")],
             [
               h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("lock", h)]),
-              h.h3([], ["Zugriff erforderlich"]),
-              h.p(
-                [],
-                [
-                  "Um Ihre Dateien zu laden, bestätigen Sie bitte den dauerhaften Zugriff auf den Ordner ",
-                  h.strong([], [folderName]),
-                  ".",
-                ],
-              ),
+              h.h3([], [tr.files.permissionRequiredTitle]),
+              h.p([], [tr.files.permissionRequiredPrefix, h.strong([], [folderName]), "."]),
               h.button(
                 [
                   h.Type("button"),
@@ -7495,7 +7478,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
                   h.Class("btn btn-primary"),
                   h.OnClick(Message.ClickedGrantPermission()),
                 ],
-                [`Zugriff auf "${folderName}" erlauben`],
+                [tr.files.grantAccessTo(folderName)],
               ),
             ],
           ),
@@ -7505,10 +7488,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
             Loading: () =>
               h.div(
                 [h.Class("loading-state")],
-                [
-                  h.div([h.Class("spinner"), h.AriaHidden(true)]),
-                  h.p([], ["Dateien werden geladen..."]),
-                ],
+                [h.div([h.Class("spinner"), h.AriaHidden(true)]), h.p([], [tr.files.loadingFiles])],
               ),
             Loaded: ({ entries }) => viewFilesTable(entries, model.showFileInfo, model.language, h),
             Error: ({ message }) =>
@@ -7516,7 +7496,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
                 [h.Class("empty-state")],
                 [
                   h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("warning", h)]),
-                  h.h3([], ["Fehler beim Lesen der Dateien"]),
+                  h.h3([], [tr.files.readErrorTitle]),
                   h.p([], [message]),
                   h.button(
                     [
@@ -7525,7 +7505,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
                       h.Class("btn btn-primary"),
                       h.OnClick(Message.ClickedRetryList()),
                     ],
-                    ["Erneut versuchen"],
+                    [tr.files.retry],
                   ),
                 ],
               ),
@@ -7533,6 +7513,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
       }),
     ],
   )
+}
 
 // VIEW MODALS
 
@@ -7602,9 +7583,11 @@ const ISLAND_IFRAME_SANDBOX =
 const viewWindowControls = (
   isMaximized: boolean,
   isFullscreen: boolean,
+  language: Language,
   h: HtmlBuilder,
-): Html.Html =>
-  h.div(
+): Html.Html => {
+  const tr = t(language)
+  return h.div(
     [h.Class("window-controls")],
     [
       h.button(
@@ -7612,8 +7595,8 @@ const viewWindowControls = (
           h.Type("button"),
           h.Id("fullscreen-btn"),
           h.Class("win-btn"),
-          h.Title(isFullscreen ? "Vollbild beenden (F11)" : "Vollbild (F11)"),
-          h.AriaLabel(isFullscreen ? "Vollbild beenden" : "Vollbild"),
+          h.Title(isFullscreen ? tr.files.fullscreenExitTitle : tr.files.fullscreenEnterTitle),
+          h.AriaLabel(isFullscreen ? tr.files.fullscreenExitLabel : tr.files.fullscreenEnterLabel),
           h.OnClick(Message.ClickedToggleFullscreen()),
         ],
         [isFullscreen ? "\uE73F" : "\uE740"],
@@ -7623,8 +7606,8 @@ const viewWindowControls = (
           h.Type("button"),
           h.Id("min-btn"),
           h.Class("win-btn"),
-          h.Title("Minimieren"),
-          h.AriaLabel("Minimieren"),
+          h.Title(tr.nav.minimize),
+          h.AriaLabel(tr.nav.minimize),
           h.OnClick(Message.ClickedMinimizeWindow()),
         ],
         ["\uE921"],
@@ -7634,8 +7617,8 @@ const viewWindowControls = (
           h.Type("button"),
           h.Id("max-btn"),
           h.Class("win-btn"),
-          h.Title(isMaximized ? "Wiederherstellen" : "Maximieren"),
-          h.AriaLabel(isMaximized ? "Wiederherstellen" : "Maximieren"),
+          h.Title(isMaximized ? tr.nav.restore : tr.nav.maximize),
+          h.AriaLabel(isMaximized ? tr.nav.restore : tr.nav.maximize),
           h.OnClick(Message.ClickedToggleMaximizeWindow()),
         ],
         [isMaximized ? "\uE923" : "\uE922"],
@@ -7645,23 +7628,26 @@ const viewWindowControls = (
           h.Type("button"),
           h.Id("close-btn"),
           h.Class("win-btn close-btn"),
-          h.Title("Schließen"),
-          h.AriaLabel("Schließen"),
+          h.Title(tr.common.close),
+          h.AriaLabel(tr.common.close),
           h.OnClick(Message.ClickedCloseWindow()),
         ],
         ["\uE8BB"],
       ),
     ],
   )
+}
 
 const viewWindowTopBorder = (
   title: string,
   isFocused: boolean,
   isMaximized: boolean,
   isFullscreen: boolean,
+  language: Language,
   h: HtmlBuilder,
-): Html.Html =>
-  h.header(
+): Html.Html => {
+  const tr = t(language)
+  return h.header(
     [
       h.Id("window-top-border"),
       h.Class(isFocused ? "window-top-border titlebar" : "window-top-border titlebar inactive"),
@@ -7673,8 +7659,8 @@ const viewWindowTopBorder = (
           h.Type("button"),
           h.Id("btn-return-pwaislands"),
           h.Class("window-top-border-btn"),
-          h.Title("Zurück (Doppelklick: Bearbeitungsmodus)"),
-          h.AriaLabel("Zurück"),
+          h.Title(tr.files.backDoubleClickTitle),
+          h.AriaLabel(tr.common.back),
           h.OnClick(Message.ClickedReturnArrow()),
           h.OnDoubleClick(Message.DoubleClickedReturnArrow()),
         ],
@@ -7684,9 +7670,10 @@ const viewWindowTopBorder = (
         ],
       ),
       h.div([h.Class("titlebar-drag-spacer"), h.DataAttribute("tauri-drag-region", "true")], []),
-      viewWindowControls(isMaximized, isFullscreen, h),
+      viewWindowControls(isMaximized, isFullscreen, language, h),
     ],
   )
+}
 
 const viewManagerTitlebar = (
   title: string,
@@ -7694,9 +7681,11 @@ const viewManagerTitlebar = (
   isFocused: boolean,
   isMaximized: boolean,
   isFullscreen: boolean,
+  language: Language,
   h: HtmlBuilder,
-): Html.Html =>
-  h.header(
+): Html.Html => {
+  const tr = t(language)
+  return h.header(
     [
       h.Id("manager-titlebar"),
       h.Class(isFocused ? "window-top-border titlebar" : "window-top-border titlebar inactive"),
@@ -7709,8 +7698,8 @@ const viewManagerTitlebar = (
               h.Type("button"),
               h.Id("btn-return-pwaislands"),
               h.Class("window-top-border-btn"),
-              h.Title("Zurück"),
-              h.AriaLabel("Zurück"),
+              h.Title(tr.common.back),
+              h.AriaLabel(tr.common.back),
               h.OnClick(Message.ClickedReturnArrow()),
               h.OnDoubleClick(Message.DoubleClickedReturnArrow()),
             ],
@@ -7721,9 +7710,10 @@ const viewManagerTitlebar = (
           )
         : h.div([h.Class("titlebar-title"), h.DataAttribute("tauri-drag-region", "true")], [title]),
       h.div([h.Class("titlebar-drag-spacer"), h.DataAttribute("tauri-drag-region", "true")], []),
-      viewWindowControls(isMaximized, isFullscreen, h),
+      viewWindowControls(isMaximized, isFullscreen, language, h),
     ],
   )
+}
 
 const viewIslandContainer = (
   islandUrl: string,
@@ -7732,12 +7722,15 @@ const viewIslandContainer = (
   isFocused: boolean,
   isMaximized: boolean,
   isFullscreen: boolean,
+  language: Language,
   h: HtmlBuilder,
 ): Html.Html =>
   h.div(
     [h.Class(isFullscreen ? "island-container is-fullscreen" : "island-container")],
     [
-      showTopBorder ? viewWindowTopBorder(title, isFocused, isMaximized, isFullscreen, h) : h.empty,
+      showTopBorder
+        ? viewWindowTopBorder(title, isFocused, isMaximized, isFullscreen, language, h)
+        : h.empty,
       h.iframe([
         h.Id("island-iframe"),
         h.Class(showTopBorder ? "island-iframe has-top-border" : "island-iframe"),
@@ -7763,6 +7756,7 @@ const viewManagerMain = (model: Model, title: string, h: HtmlBuilder): Html.Html
             model.isWindowFocused,
             model.isWindowMaximized,
             model.isWindowFullscreen,
+            model.language,
             h,
           )
         : h.empty,
@@ -7796,6 +7790,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
               model.isWindowFocused,
               model.isWindowMaximized,
               model.isWindowFullscreen,
+              model.language,
               h,
             ),
         }),
