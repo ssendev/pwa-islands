@@ -3894,7 +3894,12 @@ export const update = (
 
 // VIEW
 
-const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>): Html.Html => {
+const viewTemplatePicker = (
+  state: CreateFileModel,
+  language: Language,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html => {
+  const tr = t(language).editor
   const selectedTemplate = Array.findFirst(
     state.userTemplates,
     (t) => t.id === state.selectedTemplateId,
@@ -3904,7 +3909,7 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
   return h.div(
     [h.Class("form-group")],
     [
-      h.label([h.For("modal-template-select")], ["Vorlage:"]),
+      h.label([h.For("modal-template-select")], [tr.templateLabel]),
       h.div(
         [h.Class("template-toolbar")],
         [
@@ -3919,7 +3924,7 @@ const viewTemplatePicker = (state: CreateFileModel, h: Html.HtmlBuilder<Message>
               ...(Array.isReadonlyArrayNonEmpty(state.userTemplates)
                 ? [
                     h.optgroup(
-                      [h.LabelAttr("Eigene Vorlagen")],
+                      [h.LabelAttr(tr.customTemplates)],
                       pipe(
                         state.userTemplates,
                         Array.map((t) =>
@@ -4171,83 +4176,87 @@ const viewEditorFileBody = (
 
 const viewLlmButtons = (
   maybePasteError: Option.Option<string>,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
-): ReadonlyArray<Html.Html> => [
-  h.button(
-    [
-      h.Type("button"),
-      h.Id("modal-btn-copy-dts"),
-      h.Class("btn btn-secondary icon-label-btn"),
-      h.AriaLabel("/app.d.ts kopieren"),
-      h.DataAttribute("tip", "/app.d.ts kopieren"),
-      h.OnClick(Message.ClickedCopyDts()),
-    ],
-    [
-      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
-      h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
-    ],
-  ),
-  h.button(
-    [
-      h.Type("button"),
-      h.Id("modal-btn-copy-llm"),
-      h.Class("btn btn-secondary icon-label-btn"),
-      h.AriaLabel("Datei, /api.d.ts und Anleitung für KI kopieren"),
-      h.DataAttribute("tip", "Datei, /api.d.ts und Anleitung kopieren"),
-      h.OnClick(Message.ClickedCopyLlmContext()),
-    ],
-    [
-      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
-      h.span([h.Class("icon-label-btn-text")], ["Mit Anleitung"]),
-    ],
-  ),
-  h.button(
-    [
-      h.Type("button"),
-      h.Id("modal-btn-copy-hashes"),
-      h.Class("btn btn-secondary icon-label-btn"),
-      h.AriaLabel("Nur Datei mit Hashes kopieren"),
-      h.DataAttribute("tip", "Nur Datei mit Hashes kopieren"),
-      h.OnClick(Message.ClickedCopyFileHashes()),
-    ],
-    [
-      h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
-      h.span([h.Class("icon-label-btn-text")], ["Datei"]),
-    ],
-  ),
-  Option.match(maybePasteError, {
-    onNone: () =>
-      h.button(
-        [
-          h.Type("button"),
-          h.Id("modal-btn-paste-llm"),
-          h.Class("btn btn-secondary icon-label-btn"),
-          h.AriaLabel("KI-Änderungen einfügen"),
-          h.DataAttribute("tip", "KI-Änderungen einfügen"),
-          h.OnClick(Message.ClickedPasteLlmEdits()),
-        ],
-        [
-          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("install", h)]),
-          h.span([h.Class("icon-label-btn-text")], ["Einfügen"]),
-        ],
-      ),
-    onSome: (pasteError) =>
-      h.button(
-        [
-          h.Type("button"),
-          h.Id("modal-btn-paste-llm"),
-          h.Class("btn btn-danger icon-label-btn"),
-          h.AriaLabel(`Fehler beim Einfügen: ${pasteError}`),
-          h.DataAttribute("tip", "Fehler (in Zwischenablage kopiert)"),
-          h.OnClick(Message.ClickedPasteLlmEdits()),
-        ],
-        [
-          h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("warning", h)]),
-          h.span([h.Class("icon-label-btn-text")], ["Fehler"]),
-        ],
-      ),
-  }),
-]
+): ReadonlyArray<Html.Html> => {
+  const tr = t(language)
+  return [
+    h.button(
+      [
+        h.Type("button"),
+        h.Id("modal-btn-copy-dts"),
+        h.Class("btn btn-secondary icon-label-btn"),
+        h.AriaLabel(tr.editor.copyDtsTip),
+        h.DataAttribute("tip", tr.editor.copyDtsTip),
+        h.OnClick(Message.ClickedCopyDts()),
+      ],
+      [
+        h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+        h.span([h.Class("icon-label-btn-text")], ["/app.d.ts"]),
+      ],
+    ),
+    h.button(
+      [
+        h.Type("button"),
+        h.Id("modal-btn-copy-llm"),
+        h.Class("btn btn-secondary icon-label-btn"),
+        h.AriaLabel(tr.editor.copyWithInstructionsTip),
+        h.DataAttribute("tip", tr.editor.copyWithInstructionsTip),
+        h.OnClick(Message.ClickedCopyLlmContext()),
+      ],
+      [
+        h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+        h.span([h.Class("icon-label-btn-text")], [tr.editor.copyWithInstructions]),
+      ],
+    ),
+    h.button(
+      [
+        h.Type("button"),
+        h.Id("modal-btn-copy-hashes"),
+        h.Class("btn btn-secondary icon-label-btn"),
+        h.AriaLabel(tr.editor.copyFileHashesTip),
+        h.DataAttribute("tip", tr.editor.copyFileHashesTip),
+        h.OnClick(Message.ClickedCopyFileHashes()),
+      ],
+      [
+        h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("clipboard", h)]),
+        h.span([h.Class("icon-label-btn-text")], [tr.toolbar.newFileLabel]),
+      ],
+    ),
+    Option.match(maybePasteError, {
+      onNone: () =>
+        h.button(
+          [
+            h.Type("button"),
+            h.Id("modal-btn-paste-llm"),
+            h.Class("btn btn-secondary icon-label-btn"),
+            h.AriaLabel(tr.editor.pasteTip),
+            h.DataAttribute("tip", tr.editor.pasteTip),
+            h.OnClick(Message.ClickedPasteLlmEdits()),
+          ],
+          [
+            h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("install", h)]),
+            h.span([h.Class("icon-label-btn-text")], [tr.editor.paste]),
+          ],
+        ),
+      onSome: (pasteError) =>
+        h.button(
+          [
+            h.Type("button"),
+            h.Id("modal-btn-paste-llm"),
+            h.Class("btn btn-danger icon-label-btn"),
+            h.AriaLabel(tr.editor.pasteErrorAria(pasteError)),
+            h.DataAttribute("tip", tr.editor.pasteErrorTip),
+            h.OnClick(Message.ClickedPasteLlmEdits()),
+          ],
+          [
+            h.span([h.Class("icon-label-btn-icon"), h.AriaHidden(true)], [viewIcon("warning", h)]),
+            h.span([h.Class("icon-label-btn-text")], [tr.editor.pasteError]),
+          ],
+        ),
+    }),
+  ]
+}
 
 export type ViewInputs = {
   readonly llmEnabled: boolean
@@ -5244,7 +5253,7 @@ const viewEditorModal = (
                   ...(effectiveLlmBarMode === "Chat"
                     ? viewLlmChatModelControls(llmChatState, llmViewInputs, h)
                     : effectiveLlmBarMode === "Copy"
-                      ? viewLlmButtons(maybePasteError, h)
+                      ? viewLlmButtons(maybePasteError, language, h)
                       : []),
                   isTextFile
                     ? h.div(
@@ -5891,15 +5900,17 @@ const viewHistoryOverlay = (
 }
 
 export const view = Submodel.defineView<Model, Message, ViewInputs>(
-  (model, context, h): Html.Html =>
-    Model.match(model, {
+  (model, context, h): Html.Html => {
+    const language = context.language ?? "en"
+    const tr = t(language)
+    return Model.match(model, {
       CreateFile: (state) =>
         h.div(
           [h.Class("editor-modal-host")],
           [
             viewEditorModal(
               {
-                titleText: "Neue Datei erstellen",
+                titleText: tr.toolbar.newFileTitle,
                 noun: "Datei",
                 isFolder: false,
                 isTextFile: true,
@@ -5925,7 +5936,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 maybeValidationError: state.maybeValidationError,
                 maybePasteError: state.maybePasteError,
                 extraBodyNodes: [
-                  viewTemplatePicker(state, h),
+                  viewTemplatePicker(state, language, h),
                   ...viewEditorFileBody(
                     EditorFileMode.Text({ content: state.content }),
                     state.name,
@@ -5943,19 +5954,21 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                   {
                     overlayId: "modal-delete-template-box",
                     titleId: "modal-delete-template-title",
-                    title: "Vorlage löschen",
-                    prompt: `Vorlage „${pipe(
-                      state.userTemplates,
-                      Array.findFirst((t) => t.id === state.selectedTemplateId),
-                      Option.match({
-                        onNone: () => "",
-                        onSome: (t) => t.label,
-                      }),
-                    )}“ wirklich löschen?`,
+                    title: tr.editor.deleteTemplateTitle,
+                    prompt: tr.editor.deleteTemplatePrompt(
+                      pipe(
+                        state.userTemplates,
+                        Array.findFirst((t) => t.id === state.selectedTemplateId),
+                        Option.match({
+                          onNone: () => "",
+                          onSome: (t) => t.label,
+                        }),
+                      ),
+                    ),
                     cancelButtonId: "modal-btn-cancel-delete-template",
                     onCancel: Message.ClickedCancelDeleteTemplate(),
                     confirmButtonId: "modal-btn-confirm-delete-template",
-                    confirmLabel: "Löschen",
+                    confirmLabel: tr.common.delete,
                     onConfirm: Message.ClickedConfirmDeleteTemplate(),
                   },
                   h,
@@ -5967,7 +5980,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
       CreateFolder: ({ name, maybeValidationError }) =>
         viewEditorModal(
           {
-            titleText: "Neuen Ordner erstellen",
+            titleText: tr.toolbar.newFolderTitle,
             noun: "Ordner",
             isFolder: true,
             isTextFile: false,
@@ -5999,7 +6012,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
           [
             viewEditorModal(
               {
-                titleText: `Ordner bearbeiten: ${originalName}`,
+                titleText: tr.editor.editFolderTitle(originalName),
                 noun: "Ordner",
                 isFolder: true,
                 isTextFile: false,
@@ -6082,7 +6095,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
           [
             viewEditorModal(
               {
-                titleText: `Datei bearbeiten: ${originalName}`,
+                titleText: tr.editor.editFileTitle(originalName),
                 noun: "Datei",
                 isFolder: false,
                 isTextFile: fileMode._tag === "Text",
@@ -6149,5 +6162,6 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
       },
 
       ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
-    }),
+    })
+  },
 )
