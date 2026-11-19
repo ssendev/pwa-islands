@@ -43,6 +43,7 @@ import {
   loadFileHistoryIndex,
   truncateLatestFileHistoryEntry,
 } from "./history"
+import { type Language, t } from "./i18n"
 import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { viewMarkdown, viewUserMarkdown } from "./markdown"
@@ -4260,6 +4261,7 @@ export type ViewInputs = {
   readonly llmToolCalls?: boolean
   readonly llmChatAiName?: string
   readonly llmChatUserName?: string
+  readonly language?: Language
 }
 
 const viewLlmChatHistory = (
@@ -5038,7 +5040,9 @@ const viewEditorModal = (
   },
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
-  const saveLabel = isEditingExisting ? "Speichern" : "Erstellen"
+  const language = llmViewInputs.language ?? "en"
+  const tr = t(language)
+  const saveLabel = isEditingExisting ? tr.common.save : tr.common.create
   const undoInTitlebar = llmViewInputs.monacoSettings.undoInTitlebar
   const showStepButtons = historyControls !== undefined && historyControls.showStepButtons
   const viewStepButton = (kind: "undo" | "redo", className: string, canStep: boolean): Html.Html =>
@@ -5047,8 +5051,8 @@ const viewEditorModal = (
         h.Type("button"),
         h.Id(kind === "undo" ? "modal-btn-undo" : "modal-btn-redo"),
         h.Class(className),
-        h.AriaLabel(kind === "undo" ? "Rückgängig" : "Wiederholen"),
-        h.Title(kind === "undo" ? "Rückgängig (Strg+Z)" : "Wiederholen (Strg+Y)"),
+        h.AriaLabel(kind === "undo" ? tr.editor.undo : tr.editor.redo),
+        h.Title(kind === "undo" ? tr.editor.undoTitle : tr.editor.redoTitle),
         h.Disabled(!canStep),
         h.OnClick(kind === "undo" ? Message.ClickedUndo() : Message.ClickedRedo()),
       ],
@@ -5062,13 +5066,13 @@ const viewEditorModal = (
     readonly icon: IconId
   }> = llmViewInputs.llmEnabled
     ? [
-        { value: "Closed", label: "Bearbeiten", icon: "edit" },
+        { value: "Closed", label: tr.common.edit, icon: "edit" },
         { value: "Chat", label: "Chat", icon: "ai" },
-        { value: "Copy", label: "Kopieren", icon: "clipboard" },
+        { value: "Copy", label: tr.common.copy, icon: "clipboard" },
       ]
     : [
-        { value: "Closed", label: "Bearbeiten", icon: "edit" },
-        { value: "Copy", label: "Kopieren", icon: "clipboard" },
+        { value: "Closed", label: tr.common.edit, icon: "edit" },
+        { value: "Copy", label: tr.common.copy, icon: "clipboard" },
       ]
   const activeLlmBarModeOption = Array.findFirst(
     llmBarModeOptions,
@@ -5093,7 +5097,7 @@ const viewEditorModal = (
                 [h.Id("modal-title"), h.Class("modal-title")],
                 isNameToggleable
                   ? [
-                      h.span([h.Class("modal-title-prefix")], ["Datei bearbeiten: "]),
+                      h.span([h.Class("modal-title-prefix")], [tr.editor.editFilePrefix]),
                       h.button(
                         [
                           h.Type("button"),
@@ -5128,7 +5132,7 @@ const viewEditorModal = (
                     [
                       h.Type("button"),
                       h.Class("modal-close-btn"),
-                      h.AriaLabel("Schließen"),
+                      h.AriaLabel(tr.common.close),
                       h.OnClick(Message.ClickedClose()),
                     ],
                     [viewIcon("close", h)],
@@ -5161,7 +5165,14 @@ const viewEditorModal = (
                     ? h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("modal-file-name")], [`${noun}name:`]),
+                          h.label(
+                            [h.For("modal-file-name")],
+                            [
+                              noun === "Ordner"
+                                ? tr.editor.folderNameLabel
+                                : tr.editor.fileNameLabel,
+                            ],
+                          ),
                           h.div(
                             [h.Class("modal-name-row")],
                             [
@@ -5172,7 +5183,9 @@ const viewEditorModal = (
                                 h.Value(nameValue),
                                 h.Required(true),
                                 h.Placeholder(
-                                  isFolder ? "z. B. projekte" : "z. B. index.html, daten.json",
+                                  isFolder
+                                    ? tr.editor.folderNamePlaceholder
+                                    : tr.editor.fileNamePlaceholder,
                                 ),
                                 h.Autocomplete("off"),
                                 h.OnInput((name) => Message.UpdatedName({ name })),
@@ -5183,8 +5196,8 @@ const viewEditorModal = (
                                       h.Type("button"),
                                       h.Id("modal-btn-delete"),
                                       h.Class("btn btn-danger icon-label-btn"),
-                                      h.AriaLabel("Löschen"),
-                                      h.DataAttribute("tip", "Löschen"),
+                                      h.AriaLabel(tr.common.delete),
+                                      h.DataAttribute("tip", tr.common.delete),
                                       h.OnClick(Message.ClickedDelete()),
                                     ],
                                     [
@@ -5192,7 +5205,7 @@ const viewEditorModal = (
                                         [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                                         [viewIcon("trash", h)],
                                       ),
-                                      h.span([h.Class("icon-label-btn-text")], ["Löschen"]),
+                                      h.span([h.Class("icon-label-btn-text")], [tr.common.delete]),
                                     ],
                                   )
                                 : h.empty,
@@ -5304,8 +5317,8 @@ const viewEditorModal = (
                                 h.Type("button"),
                                 h.Id("modal-btn-history"),
                                 h.Class("btn btn-secondary btn-icon"),
-                                h.AriaLabel("Versionsverlauf"),
-                                h.Title("Versionsverlauf"),
+                                h.AriaLabel(tr.files.versionHistory),
+                                h.Title(tr.files.versionHistory),
                                 h.OnClick(Message.ClickedOpenHistory()),
                               ],
                               [viewIcon("history", h)],
@@ -5330,8 +5343,8 @@ const viewEditorModal = (
                                 ? "btn btn-secondary icon-label-btn"
                                 : "btn btn-secondary icon-label-btn modal-footer-push-right",
                             ),
-                            h.AriaLabel("Abbrechen"),
-                            h.DataAttribute("tip", "Abbrechen"),
+                            h.AriaLabel(tr.common.cancel),
+                            h.DataAttribute("tip", tr.common.cancel),
                             h.OnClick(Message.ClickedClose()),
                           ],
                           [
@@ -5339,7 +5352,7 @@ const viewEditorModal = (
                               [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                               [viewIcon("close", h)],
                             ),
-                            h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
+                            h.span([h.Class("icon-label-btn-text")], [tr.common.cancel]),
                           ],
                         ),
                       ]),
@@ -5366,8 +5379,8 @@ const viewEditorModal = (
                           h.Type("button"),
                           h.Id("modal-btn-preview"),
                           h.Class("btn btn-secondary icon-label-btn"),
-                          h.AriaLabel("Im Vollfenster anzeigen"),
-                          h.DataAttribute("tip", "Im Vollfenster anzeigen"),
+                          h.AriaLabel(tr.editor.openFullscreenPreview),
+                          h.DataAttribute("tip", tr.editor.openFullscreenPreview),
                           h.OnClick(Message.ClickedOpenPreview()),
                         ],
                         [
@@ -5375,7 +5388,7 @@ const viewEditorModal = (
                             [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                             [viewIcon("desktop", h)],
                           ),
-                          h.span([h.Class("icon-label-btn-text")], ["Vorschau"]),
+                          h.span([h.Class("icon-label-btn-text")], [tr.editor.preview]),
                         ],
                       )
                     : h.empty,

@@ -5633,7 +5633,12 @@ const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
 
     Unsupported: () =>
       viewBreadcrumbNav(
-        [h.span([h.Class("breadcrumb-current")], ["Dateisystem-APIs nicht unterstützt"])],
+        [
+          h.span(
+            [h.Class("breadcrumb-current")],
+            [t(model.language).settings.unsupportedFsBreadcrumb],
+          ),
+        ],
         h,
       ),
 
@@ -6405,14 +6410,14 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.section(
                     [h.Class("settings-group"), h.Id("settings-group-llm")],
                     [
-                      h.h4([h.Class("settings-group-title")], ["KI-Chat"]),
+                      h.h4([h.Class("settings-group-title")], [tr.settings.llmTitle]),
                       h.div(
                         [h.Class("form-row")],
                         [
                           h.div(
                             [h.Class("form-group")],
                             [
-                              h.label([h.For("llm-chat-ai-name")], ["Name für KI"]),
+                              h.label([h.For("llm-chat-ai-name")], [tr.settings.llmAiName]),
                               h.input([
                                 h.Type("text"),
                                 h.Id("llm-chat-ai-name"),
@@ -6426,7 +6431,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           h.div(
                             [h.Class("form-group")],
                             [
-                              h.label([h.For("llm-chat-user-name")], ["Name für Du"]),
+                              h.label([h.For("llm-chat-user-name")], [tr.settings.llmUserName]),
                               h.input([
                                 h.Type("text"),
                                 h.Id("llm-chat-user-name"),
@@ -6442,7 +6447,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-edit-format")], ["Bearbeitungsformat (Standard)"]),
+                          h.label([h.For("llm-edit-format")], [tr.settings.llmEditFormatDefault]),
                           h.select(
                             [
                               h.Id("llm-edit-format"),
@@ -6463,9 +6468,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           model.hasLanguageModel
                             ? h.p(
                                 [h.Id("llm-native-detected-hint"), h.Class("form-hint")],
-                                [
-                                  "Browser-KI (LanguageModel-API) erkannt – Chat im Editor ist automatisch aktiv.",
-                                ],
+                                [tr.settings.llmNativeDetectedHint],
                               )
                             : h.empty,
                         ],
@@ -6485,7 +6488,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                       h.input([
                                         h.Type("checkbox"),
                                         h.Checked(provider.enabled),
-                                        h.AriaLabel(`${displayName} aktivieren`),
+                                        h.AriaLabel(tr.settings.llmEnableProvider(displayName)),
                                         h.OnChange(() =>
                                           Message.ToggledLlmProviderEnabled({
                                             id: provider.id,
@@ -6520,7 +6523,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                             }),
                                           ),
                                         ],
-                                        [viewIcon("edit", h), " Bearbeiten"],
+                                        [viewIcon("edit", h), ` ${tr.common.edit}`],
                                       ),
                                     ],
                                   ),
@@ -6533,7 +6536,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             [
                               h.p(
                                 [h.Id("llm-summary-url"), h.Class("llm-summary-item")],
-                                ["Noch kein OpenAPI-Provider angelegt."],
+                                [tr.settings.llmNoProviders],
                               ),
                             ],
                           ),
@@ -6547,7 +6550,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               h.Class("btn btn-secondary"),
                               h.OnClick(Message.ClickedAddLlmProvider()),
                             ],
-                            ["+ Provider hinzufügen"],
+                            [tr.settings.llmAddProvider],
                           ),
                         ],
                       ),
@@ -7124,12 +7127,12 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               {
                 overlayId: "delete-llm-provider-confirm",
                 titleId: "delete-llm-provider-confirm-title",
-                title: "Provider löschen",
-                prompt: `Provider „${providerLabel}“ wirklich löschen?`,
+                title: tr.settings.llmDeleteProviderTitle,
+                prompt: tr.settings.llmDeleteProviderPrompt(providerLabel),
                 cancelButtonId: "btn-delete-llm-provider-cancel",
                 onCancel: Message.ClickedCancelDeleteLlmProvider(),
                 confirmButtonId: "btn-delete-llm-provider-confirm",
-                confirmLabel: "Löschen",
+                confirmLabel: tr.common.delete,
                 onConfirm: Message.ClickedConfirmDeleteLlmProvider(),
               },
               h,
@@ -7141,12 +7144,12 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
             {
               overlayId: "clear-all-history-confirm",
               titleId: "clear-all-history-confirm-title",
-              title: "Alle Versionen löschen",
-              prompt: "Alle gespeicherten Versionen aller Dateien löschen?",
+              title: tr.settings.clearAllHistory,
+              prompt: tr.settings.clearAllHistoryPrompt,
               cancelButtonId: "btn-clear-all-history-cancel",
               onCancel: Message.ClickedCancelClearAllHistory(),
               confirmButtonId: "btn-clear-all-history-confirm",
-              confirmLabel: "Endgültig löschen",
+              confirmLabel: tr.settings.deletePermanently,
               onConfirm: Message.ClickedConfirmClearAllHistory(),
             },
             h,
@@ -7563,6 +7566,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
           undoInTitlebar: model.editorUndoInTitlebar,
         },
         appTheme: model.appTheme,
+        language: model.language,
       },
     },
     view: Modal.view,
