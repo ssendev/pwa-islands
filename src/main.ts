@@ -7558,6 +7558,7 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
       hasDirectoryPicker: model.hasDirectoryPicker,
       hasOPFS: model.hasOPFS,
       hasTauri: model.hasTauri,
+      language: model.language,
       llm: {
         llmEnabled: isChatAvailable(model),
         llmModelOptions,

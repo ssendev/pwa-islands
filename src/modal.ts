@@ -24,6 +24,7 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
+import type { Language } from "./i18n"
 import { hasFileHistory } from "./history"
 import { viewIcon } from "./icons"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
@@ -1299,6 +1300,7 @@ export type ViewInputs = {
   readonly hasDirectoryPicker: boolean
   readonly hasOPFS: boolean
   readonly hasTauri: boolean
+  readonly language: Language
   readonly llm: Editor.ViewInputs
 }
 
