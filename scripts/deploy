@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$BRANCH" != "main" ]; then
+  echo "Error: current branch is '${BRANCH}', must be 'main'." >&2
+  exit 1
+fi
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Error: working tree has uncommitted changes. Commit or stash them first." >&2
+  exit 1
+fi
+
+TAG="${1:-v0.1.$(git rev-list --count HEAD)}"
+if [[ "$TAG" != v* ]]; then
+  TAG="v${TAG}"
+fi
+
+echo "==> Pushing main to github..."
+git push github main
+
+echo "==> Creating and pushing tag ${TAG}..."
+git tag "$TAG"
+git push github "$TAG"
+
+echo "==> Release workflow triggered for ${TAG}"
+echo "    https://github.com/ssendev/pwa-islands/actions/workflows/release.yml"
