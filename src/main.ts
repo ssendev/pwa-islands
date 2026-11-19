@@ -7134,6 +7134,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 confirmButtonId: "btn-delete-llm-provider-confirm",
                 confirmLabel: tr.common.delete,
                 onConfirm: Message.ClickedConfirmDeleteLlmProvider(),
+                language: model.language,
               },
               h,
             )
@@ -7151,6 +7152,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               confirmButtonId: "btn-clear-all-history-confirm",
               confirmLabel: tr.settings.deletePermanently,
               onConfirm: Message.ClickedConfirmClearAllHistory(),
+              language: model.language,
             },
             h,
           )

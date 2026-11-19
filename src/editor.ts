@@ -5609,9 +5609,11 @@ const canPreviewHistoryEntry = (
 
 const viewHistoryPreviewOverlay = (
   preview: HistoryPreview,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
-): Html.Html =>
-  h.div(
+): Html.Html => {
+  const tr = t(language).editor
+  return h.div(
     [h.Id("editor-preview-overlay"), h.Class("editor-preview-overlay")],
     [
       HistoryPreview.match(preview, {
@@ -5621,7 +5623,7 @@ const viewHistoryPreviewOverlay = (
             h.Class("editor-preview-iframe"),
             h.Srcdoc(content),
             h.Sandbox(PREVIEW_IFRAME_SANDBOX),
-            h.Title("Vorschau"),
+            h.Title(tr.preview),
           ]),
         Image: ({ objectUrl }) =>
           h.div(
@@ -5631,7 +5633,7 @@ const viewHistoryPreviewOverlay = (
                 h.Id("editor-preview-image"),
                 h.Class("editor-preview-image"),
                 h.Src(objectUrl),
-                h.Alt("Vorschau der Version"),
+                h.Alt(tr.versionPreviewAlt),
               ]),
             ],
           ),
@@ -5640,7 +5642,7 @@ const viewHistoryPreviewOverlay = (
             h.Id("editor-preview-iframe"),
             h.Class("editor-preview-iframe"),
             h.Src(objectUrl),
-            h.Title("Vorschau"),
+            h.Title(tr.preview),
           ]),
       }),
       h.button(
@@ -5648,20 +5650,24 @@ const viewHistoryPreviewOverlay = (
           h.Type("button"),
           h.Id("editor-preview-close"),
           h.Class("editor-preview-close"),
-          h.Title("Schließen (Esc)"),
-          h.AriaLabel("Vorschau schließen"),
+          h.Title(tr.closeEscTitle),
+          h.AriaLabel(tr.closePreviewAria),
           h.OnClick(Message.ClickedClosePreview()),
         ],
         [viewIcon("close", h)],
       ),
     ],
   )
+}
 
-const viewPreviewOverlay = (content: string, h: Html.HtmlBuilder<Message>): Html.Html =>
-  viewHistoryPreviewOverlay(HistoryPreview.Text({ content }), h)
+const viewPreviewOverlay = (
+  content: string,
+  language: Language,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html => viewHistoryPreviewOverlay(HistoryPreview.Text({ content }), language, h)
 
-const formatHistoryTimestamp = (timestampMs: number): string =>
-  new Date(timestampMs).toLocaleString("de-DE", {
+const formatHistoryTimestamp = (timestampMs: number, language: Language): string =>
+  new Date(timestampMs).toLocaleString(language === "de" ? "de-DE" : "en-US", {
     dateStyle: "medium",
     timeStyle: "medium",
   })
@@ -5679,11 +5685,13 @@ const viewHistoryOverlay = (
     readonly byteLength: number
   }>,
   isBinary: boolean,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   if (historyState._tag === "Closed") {
     return h.empty
   }
+  const tr = t(language)
 
   return h.div(
     [
@@ -5691,7 +5699,7 @@ const viewHistoryOverlay = (
       h.Class("modal-overlay"),
       h.Role("dialog"),
       h.AriaModal(true),
-      h.AriaLabel("Versionsverlauf"),
+      h.AriaLabel(tr.files.versionHistory),
     ],
     [
       h.div(
@@ -5703,7 +5711,7 @@ const viewHistoryOverlay = (
               h.div(
                 [h.Class("editor-history-header-title")],
                 [
-                  h.h3([h.Class("modal-title")], ["Versionsverlauf"]),
+                  h.h3([h.Class("modal-title")], [tr.files.versionHistory]),
                   historyState._tag === "Open"
                     ? h.label(
                         [h.Class("form-check editor-history-toggle")],
@@ -5718,7 +5726,7 @@ const viewHistoryOverlay = (
                               }),
                             ),
                           ]),
-                          h.span([], ["Speichern"]),
+                          h.span([], [tr.common.save]),
                         ],
                       )
                     : h.empty,
@@ -5729,7 +5737,7 @@ const viewHistoryOverlay = (
                   h.Type("button"),
                   h.Id("editor-history-close"),
                   h.Class("modal-close-btn"),
-                  h.AriaLabel("Verlauf schließen"),
+                  h.AriaLabel(tr.editor.closeHistory),
                   h.OnClick(Message.ClickedCloseHistory()),
                 ],
                 [viewIcon("close", h)],
@@ -5741,14 +5749,11 @@ const viewHistoryOverlay = (
             [
               HistoryState.match(historyState, {
                 Closed: () => h.empty,
-                Loading: () => h.p([h.Class("editor-history-empty")], ["Verlauf wird geladen..."]),
+                Loading: () => h.p([h.Class("editor-history-empty")], [tr.editor.loadingHistory]),
                 Open: ({ entries, isConfirmingClear, isConfirmingDeleteLatest }) =>
                   Array.match(entries, {
                     onEmpty: () =>
-                      h.p(
-                        [h.Class("editor-history-empty")],
-                        ["Noch keine gespeicherten Versionen vorhanden."],
-                      ),
+                      h.p([h.Class("editor-history-empty")], [tr.editor.noHistoryVersions]),
                     onNonEmpty: (nonEmptyEntries) =>
                       h.div(
                         [h.Class("editor-history-content")],
@@ -5768,7 +5773,10 @@ const viewHistoryOverlay = (
                                     [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                                     [viewIcon("trash", h)],
                                   ),
-                                  h.span([h.Class("icon-label-btn-text")], ["Neueste löschen"]),
+                                  h.span(
+                                    [h.Class("icon-label-btn-text")],
+                                    [tr.editor.deleteLatestVersion],
+                                  ),
                                 ],
                               ),
                               h.button(
@@ -5783,7 +5791,10 @@ const viewHistoryOverlay = (
                                     [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                                     [viewIcon("trash", h)],
                                   ),
-                                  h.span([h.Class("icon-label-btn-text")], ["Verlauf löschen"]),
+                                  h.span(
+                                    [h.Class("icon-label-btn-text")],
+                                    [tr.editor.clearHistory],
+                                  ),
                                 ],
                               ),
                             ],
@@ -5793,14 +5804,14 @@ const viewHistoryOverlay = (
                                 {
                                   overlayId: "editor-history-delete-latest-confirm",
                                   titleId: "editor-history-delete-latest-title",
-                                  title: "Neueste Version löschen",
-                                  prompt:
-                                    "Neueste gespeicherte Version wirklich unwiderruflich löschen?",
+                                  title: tr.editor.deleteLatestVersionTitle,
+                                  prompt: tr.editor.deleteLatestVersionPrompt,
                                   cancelButtonId: "editor-history-delete-latest-cancel",
                                   onCancel: Message.ClickedCancelDeleteLatestHistoryEntry(),
                                   confirmButtonId: "editor-history-delete-latest-confirm-btn",
-                                  confirmLabel: "Löschen",
+                                  confirmLabel: tr.common.delete,
                                   onConfirm: Message.ClickedConfirmDeleteLatestHistoryEntry(),
+                                  language,
                                 },
                                 h,
                               )
@@ -5810,13 +5821,14 @@ const viewHistoryOverlay = (
                                 {
                                   overlayId: "editor-history-clear-confirm",
                                   titleId: "editor-history-clear-title",
-                                  title: "Verlauf löschen",
-                                  prompt: "Gesamten Verlauf wirklich löschen?",
+                                  title: tr.editor.clearHistory,
+                                  prompt: tr.editor.clearHistoryPrompt,
                                   cancelButtonId: "editor-history-clear-cancel",
                                   onCancel: Message.ClickedCancelClearHistory(),
                                   confirmButtonId: "editor-history-clear-confirm-btn",
-                                  confirmLabel: "Endgültig löschen",
+                                  confirmLabel: tr.settings.deletePermanently,
                                   onConfirm: Message.ClickedConfirmClearHistory(),
+                                  language,
                                 },
                                 h,
                               )
@@ -5845,7 +5857,7 @@ const viewHistoryOverlay = (
                                     [
                                       h.span(
                                         [h.Class("editor-history-date")],
-                                        [formatHistoryTimestamp(entry.timestampMs)],
+                                        [formatHistoryTimestamp(entry.timestampMs, language)],
                                       ),
                                       h.span(
                                         [h.Class("editor-history-lines")],
@@ -5873,7 +5885,7 @@ const viewHistoryOverlay = (
                                                 }),
                                               ),
                                             ],
-                                            ["Vorschau"],
+                                            [tr.editor.preview],
                                           )
                                         : h.empty,
                                       h.button(
@@ -5886,7 +5898,7 @@ const viewHistoryOverlay = (
                                             }),
                                           ),
                                         ],
-                                        ["Wiederherstellen"],
+                                        [tr.nav.restore],
                                       ),
                                     ],
                                   ),
@@ -5955,7 +5967,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               },
               h,
             ),
-            state.isPreviewOpen ? viewPreviewOverlay(state.content, h) : h.empty,
+            state.isPreviewOpen ? viewPreviewOverlay(state.content, language, h) : h.empty,
             state.isDeletingTemplate
               ? viewConfirmDeleteDialog(
                   {
@@ -6091,10 +6103,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                   ? Option.some(hashAndMeasureHistoryContent(fileMode.content))
                   : Option.none(),
                 isBinaryHistory,
+                language,
                 h,
               ),
               historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
-                ? viewHistoryPreviewOverlay(historyState.maybePreviewContent.value, h)
+                ? viewHistoryPreviewOverlay(historyState.maybePreviewContent.value, language, h)
                 : h.empty,
             ],
           )
@@ -6152,7 +6165,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               h,
             ),
             previewOpen && fileMode._tag === "Text"
-              ? viewPreviewOverlay(fileMode.content, h)
+              ? viewPreviewOverlay(fileMode.content, language, h)
               : h.empty,
             viewHistoryOverlay(
               historyState,
@@ -6160,10 +6173,11 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 ? Option.some(hashAndMeasureHistoryContent(fileMode.content))
                 : Option.none(),
               isBinaryHistory,
+              language,
               h,
             ),
             historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
-              ? viewHistoryPreviewOverlay(historyState.maybePreviewContent.value, h)
+              ? viewHistoryPreviewOverlay(historyState.maybePreviewContent.value, language, h)
               : h.empty,
             isConfirmingDelete
               ? viewConfirmDeleteModal(originalName, "file", language, h)
