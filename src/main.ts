@@ -6582,8 +6582,8 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         [h.Id("llm-provider-modal-title"), h.Class("modal-title")],
                         [
                           Option.isSome(model.editingLlmProviderId)
-                            ? "Provider bearbeiten"
-                            : "Provider hinzufügen",
+                            ? tr.settings.providerEditTitle
+                            : tr.settings.providerAddTitle,
                         ],
                       ),
                       h.button(
@@ -6591,7 +6591,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           h.Type("button"),
                           h.Id("btn-close-llm-provider-modal"),
                           h.Class("modal-close-btn"),
-                          h.AriaLabel("Schließen"),
+                          h.AriaLabel(tr.common.close),
                           h.OnClick(Message.ClickedCancelLlmProviderEdit()),
                         ],
                         [viewIcon("close", h)],
@@ -6617,7 +6617,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["Aktiviert"]),
+                              h.span([], [tr.settings.providerEnabled]),
                             ],
                           ),
                         ],
@@ -6627,7 +6627,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         [
                           h.label(
                             [h.For("llm-provider-edit-format")],
-                            ["Bearbeitungsformat (optional überschreiben)"],
+                            [tr.settings.providerEditFormatOverride],
                           ),
                           h.select(
                             [
@@ -6641,7 +6641,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             [
                               h.option(
                                 [h.Value(""), h.Selected(model.llmDraftProviderEditFormat === "")],
-                                ["Standard (global)"],
+                                [tr.settings.providerEditFormatGlobal],
                               ),
                               ...EDIT_FORMAT_OPTIONS.map((item) =>
                                 h.option(
@@ -6659,12 +6659,12 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-provider-name")], ["Provider-Name"]),
+                          h.label([h.For("llm-provider-name")], [tr.settings.providerName]),
                           h.input([
                             h.Id("llm-provider-name"),
                             h.Class("form-input"),
                             h.Type("text"),
-                            h.Placeholder("z. B. OpenAI, Ollama, OpenRouter"),
+                            h.Placeholder(tr.settings.providerNamePlaceholder),
                             h.Autocomplete("off"),
                             h.Value(model.llmDraftName),
                             h.OnInput((value) => Message.UpdatedLlmProviderName({ value })),
@@ -6674,7 +6674,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-base-url")], ["Base-URL (OpenAI-kompatibel)"]),
+                          h.label([h.For("llm-base-url")], [tr.settings.providerBaseUrl]),
                           h.input([
                             h.Id("llm-base-url"),
                             h.Class("form-input"),
@@ -6689,7 +6689,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-api-key")], ["API-Key"]),
+                          h.label([h.For("llm-api-key")], [tr.settings.providerApiKey]),
                           h.input([
                             h.Id("llm-api-key"),
                             h.Class("form-input"),
@@ -6704,33 +6704,28 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-models")], ["Modellliste (optional, kommagetrennt)"]),
+                          h.label([h.For("llm-models")], [tr.settings.providerModels]),
                           h.input([
                             h.Id("llm-models"),
                             h.Class("form-input"),
                             h.Type("text"),
-                            h.Placeholder("z. B. gpt-4o, Schnell=gpt-4o-mini"),
+                            h.Placeholder(tr.settings.providerModelsPlaceholder),
                             h.Autocomplete("off"),
                             h.Value(model.llmDraftModels),
                             h.OnInput((value) => Message.UpdatedLlmModels({ value })),
                           ]),
-                          h.p(
-                            [h.Class("form-hint")],
-                            [
-                              "Wird genutzt, wenn die automatische Erkennung nicht funktioniert, um die Modellliste selbst festzulegen (optional Name=Modell-ID).",
-                            ],
-                          ),
+                          h.p([h.Class("form-hint")], [tr.settings.providerModelsHint]),
                         ],
                       ),
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-model-filter")], ["Modellfilter (RegExp, optional)"]),
+                          h.label([h.For("llm-model-filter")], [tr.settings.providerModelFilter]),
                           h.input([
                             h.Id("llm-model-filter"),
                             h.Class("form-input"),
                             h.Type("text"),
-                            h.Placeholder("z. B. ^(gpt-4|claude)"),
+                            h.Placeholder(tr.settings.providerModelFilterPlaceholder),
                             h.Autocomplete("off"),
                             h.Spellcheck(false),
                             h.Value(model.llmDraftModelFilter),
@@ -6741,8 +6736,8 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             [
                               model.llmDraftModelFilter.trim() !== "" &&
                               compileModelFilter(model.llmDraftModelFilter) === null
-                                ? "Ungültiger regulärer Ausdruck – Filter ist aktuell inaktiv."
-                                : "Filtert sowohl abgerufene als auch angezeigte Modelle per RegExp (Groß-/Kleinschreibung ignoriert).",
+                                ? tr.settings.providerModelFilterInvalid
+                                : tr.settings.providerModelFilterHint,
                             ],
                           ),
                         ],
@@ -6766,7 +6761,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                       }),
                                     ),
                                   ]),
-                                  h.span([], ["Streaming verwenden"]),
+                                  h.span([], [tr.settings.providerUseStreaming]),
                                 ],
                               ),
                             ],
@@ -6787,7 +6782,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                       }),
                                     ),
                                   ]),
-                                  h.span([], ["Tool-Calls verwenden"]),
+                                  h.span([], [tr.settings.providerUseToolCalls]),
                                 ],
                               ),
                             ],
@@ -6797,7 +6792,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-thinking-preset")], ["Thinking-Preset"]),
+                          h.label(
+                            [h.For("llm-thinking-preset")],
+                            [tr.settings.providerThinkingPreset],
+                          ),
                           (() => {
                             const matchedPresetId =
                               THINKING_PRESETS.find(
@@ -6823,7 +6821,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 ),
                                 h.option(
                                   [h.Value("custom"), h.Selected(matchedPresetId === "custom")],
-                                  ["Benutzerdefiniert"],
+                                  [tr.settings.providerThinkingCustom],
                                 ),
                               ],
                             )
@@ -6833,14 +6831,15 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("llm-thinking-param")], ["Thinking-Parameter"]),
+                          h.label(
+                            [h.For("llm-thinking-param")],
+                            [tr.settings.providerThinkingParam],
+                          ),
                           h.input([
                             h.Id("llm-thinking-param"),
                             h.Class("form-input"),
                             h.Type("text"),
-                            h.Placeholder(
-                              "z. B. reasoning_effort oder chat_template_kwargs.enable_thinking",
-                            ),
+                            h.Placeholder(tr.settings.providerThinkingParamPlaceholder),
                             h.Autocomplete("off"),
                             h.Value(model.llmDraftThinkingParam),
                             h.OnInput((value) => Message.UpdatedLlmThinkingParam({ value })),
@@ -6852,15 +6851,13 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         [
                           h.label(
                             [h.For("llm-thinking-levels")],
-                            ["Verfügbare Thinking-Level (kommagetrennt)"],
+                            [tr.settings.providerThinkingLevels],
                           ),
                           h.input([
                             h.Id("llm-thinking-levels"),
                             h.Class("form-input"),
                             h.Type("text"),
-                            h.Placeholder(
-                              "z. B. Aus=none, Niedrig=low, Hoch=high oder Aus=false, An=true",
-                            ),
+                            h.Placeholder(tr.settings.providerThinkingLevelsPlaceholder),
                             h.Autocomplete("off"),
                             h.Value(model.llmDraftThinkingLevels),
                             h.OnInput((value) => Message.UpdatedLlmThinkingLevels({ value })),
@@ -6870,23 +6867,17 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label(
-                            [h.For("llm-extra-args")],
-                            ["Zusätzliche Parameter (JSON, optional)"],
-                          ),
+                          h.label([h.For("llm-extra-args")], [tr.settings.providerExtraArgs]),
                           h.textarea([
                             h.Id("llm-extra-args"),
                             h.Class("form-input form-textarea-mono"),
                             h.Rows(2),
-                            h.Placeholder('z. B. {"temperature": 0.2, "max_tokens": 64}'),
+                            h.Placeholder(tr.settings.providerExtraArgsPlaceholder),
                             h.Spellcheck(false),
                             h.Value(model.llmDraftExtraArgs),
                             h.OnInput((value) => Message.UpdatedLlmExtraArgs({ value })),
                           ]),
-                          h.p(
-                            [h.Class("form-hint")],
-                            ["Werden als JSON-Objekt an /chat/completions übergeben."],
-                          ),
+                          h.p([h.Class("form-hint")], [tr.settings.providerExtraArgsHint]),
                         ],
                       ),
                       (() => {
@@ -6913,7 +6904,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             h.div(
                               [h.Class("form-group")],
                               [
-                                h.label([h.For("llm-active-model")], ["Modell"]),
+                                h.label(
+                                  [h.For("llm-active-model")],
+                                  [tr.settings.providerModelLabel],
+                                ),
                                 h.select(
                                   [
                                     h.Id("llm-active-model"),
@@ -6935,7 +6929,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                     : [
                                         h.option(
                                           [h.Value(""), h.Selected(true)],
-                                          ["Noch keine Modelle"],
+                                          [tr.settings.providerNoModelsYet],
                                         ),
                                       ],
                                 ),
@@ -6944,7 +6938,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             h.div(
                               [h.Class("form-group")],
                               [
-                                h.label([h.For("llm-thinking-level")], ["Thinking-Level"]),
+                                h.label(
+                                  [h.For("llm-thinking-level")],
+                                  [tr.settings.providerThinkingLevelLabel],
+                                ),
                                 h.select(
                                   [
                                     h.Id("llm-thinking-level"),
@@ -6962,7 +6959,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                             h.Value(""),
                                             h.Selected(model.llmDraftThinkingLevel === ""),
                                           ],
-                                          ["Standard (nicht gesetzt)"],
+                                          [tr.settings.providerDefaultUnset],
                                         ),
                                         ...availableLevels.map((item) =>
                                           h.option(
@@ -6976,7 +6973,12 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                           ),
                                         ),
                                       ]
-                                    : [h.option([h.Value(""), h.Selected(true)], ["Standard"])],
+                                    : [
+                                        h.option(
+                                          [h.Value(""), h.Selected(true)],
+                                          [tr.settings.providerDefault],
+                                        ),
+                                      ],
                                 ),
                               ],
                             ),
@@ -6996,10 +6998,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             })
                             const label =
                               mode === "models"
-                                ? "Liste testen"
+                                ? tr.settings.providerTestModels
                                 : mode === "chat"
-                                  ? "Chat testen"
-                                  : "Tools testen"
+                                  ? tr.settings.providerTestChat
+                                  : tr.settings.providerTestTools
                             const isNativeSelected = isLanguageModelSelection(model.llmDraftModel)
                             const isDisabled =
                               isRunning ||
@@ -7026,7 +7028,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 [
                                   h.Id("llm-test-status"),
                                   h.Class("llm-test-status is-ok"),
-                                  h.AriaLabel("OK"),
+                                  h.AriaLabel(tr.common.ok),
                                 ],
                                 [viewIcon("check", h)],
                               ),
@@ -7035,7 +7037,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 [
                                   h.Id("llm-test-status"),
                                   h.Class("llm-test-status is-error"),
-                                  h.AriaLabel("Nicht OK"),
+                                  h.AriaLabel(tr.settings.providerTestNotOk),
                                 ],
                                 [viewIcon("cross", h)],
                               ),
@@ -7054,7 +7056,11 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           if (content.trim() === "" && reasoning.trim() === "") {
                             return h.p(
                               [h.Id("llm-test-result"), h.Class("form-hint")],
-                              [models.length > 0 ? models.join(", ") : "Keine Modelle gefunden."],
+                              [
+                                models.length > 0
+                                  ? models.join(", ")
+                                  : tr.settings.providerNoModelsFound,
+                              ],
                             )
                           }
                           return h.div(
@@ -7082,7 +7088,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 h.Class("btn btn-danger"),
                                 h.OnClick(Message.ClickedDeleteLlmProvider({ id })),
                               ],
-                              [viewIcon("trash", h), " Löschen"],
+                              [viewIcon("trash", h), ` ${tr.common.delete}`],
                             ),
                           ],
                         }),
@@ -7097,7 +7103,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               h.Class("btn btn-secondary"),
                               h.OnClick(Message.ClickedCancelLlmProviderEdit()),
                             ],
-                            ["Abbrechen"],
+                            [tr.common.cancel],
                           ),
                           h.button(
                             [
@@ -7106,7 +7112,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               h.Class("btn btn-primary"),
                               h.OnClick(Message.ClickedSaveSettingsDialog()),
                             ],
-                            ["Speichern"],
+                            [tr.common.save],
                           ),
                         ],
                       ),
