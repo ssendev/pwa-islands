@@ -79,7 +79,7 @@ import {
   LANGUAGE_MODEL_OPTION_VALUE,
   OpenAiProviderConfig,
   ProviderEditFormat,
-  THINKING_PRESETS,
+  getThinkingPresets,
   compileModelFilter,
   decodeProviderModelValue,
   detectLanguageModelAvailability,
@@ -101,7 +101,7 @@ import {
 } from "./agent"
 import {
   DEFAULT_EDIT_FORMAT,
-  EDIT_FORMAT_OPTIONS,
+  getEditFormatOptions,
   EditFormat,
   formatFileMessageForFormat,
   formatSystemPromptForFormat,
@@ -117,6 +117,7 @@ import {
   TimeFormatSchema,
   applyLanguageToDocument,
   formatDateTime,
+  getDocumentLanguage,
   isDateFormat,
   isLanguage,
   isTimeFormat,
@@ -933,7 +934,7 @@ export const ClearAllHistory = Command.define("ClearAllHistory", {
     Effect.catch((error) =>
       Effect.succeed(
         Message.FailedClearAllHistory({
-          message: `Alle Versionen konnten nicht gelöscht werden: ${error.message}`,
+          message: t(getDocumentLanguage()).errors.clearAllHistoryFailed(error.message),
         }),
       ),
     ),
@@ -1343,13 +1344,18 @@ export const TestLlm = Command.define("TestLlm", {
   execute: (args) =>
     Effect.tryPromise({
       try: () => testLlmConnection(args, args.mode),
-      catch: (error) => (error instanceof Error ? error : new Error("Unbekannter Fehler")),
+      catch: (error) =>
+        error instanceof Error ? error : new Error(t(getDocumentLanguage()).common.unknownError),
     }).pipe(
       Effect.map(({ content, reasoning, models }) =>
         Message.SucceededTestLlm({ content, reasoning, models }),
       ),
       Effect.catch((error) =>
-        Effect.succeed(Message.FailedTestLlm({ message: `Fehlgeschlagen: ${error.message}` })),
+        Effect.succeed(
+          Message.FailedTestLlm({
+            message: t(getDocumentLanguage()).errors.failedWithDetail(error.message),
+          }),
+        ),
       ),
     ),
 })
@@ -1387,12 +1393,12 @@ export const InitializeStorage = Command.define("InitializeStorage", {
               const perm = await queryDirectoryPermission(savedHandle, "readwrite")
               if (perm === "granted") {
                 return SavedBackend.Granted({
-                  rootName: savedHandle.name || "Gespeicherter Ordner",
+                  rootName: savedHandle.name || t(getDocumentLanguage()).files.savedFolderFallback,
                 })
               }
               setPendingHandle(Option.some(savedHandle))
               return SavedBackend.PermissionRequired({
-                folderName: savedHandle.name || "Gespeicherter Ordner",
+                folderName: savedHandle.name || t(getDocumentLanguage()).files.savedFolderFallback,
               })
             },
           })
@@ -1472,7 +1478,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
               setPendingHandle(Option.some(savedHandle))
               return Message.CompletedInitializeStoragePermissionRequired({
                 storageType: "fsa",
-                folderName: savedHandle.name || "Gespeicherter Ordner",
+                folderName: savedHandle.name || t(getDocumentLanguage()).files.savedFolderFallback,
                 otherBackend: opfsSavedBackend,
                 pendingRoute: args.route,
               })
@@ -1498,7 +1504,7 @@ export const InitializeStorage = Command.define("InitializeStorage", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedInitializeStorage({
-            message: error.message || "Unbekannter Fehler beim Initialisieren des Speichers",
+            message: error.message || t(getDocumentLanguage()).errors.initStorageUnknown,
           }),
         ),
       ),
@@ -1557,7 +1563,7 @@ export const PickLocalDirectory = Command.define("PickLocalDirectory", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedPickLocalDirectory({
-            message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.openFolderFailed(error.message),
           }),
         ),
       ),
@@ -1593,8 +1599,7 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
               )
             }
             return Message.FailedGrantDirectoryPermission({
-              message:
-                "Zugriff auf den Ordner wurde verweigert. Bitte wählen Sie den Ordner erneut aus.",
+              message: t(getDocumentLanguage()).errors.folderAccessDenied,
             })
           },
         })
@@ -1604,7 +1609,7 @@ export const GrantDirectoryPermission = Command.define("GrantDirectoryPermission
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedGrantDirectoryPermission({
-            message: `Fehler bei der Berechtigungsanfrage: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.permissionRequestFailed(error.message),
           }),
         ),
       ),
@@ -1630,7 +1635,7 @@ export const ActivateOpfsBackend = Command.define("ActivateOpfsBackend", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedActivateOpfsBackend({
-            message: `Interner Speicher (OPFS) konnte nicht geöffnet werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.openOpfsFailed(error.message),
           }),
         ),
       ),
@@ -1697,7 +1702,7 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
             setPendingHandle(Option.some(handle))
             return Message.CompletedActivateFsaBackendPermissionRequired({
               storageType: "fsa",
-              folderName: handle.name || "Gespeicherter Ordner",
+              folderName: handle.name || t(getDocumentLanguage()).files.savedFolderFallback,
               otherBackend: args.otherBackend,
               pendingRoute: args.route,
             })
@@ -1709,7 +1714,7 @@ export const ActivateFsaBackend = Command.define("ActivateFsaBackend", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedActivateFsaBackend({
-            message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.openFolderFailed(error.message),
           }),
         ),
       ),
@@ -1758,7 +1763,7 @@ export const DisconnectStorage = Command.define("DisconnectStorage", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedDisconnectStorage({
-            message: `Fehler beim Trennen: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.disconnectFailed(error.message),
           }),
         ),
       ),
@@ -1812,7 +1817,7 @@ export const NavigateToSubfolder = Command.define("NavigateToSubfolder", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedNavigateToSubfolder({
-            message: `Ordner konnte nicht geöffnet werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.openFolderFailed(error.message),
           }),
         ),
       ),
@@ -2262,8 +2267,7 @@ export const init = (
         toasts: [
           {
             id: 1,
-            message:
-              "Ihr Browser unterstützt weder die File System Access API noch das Origin Private File System (OPFS).",
+            message: t(getDocumentLanguage()).errors.browserStorageUnsupported,
             variant: "warning",
           },
         ],
@@ -3683,7 +3687,7 @@ export const update = (
             ? trimmedName
             : model.llmDraftBaseUrl.trim() !== ""
               ? model.llmDraftBaseUrl.trim()
-              : "Provider",
+              : t(model.language).common.providerFallback,
         enabled: model.llmDraftProviderEnabled,
         baseUrl: model.llmDraftBaseUrl,
         apiKey: model.llmDraftApiKey,
@@ -4080,7 +4084,7 @@ export const update = (
     }),
 
     SelectedLlmThinkingPreset: ({ presetId }) => {
-      const preset = THINKING_PRESETS.find((item) => item.id === presetId)
+      const preset = getThinkingPresets(model.language).find((item) => item.id === presetId)
       if (!preset) {
         return { model }
       }
@@ -5418,7 +5422,9 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                     Queue.offerUnsafe(
                       queue,
                       Message.FailedTestLlm({
-                        message: "Fehlgeschlagen: Unerwartete Antwort: leere Chat-Antwort",
+                        message: t(getDocumentLanguage()).errors.failedWithDetail(
+                          t(getDocumentLanguage()).agent.errEmptyChatResponse,
+                        ),
                       }),
                     )
                   } else {
@@ -5437,10 +5443,15 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                   if (controller.signal.aborted) {
                     return
                   }
-                  const errMsg = error instanceof Error ? error.message : "Unbekannter Fehler"
+                  const errMsg =
+                    error instanceof Error
+                      ? error.message
+                      : t(getDocumentLanguage()).common.unknownError
                   Queue.offerUnsafe(
                     queue,
-                    Message.FailedTestLlm({ message: `Fehlgeschlagen: ${errMsg}` }),
+                    Message.FailedTestLlm({
+                      message: t(getDocumentLanguage()).errors.failedWithDetail(errMsg),
+                    }),
                   )
                   Queue.endUnsafe(queue)
                 })
@@ -5531,7 +5542,9 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                           signal: controller.signal,
                         })
                         if (!res.ok) {
-                          throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
+                          throw new Error(
+                            t(getDocumentLanguage()).errors.httpLoadingApiDts(res.status),
+                          )
                         }
                         const apiDts = await res.text()
                         return [
@@ -5712,7 +5725,14 @@ export const fileIconFor = (name: string, isDirectory: boolean): IconId => {
 }
 
 const viewBreadcrumbNav = (children: ReadonlyArray<Html.Html>, h: HtmlBuilder): Html.Html =>
-  h.nav([h.Id("folder-name-display"), h.Class("breadcrumbs"), h.AriaLabel("Pfad")], children)
+  h.nav(
+    [
+      h.Id("folder-name-display"),
+      h.Class("breadcrumbs"),
+      h.AriaLabel(t(getDocumentLanguage()).files.breadcrumbAria),
+    ],
+    children,
+  )
 
 const viewBreadcrumbs = (model: Model, h: HtmlBuilder): Html.Html =>
   StorageState.match(model.storageState, {
@@ -6616,7 +6636,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               h.Value(model.llmDraftEditFormat),
                               h.OnChange((value) => Message.UpdatedLlmEditFormat({ value })),
                             ],
-                            EDIT_FORMAT_OPTIONS.map((item) =>
+                            getEditFormatOptions(model.language).map((item) =>
                               h.option(
                                 [
                                   h.Value(item.value),
@@ -6804,7 +6824,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 [h.Value(""), h.Selected(model.llmDraftProviderEditFormat === "")],
                                 [tr.settings.providerEditFormatGlobal],
                               ),
-                              ...EDIT_FORMAT_OPTIONS.map((item) =>
+                              ...getEditFormatOptions(model.language).map((item) =>
                                 h.option(
                                   [
                                     h.Value(item.value),
@@ -6959,7 +6979,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           ),
                           (() => {
                             const matchedPresetId =
-                              THINKING_PRESETS.find(
+                              getThinkingPresets(model.language).find(
                                 (preset) =>
                                   preset.param === model.llmDraftThinkingParam.trim() &&
                                   preset.levels === model.llmDraftThinkingLevels.trim(),
@@ -6974,7 +6994,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 ),
                               ],
                               [
-                                ...THINKING_PRESETS.map((preset) =>
+                                ...getThinkingPresets(model.language).map((preset) =>
                                   h.option(
                                     [h.Value(preset.id), h.Selected(matchedPresetId === preset.id)],
                                     [preset.label],
@@ -7289,7 +7309,9 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
             const editingId = Option.getOrElse(model.editingLlmProviderId, () => "")
             const provider = model.llmProviders.find((p) => p.id === editingId)
             const providerLabel =
-              provider !== undefined ? getProviderDisplayName(provider) : "Provider"
+              provider !== undefined
+                ? getProviderDisplayName(provider)
+                : t(model.language).common.providerFallback
             return Editor.viewConfirmDeleteDialog(
               {
                 overlayId: "delete-llm-provider-confirm",

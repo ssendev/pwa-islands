@@ -2,6 +2,7 @@ import { Array, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
 import { invoke } from "@tauri-apps/api/core"
 import { listHistoryFileNames } from "./history"
+import { getDocumentLanguage, t } from "./i18n"
 import {
   OPFS_APP_FOLDER,
   checkTextBytes,
@@ -145,9 +146,7 @@ export const showDirectoryPicker = (options?: {
   mode?: "read" | "readwrite"
 }): Promise<FileSystemDirectoryHandle> => {
   if (!supportsDirectoryPicker()) {
-    return Promise.reject(
-      new Error("Die File System Access API wird in diesem Browser nicht unterstützt."),
-    )
+    return Promise.reject(new Error(t(getDocumentLanguage()).errors.fsaUnsupported))
   }
   return window.showDirectoryPicker!(options)
 }
@@ -175,7 +174,7 @@ export const requestDirectoryPermission = async (
 export const getOPFSRootDirectory = async (): Promise<FileSystemDirectoryHandle> => {
   return Option.match(await getOPFSDirectoryHandle(), {
     onNone: () => {
-      throw new Error("Interner Browser-Speicher (OPFS) ist nicht verfügbar.")
+      throw new Error(t(getDocumentLanguage()).errors.opfsUnavailable)
     },
     onSome: (handle) => handle,
   })
@@ -201,7 +200,9 @@ export const clearSavedDirectoryHandle = async (): Promise<void> => {
 export const folderNameFromPath = (folderPath: string): string => {
   const cleaned = folderPath.replace(/[\\/]+$/, "")
   const parts = Array.filter(cleaned.split(/[\\/]/), Boolean)
-  return Array.isReadonlyArrayNonEmpty(parts) ? Array.lastNonEmpty(parts) : "Lokaler Ordner"
+  return Array.isReadonlyArrayNonEmpty(parts)
+    ? Array.lastNonEmpty(parts)
+    : t(getDocumentLanguage()).storage.localFolder
 }
 
 export const pickTauriDirectory = async (): Promise<Option.Option<string>> => {
@@ -358,12 +359,14 @@ export class FileSystemHandleStorage {
   }
 
   get name(): string {
-    return this.type === "opfs" ? OPFS_APP_FOLDER : this.rootHandle?.name || "Lokaler Ordner"
+    return this.type === "opfs"
+      ? OPFS_APP_FOLDER
+      : this.rootHandle?.name || t(getDocumentLanguage()).storage.localFolder
   }
 
   async getDirectoryHandle(subPath: ReadonlyArray<string>): Promise<FileSystemDirectoryHandle> {
     if (!this.rootHandle) {
-      throw new Error("Kein lokales Handle verfügbar.")
+      throw new Error(t(getDocumentLanguage()).errors.noLocalHandle)
     }
     return await Array.reduce(
       subPath,
@@ -740,7 +743,7 @@ export const getActiveStorage = (): Option.Option<StorageBackend> => runtimeBrid
 export const requireActiveStorage = (): StorageBackend =>
   Option.match(getActiveStorage(), {
     onNone: () => {
-      throw new Error("Kein aktiver Speicher verfügbar.")
+      throw new Error(t(getDocumentLanguage()).errors.noActiveStorage)
     },
     onSome: (storage) => storage,
   })
@@ -849,7 +852,9 @@ const loadBinaryEditorFileMode = async (
   const edit =
     size > MAX_TEXT_EDIT_SIZE_BYTES
       ? BinaryEdit.Locked({
-          reason: `Die Datei ist größer als 10 MB (${(size / (1024 * 1024)).toFixed(1)} MB) und kann nicht im Texteditor bearbeitet werden.`,
+          reason: t(getDocumentLanguage()).errors.fileTooLargeForEditor(
+            (size / (1024 * 1024)).toFixed(1),
+          ),
         })
       : BinaryEdit.Disabled()
 

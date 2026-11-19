@@ -6,6 +6,7 @@ import {
   type ComarkElementAttributes,
   type ComarkNode,
 } from "md4x/wasm"
+import { getDocumentLanguage, type Language, t } from "./i18n"
 import { viewIcon } from "./icons"
 
 let initPromise: Promise<void> | undefined
@@ -120,6 +121,7 @@ const simpleTagBuilders = <Message>(
 type RenderOptions<Message> = {
   readonly onCopyCode?: (code: string) => Message
   readonly codeblocksOpen?: boolean
+  readonly language?: Language
 }
 
 const renderNode = <Message>(
@@ -168,14 +170,15 @@ const renderNode = <Message>(
       const label = filename ?? language ?? "Code"
       const codeText = extractPlainText(children).replace(/\n$/, "")
       const onCopyCode = opts.onCopyCode
+      const copyCodeLabel = t(opts.language ?? getDocumentLanguage()).common.copyCode
       const copyButton =
         onCopyCode !== undefined
           ? h.button(
               [
                 h.Type("button"),
                 h.Class("btn btn-icon llm-markdown-copy-btn"),
-                h.AriaLabel("Code kopieren"),
-                h.DataAttribute("tip", "Code kopieren"),
+                h.AriaLabel(copyCodeLabel),
+                h.DataAttribute("tip", copyCodeLabel),
                 h.OnClick(onCopyCode(codeText)),
               ],
               [viewIcon("clipboard", h)],
@@ -243,6 +246,7 @@ export type ViewMarkdownOptions<Message> = {
   readonly heal?: boolean
   readonly onCopyCode?: (code: string) => Message
   readonly codeblocksOpen?: boolean
+  readonly language?: Language
 }
 
 export const viewMarkdown = <Message>(
@@ -253,7 +257,15 @@ export const viewMarkdown = <Message>(
   try {
     const tree = parseAST(markdown, { heal: opts.heal })
     const nodes = Array.map(tree.nodes, (node) =>
-      renderNode(node, { onCopyCode: opts.onCopyCode, codeblocksOpen: opts.codeblocksOpen }, h),
+      renderNode(
+        node,
+        {
+          onCopyCode: opts.onCopyCode,
+          codeblocksOpen: opts.codeblocksOpen,
+          language: opts.language,
+        },
+        h,
+      ),
     )
     return h.div([h.Class("llm-markdown")], nodes)
   } catch {

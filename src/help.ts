@@ -8,7 +8,7 @@ import { defineTaggedUnion } from "foldkit/schema"
 import { modifyFields } from "foldkit/struct"
 import { viewHelpDe } from "./help-de"
 import { viewHelpEn } from "./help-en"
-import type { Language } from "./i18n"
+import { getDocumentLanguage, type Language, t } from "./i18n"
 import { HelpTopic, buildHelpUrl } from "./route"
 import { AlertBanner } from "./toast"
 
@@ -67,7 +67,7 @@ export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
     try: async () => {
       const res = await fetch("/api.d.ts", { cache: "no-cache" })
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
+        throw new Error(t(getDocumentLanguage()).errors.httpLoadingApiDts(res.status))
       }
       const dtsText = await res.text()
       await navigator.clipboard.writeText(dtsText)
@@ -78,7 +78,7 @@ export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
     Effect.catch((error) =>
       Effect.succeed(
         Message.FailedCopyApiDtsToClipboard({
-          message: `Kopieren fehlgeschlagen: ${error.message}`,
+          message: t(getDocumentLanguage()).errors.copyFailed(error.message),
         }),
       ),
     ),
@@ -186,7 +186,7 @@ export const update = (
       }),
       outMessage: OutMessage.ShowAlert({
         banner: {
-          message: `Kopieren hat nicht geklappt: ${errorMessage} Öffnen Sie /api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`,
+          message: t(getDocumentLanguage()).errors.copyDtsManualHint(errorMessage),
           variant: "danger",
         },
       }),

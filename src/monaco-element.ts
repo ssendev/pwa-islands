@@ -1,6 +1,7 @@
 import { Option, Schema } from "effect"
 import { CustomElement } from "foldkit"
 import type * as Monaco from "monaco-editor"
+import { getDocumentLanguage, t } from "./i18n"
 import {
   type AppTheme,
   AppThemeSchema,
@@ -605,7 +606,7 @@ export const registerMonacoEditorElement = (): void => {
 
       editor.addAction({
         id: "pwa-islands-open-settings",
-        label: "Einstellungen",
+        label: t(getDocumentLanguage()).common.settings,
         contextMenuGroupId: "navigation",
         contextMenuOrder: 1.5,
         run: () => {

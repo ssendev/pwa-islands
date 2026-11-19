@@ -19,6 +19,7 @@ import {
   parseEditToolArguments,
   stripTextToolCalls,
 } from "./edit-format"
+import { getDocumentLanguage, type Language, t } from "./i18n"
 import { formatToolArguments } from "./tool-format"
 
 export const LlmProvider = Schema.Literals(["openai", "language-model"])
@@ -104,44 +105,51 @@ export type ThinkingPreset = {
   levels: string
 }
 
-export const THINKING_PRESETS: ReadonlyArray<ThinkingPreset> = [
-  {
-    id: "none",
-    label: "Standard (ohne Parameter)",
-    param: "",
-    levels: "",
-  },
-  {
-    id: "openai",
-    label: "OpenAI / vLLM (Stufen)",
-    param: "reasoning_effort",
-    levels: "Aus=none, Minimal=minimal, Niedrig=low, Mittel=medium, Hoch=high",
-  },
-  {
-    id: "qwen-template",
-    label: "Qwen / vLLM-Template (An/Aus)",
-    param: "chat_template_kwargs.enable_thinking",
-    levels: "Aus=false, An=true",
-  },
-  {
-    id: "enable-thinking",
-    label: "An / Aus (Standard)",
-    param: "enable_thinking",
-    levels: "Aus=false, An=true",
-  },
-  {
-    id: "ollama-think",
-    label: "Ollama (An/Aus)",
-    param: "think",
-    levels: "Aus=false, An=true",
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter (Stufen)",
-    param: "reasoning.effort",
-    levels: "Aus=none, Minimal=minimal, Niedrig=low, Mittel=medium, Hoch=high",
-  },
-]
+export const getThinkingPresets = (
+  language: Language = getDocumentLanguage(),
+): ReadonlyArray<ThinkingPreset> => {
+  const a = t(language).agent
+  return [
+    {
+      id: "none",
+      label: a.thinkingPresetDefault,
+      param: "",
+      levels: "",
+    },
+    {
+      id: "openai",
+      label: a.thinkingPresetOpenAi,
+      param: "reasoning_effort",
+      levels: a.thinkingLevelsStages,
+    },
+    {
+      id: "qwen-template",
+      label: a.thinkingPresetQwen,
+      param: "chat_template_kwargs.enable_thinking",
+      levels: a.thinkingLevelsBool,
+    },
+    {
+      id: "enable-thinking",
+      label: a.thinkingPresetBool,
+      param: "enable_thinking",
+      levels: a.thinkingLevelsBool,
+    },
+    {
+      id: "ollama-think",
+      label: a.thinkingPresetOllama,
+      param: "think",
+      levels: a.thinkingLevelsBool,
+    },
+    {
+      id: "openrouter",
+      label: a.thinkingPresetOpenRouter,
+      param: "reasoning.effort",
+      levels: a.thinkingLevelsStages,
+    },
+  ]
+}
+
+export const THINKING_PRESETS: ReadonlyArray<ThinkingPreset> = getThinkingPresets("de")
 
 export const emptyLlmSettings: LlmSettings = {
   enabled: false,
@@ -177,7 +185,7 @@ const readJson = async (response: Response): Promise<unknown> => {
   try {
     return JSON.parse(text)
   } catch {
-    throw new Error("Antwort ist kein gültiges JSON")
+    throw new Error(t(getDocumentLanguage()).agent.errInvalidJson)
   }
 }
 
@@ -195,7 +203,7 @@ const ensureOk = async (response: Response): Promise<unknown> => {
   }
   const body = await readJson(response)
   if (isRecord(body) && "error" in body && body.error) {
-    throw new Error(`Fehlerantwort${errorDetail(body)}`)
+    throw new Error(t(getDocumentLanguage()).agent.errErrorResponse(errorDetail(body)))
   }
   return body
 }
@@ -203,7 +211,7 @@ const ensureOk = async (response: Response): Promise<unknown> => {
 /** Extrahiert die Modellnamen (`data[].id`) aus einer `/models`-Antwort. */
 export const extractModelNames = (body: unknown): ReadonlyArray<string> => {
   if (!isRecord(body) || !Array.isArray(body.data)) {
-    throw new Error("Unerwartete Antwort: keine Modellliste")
+    throw new Error(t(getDocumentLanguage()).agent.errNoModelList)
   }
   return body.data.flatMap((entry: unknown) =>
     isRecord(entry) && typeof entry.id === "string" && entry.id.trim() !== "" ? [entry.id] : [],
@@ -255,7 +263,7 @@ const extractFirstField = (container: unknown, keys: ReadonlyArray<string>): str
 /** Extrahiert Antworttext und Reasoning getrennt aus einer `/chat/completions`-JSON-Antwort. */
 export const extractChatParts = (body: unknown): LlmReplyParts => {
   if (!isRecord(body) || !Array.isArray(body.choices) || body.choices.length === 0) {
-    throw new Error("Unerwartete Antwort: keine choices")
+    throw new Error(t(getDocumentLanguage()).agent.errNoChoices)
   }
   const first: unknown = body.choices[0]
   const message = isRecord(first) ? (first.message ?? first) : undefined
@@ -264,7 +272,7 @@ export const extractChatParts = (body: unknown): LlmReplyParts => {
     extractFirstField(message, REASONING_KEYS) ?? extractFirstField(first, REASONING_KEYS)
 
   if (content === undefined && reasoning === undefined) {
-    throw new Error("Unerwartete Antwort: keine Nachricht")
+    throw new Error(t(getDocumentLanguage()).agent.errNoMessage)
   }
   return {
     content: content ?? "",
@@ -283,10 +291,10 @@ const parseSseJsonChunk = (payload: string): unknown => {
   try {
     chunk = JSON.parse(payload)
   } catch {
-    throw new Error("Streaming-Chunk ist kein gültiges JSON")
+    throw new Error(t(getDocumentLanguage()).agent.errInvalidStreamChunk)
   }
   if (isRecord(chunk) && "error" in chunk && chunk.error) {
-    throw new Error(`Fehlerantwort${errorDetail(chunk)}`)
+    throw new Error(t(getDocumentLanguage()).agent.errErrorResponse(errorDetail(chunk)))
   }
   return chunk
 }
@@ -314,7 +322,7 @@ export const extractStreamParts = (sseText: string): LlmReplyParts => {
     .filter((line) => line.startsWith("data:"))
 
   if (dataLines.length === 0) {
-    throw new Error("Unerwartete Streaming-Antwort: keine Daten")
+    throw new Error(t(getDocumentLanguage()).agent.errNoStreamData)
   }
 
   const parts = dataLines
@@ -402,7 +410,7 @@ export const getProviderDisplayName = (provider: OpenAiProviderConfig): string =
     ? provider.name.trim()
     : provider.baseUrl.trim() !== ""
       ? provider.baseUrl.trim()
-      : "Provider"
+      : t(getDocumentLanguage()).common.providerFallback
 
 export const resolveProviderForModelSelection = (
   providers: ReadonlyArray<OpenAiProviderConfig>,
@@ -628,10 +636,10 @@ export const parseExtraArgs = (raw: string): Record<string, unknown> => {
   try {
     parsed = JSON.parse(trimmed)
   } catch {
-    throw new Error("Zusätzliche Parameter sind kein gültiges JSON")
+    throw new Error(t(getDocumentLanguage()).agent.errExtraArgsInvalidJson)
   }
   if (!isRecord(parsed) || Array.isArray(parsed)) {
-    throw new Error("Zusätzliche Parameter müssen ein JSON-Objekt sein")
+    throw new Error(t(getDocumentLanguage()).agent.errExtraArgsNotObject)
   }
   return parsed
 }
@@ -754,7 +762,7 @@ const readSseStream = async <T>(
     const text = await response.text()
     const step = applyLines(text.split(/\r?\n/), initialState, false)
     if (!step.sawData) {
-      throw new Error("Unerwartete Streaming-Antwort: keine Daten")
+      throw new Error(t(getDocumentLanguage()).agent.errNoStreamData)
     }
     if (step.changed) {
       onUpdate(step.state)
@@ -771,7 +779,7 @@ const readSseStream = async <T>(
       const trailing = buffer + decoder.decode()
       const finalStep = applyLines(trailing.split(/\r?\n/), acc, sawData)
       if (!finalStep.sawData) {
-        throw new Error("Unerwartete Streaming-Antwort: keine Daten")
+        throw new Error(t(getDocumentLanguage()).agent.errNoStreamData)
       }
       if (finalStep.changed) {
         onUpdate(finalStep.state)
@@ -930,18 +938,18 @@ const runLanguageModelPrompt = async ({
 }): Promise<string> => {
   const api = getLanguageModelGlobal()
   if (!api) {
-    throw new Error("Die Browser-KI (LanguageModel-API) wird von diesem Browser nicht unterstützt.")
+    throw new Error(t(getDocumentLanguage()).agent.errBrowserAiUnsupported)
   }
   const availability = await api.availability()
   if (availability === "unavailable" || availability === "no") {
-    throw new Error("Die Browser-KI (LanguageModel-API) ist auf diesem Gerät nicht verfügbar.")
+    throw new Error(t(getDocumentLanguage()).agent.errBrowserAiUnavailable)
   }
   const needsDownload =
     availability === "downloadable" ||
     availability === "downloading" ||
     availability === "after-download"
   if (needsDownload) {
-    onUpdate?.({ content: "Lade Browser-KI-Modell herunter …", reasoning: "" })
+    onUpdate?.({ content: t(getDocumentLanguage()).agent.downloadingBrowserAi, reasoning: "" })
   }
   const session = await api.create({
     ...(initialPrompts.length > 0 ? { initialPrompts } : {}),
@@ -957,8 +965,8 @@ const runLanguageModelPrompt = async ({
               onUpdate({
                 content:
                   percent !== undefined
-                    ? `Lade Browser-KI-Modell herunter (${percent} %) …`
-                    : "Lade Browser-KI-Modell herunter …",
+                    ? t(getDocumentLanguage()).agent.downloadingBrowserAiPercent(percent)
+                    : t(getDocumentLanguage()).agent.downloadingBrowserAi,
                 reasoning: "",
               })
             })
@@ -1033,7 +1041,9 @@ type StreamingToolCallState = {
 }
 
 const formatToolCallSummary = (calls: ReadonlyArray<LlmToolCall>): string =>
-  calls.map((call) => `Tool-Aufruf: ${call.name}(${call.arguments})`).join("\n")
+  calls
+    .map((call) => t(getDocumentLanguage()).agent.toolCallWithArgs(call.name, call.arguments))
+    .join("\n")
 
 /**
  * Testet Tool-Calling im Streaming-Modus und ruft `onUpdate` bei jedem Chunk
@@ -1046,7 +1056,7 @@ export const streamToolCallParts = async (
 ): Promise<LlmReplyParts> => {
   const activeModel = resolveTestModel(config)
   if (activeModel === "") {
-    throw new Error("Kein Modell ausgewählt oder angegeben")
+    throw new Error(t(getDocumentLanguage()).agent.errNoModelSelected)
   }
   const requestBody = buildChatRequestBody(
     { ...config, model: activeModel, streaming: true },
@@ -1112,7 +1122,7 @@ export const streamToolCallParts = async (
 
   const validCalls = finalState.calls.filter((call) => call.name.trim() !== "")
   if (validCalls.length === 0) {
-    throw new Error("Kein Tool-Aufruf in der Antwort erhalten")
+    throw new Error(t(getDocumentLanguage()).agent.errNoToolCall)
   }
   return {
     content: formatToolCallSummary(validCalls),
@@ -1128,7 +1138,7 @@ export type LlmToolCall = {
 /** Extrahiert Tool-Aufrufe aus einer `/chat/completions`-JSON-Antwort. */
 export const extractToolCalls = (body: unknown): ReadonlyArray<LlmToolCall> => {
   if (!isRecord(body) || !Array.isArray(body.choices) || body.choices.length === 0) {
-    throw new Error("Unerwartete Antwort: keine choices")
+    throw new Error(t(getDocumentLanguage()).agent.errNoChoices)
   }
   const first: unknown = body.choices[0]
   const message = isRecord(first) ? (first.message ?? first) : undefined
@@ -1150,7 +1160,7 @@ export const extractToolCalls = (body: unknown): ReadonlyArray<LlmToolCall> => {
 export const testToolCall = async (config: LlmRequestConfig): Promise<LlmTestResult> => {
   const activeModel = resolveTestModel(config)
   if (activeModel === "") {
-    throw new Error("Kein Modell ausgewählt oder angegeben")
+    throw new Error(t(getDocumentLanguage()).agent.errNoModelSelected)
   }
   const requestBody = buildChatRequestBody(
     { ...config, model: activeModel, streaming: false },
@@ -1170,10 +1180,12 @@ export const testToolCall = async (config: LlmRequestConfig): Promise<LlmTestRes
     extractFirstField(message, REASONING_KEYS) ?? extractFirstField(first, REASONING_KEYS) ?? ""
 
   if (calls.length === 0) {
-    throw new Error("Kein Tool-Aufruf in der Antwort erhalten")
+    throw new Error(t(getDocumentLanguage()).agent.errNoToolCall)
   }
   return {
-    content: calls.map((call) => `Tool-Aufruf: ${call.name}(${call.arguments})`).join("\n"),
+    content: calls
+      .map((call) => t(getDocumentLanguage()).agent.toolCallWithArgs(call.name, call.arguments))
+      .join("\n"),
     reasoning: reasoning.trim(),
     models: [],
   }
@@ -1182,11 +1194,11 @@ export const testToolCall = async (config: LlmRequestConfig): Promise<LlmTestRes
 const runChatTest = async (config: LlmRequestConfig): Promise<LlmTestResult> => {
   const activeModel = resolveTestModel(config)
   if (activeModel === "") {
-    throw new Error("Kein Modell ausgewählt oder angegeben")
+    throw new Error(t(getDocumentLanguage()).agent.errNoModelSelected)
   }
   const parts = await chatOnceParts({ ...config, model: activeModel }, "Antworte nur mit: ok")
   if (parts.content.trim() === "" && parts.reasoning.trim() === "") {
-    throw new Error("Unerwartete Antwort: leere Chat-Antwort")
+    throw new Error(t(getDocumentLanguage()).agent.errEmptyChatResponse)
   }
   return {
     content: parts.content.trim(),
@@ -1208,10 +1220,10 @@ export const testLlmConnection = async (
 ): Promise<LlmTestResult> => {
   if (resolveProvider(config) === "language-model") {
     if (mode === "models") {
-      throw new Error("Modellliste wird von der Browser-KI (LanguageModel-API) nicht unterstützt.")
+      throw new Error(t(getDocumentLanguage()).agent.errBrowserAiNoModelList)
     }
     if (mode === "tools") {
-      throw new Error("Tool-Calls werden von der Browser-KI (LanguageModel-API) nicht unterstützt.")
+      throw new Error(t(getDocumentLanguage()).agent.errBrowserAiNoToolCalls)
     }
     const content = await runLanguageModelPrompt({
       initialPrompts: [],
@@ -1219,7 +1231,7 @@ export const testLlmConnection = async (
       streaming: config.streaming,
     })
     if (content.trim() === "") {
-      throw new Error("Unerwartete Antwort: leere Chat-Antwort")
+      throw new Error(t(getDocumentLanguage()).agent.errEmptyChatResponse)
     }
     return {
       content: content.trim(),
@@ -1332,7 +1344,7 @@ const extractNonStreamingEditorResponse = (
   readonly toolCalls: ReadonlyArray<EditorChatToolCall>
 } => {
   if (!isRecord(body) || !Array.isArray(body.choices) || body.choices.length === 0) {
-    throw new Error("Unerwartete Antwort: keine choices")
+    throw new Error(t(getDocumentLanguage()).agent.errNoChoices)
   }
   const first: unknown = body.choices[0]
   const message = isRecord(first) ? (first.message ?? first) : undefined
@@ -1409,7 +1421,7 @@ export const requestEditorChatCompletion = async (
   }
   const activeModel = resolveTestModel(config)
   if (activeModel === "") {
-    throw new Error("Kein Modell ausgewählt oder angegeben")
+    throw new Error(t(getDocumentLanguage()).agent.errNoModelSelected)
   }
   const useToolCalls = shouldUseToolCalls(config)
   const requestBody = buildChatRequestBody({ ...config, model: activeModel }, "", {
@@ -1494,7 +1506,7 @@ export const requestEditorChatCompletion = async (
             ? formatEditToolSummary(call.arguments)
             : formatSingleToolCallSummary(call)
         return {
-          summary: summary !== "" ? summary : "Tool-Aufruf",
+          summary: summary !== "" ? summary : t(getDocumentLanguage()).agent.toolCall,
           name,
           arguments: call.arguments,
           result: "",
@@ -1560,9 +1572,10 @@ const parseToolArgsRecord = (rawArguments: string): Record<string, unknown> | un
 }
 
 const formatEditToolSummary = (rawArguments: string): string => {
+  const a = t(getDocumentLanguage()).agent
   const formatted = formatToolArguments(rawArguments, "edit").trim()
   if (formatted === "" || formatted.startsWith("{")) {
-    return "Tool-Aufruf: edit"
+    return a.toolCallEdit
   }
   const lines = formatted.split("\n")
   const hunkCount = lines.filter((line) => line.startsWith("@@")).length
@@ -1574,27 +1587,28 @@ const formatEditToolSummary = (rawArguments: string): string => {
   ).length
   const parts: Array<string> = []
   if (blockCount > 0) {
-    parts.push(`${blockCount} ${blockCount === 1 ? "Block" : "Blöcke"}`)
+    parts.push(a.blocksCount(blockCount))
   }
   if (addedCount > 0 || removedCount > 0) {
-    parts.push(`+${addedCount}/-${removedCount} Zeilen`)
+    parts.push(a.linesDiff(addedCount, removedCount))
   }
   if (parts.length === 0) {
-    parts.push(`${lines.length} ${lines.length === 1 ? "Zeile" : "Zeilen"}`)
+    parts.push(a.linesCount(lines.length))
   }
-  return `Tool-Aufruf: edit (${parts.join(", ")})`
+  return a.toolCallEditWithParts(parts.join(", "))
 }
 
 const formatSingleToolCallSummary = (call: EditorChatToolCall): string => {
+  const a = t(getDocumentLanguage()).agent
   const name = call.name.trim()
   if (name === "edit") {
     const args = extractEditorToolArgs(call.arguments).trim()
-    return args !== "" ? `Tool-Aufruf: edit\n${args}` : "Tool-Aufruf: edit"
+    return args !== "" ? `${a.toolCallEdit}\n${args}` : a.toolCallEdit
   }
   if (name === "search") {
     const parsed = parseToolArgsRecord(call.arguments)
     const query = parsed && typeof parsed.query === "string" ? parsed.query.trim() : ""
-    return query !== "" ? `Tool-Aufruf: search ("${query}")` : "Tool-Aufruf: search"
+    return query !== "" ? `${a.toolCallSearch} ("${query}")` : a.toolCallSearch
   }
   if (name === "read") {
     const parsed = parseToolArgsRecord(call.arguments)
@@ -1603,22 +1617,22 @@ const formatSingleToolCallSummary = (call: EditorChatToolCall): string => {
     const end =
       parsed && typeof parsed.endLine === "number" ? Math.floor(parsed.endLine) : undefined
     if (start !== undefined && end !== undefined) {
-      return `Tool-Aufruf: read (Zeilen ${start}–${end})`
+      return a.toolCallReadRange(start, end)
     }
     if (start !== undefined) {
-      return `Tool-Aufruf: read (ab Zeile ${start})`
+      return a.toolCallReadFrom(start)
     }
-    return "Tool-Aufruf: read"
+    return a.toolCallRead
   }
   if (name === "write") {
     const parsed = parseToolArgsRecord(call.arguments)
     if (parsed && typeof parsed.content === "string") {
       const lineCount = parsed.content.replace(/\r\n/g, "\n").split("\n").length
-      return `Tool-Aufruf: write (${lineCount} Zeilen)`
+      return a.toolCallWriteLines(lineCount)
     }
-    return "Tool-Aufruf: write"
+    return a.toolCallWrite
   }
-  return name !== "" ? `Tool-Aufruf: ${name}` : ""
+  return name !== "" ? a.toolCallNamed(name) : ""
 }
 
 const hasEditAttemptForFormat = (format: EditFormat, text: string): boolean => {
@@ -1877,7 +1891,7 @@ export const runEditorChatTurn = async ({
             }
             onUpdate?.({
               completedTurns: nextCompletedTurns,
-              activeTurn: { content: "Korrigiere Bearbeitung …", reasoning: "" },
+              activeTurn: { content: t(getDocumentLanguage()).agent.fixingEdit, reasoning: "" },
             })
             return step(
               nextMessages,
@@ -1911,7 +1925,7 @@ export const runEditorChatTurn = async ({
       const summary =
         name === "edit" ? formatEditToolSummary(call.arguments) : formatSingleToolCallSummary(call)
       return {
-        summary: summary !== "" ? summary : "Tool-Aufruf",
+        summary: summary !== "" ? summary : t(getDocumentLanguage()).agent.toolCall,
         name,
         arguments: call.arguments,
         result: toolMsg?.content ?? "",
@@ -1938,7 +1952,7 @@ export const runEditorChatTurn = async ({
       }
       onUpdate?.({
         completedTurns: nextCompletedTurns,
-        activeTurn: { content: "Korrigiere Bearbeitung …", reasoning: "" },
+        activeTurn: { content: t(getDocumentLanguage()).agent.fixingEdit, reasoning: "" },
       })
       return step(
         nextMessages,
@@ -1967,12 +1981,12 @@ export const runEditorChatTurn = async ({
         completedTurns: nextCompletedTurns,
         activeTurn: { content: "", reasoning: "" },
       })
-      throw new Error("Maximale Anzahl an Werkzeugschritten erreicht.")
+      throw new Error(t(getDocumentLanguage()).agent.errMaxToolSteps)
     }
 
     onUpdate?.({
       completedTurns: nextCompletedTurns,
-      activeTurn: { content: "Analysiere Ergebnis …", reasoning: "" },
+      activeTurn: { content: t(getDocumentLanguage()).agent.analyzingResult, reasoning: "" },
     })
     return step(
       nextMessages,

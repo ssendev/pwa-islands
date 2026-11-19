@@ -1,4 +1,5 @@
 import type * as Monaco from "monaco-editor"
+import { getDocumentLanguage } from "./i18n"
 import CssWorker from "monaco-editor/language/css/css.worker?worker"
 import EditorWorker from "monaco-editor/editor/editor.worker?worker"
 import HtmlWorker from "monaco-editor/language/html/html.worker?worker"
@@ -42,7 +43,9 @@ export function loadMonaco(): Promise<typeof Monaco> {
           },
         }
       }
-      await import("monaco-editor/nls/lang/de")
+      if (getDocumentLanguage() === "de") {
+        await import("monaco-editor/nls/lang/de")
+      }
       return import("monaco-editor")
     })()
   }

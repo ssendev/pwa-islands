@@ -1,5 +1,6 @@
 import { Array } from "effect"
 import type { HtmlBuilder } from "foldkit/html"
+import { getDocumentLanguage, type Language, t } from "./i18n"
 import { viewIcon } from "./icons"
 import { viewMarkdown } from "./markdown"
 import { formatToolArguments } from "./tool-format"
@@ -27,6 +28,7 @@ export type LlmResponseProps<Message = never> = {
   readonly onToggleContentMarkdown?: Message
   readonly onToggleToolMarkdown?: (toolKey: string) => Message
   readonly onCopyCode?: (code: string) => Message
+  readonly language?: Language
 }
 
 const viewToolSection = <Message>(
@@ -117,6 +119,8 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
   const hasReasoning = props.reasoning.trim() !== ""
   const hasContent = displayContent.trim() !== ""
   const rawToolKeys = props.rawToolKeys ?? []
+  const language = props.language ?? getDocumentLanguage()
+  const text = t(language).llmResponse
   const toolKeyPrefix = props.toolKeyPrefix ?? "tool"
 
   const hasRawContent = props.content.trim() !== ""
@@ -139,21 +143,16 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                 [
                   h.span(
                     [h.Class("llm-response-label")],
-                    [props.isStreaming && !hasContent ? "Thinking …" : "Thinking"],
+                    [props.isStreaming && !hasContent ? text.thinkingStreaming : text.thinking],
                   ),
                   h.div(
                     [h.Class("llm-response-section-actions")],
                     [
-                      viewHeaderCopyButton(
-                        props.reasoning,
-                        props.onCopyCode,
-                        "Thinking kopieren",
-                        h,
-                      ),
+                      viewHeaderCopyButton(props.reasoning, props.onCopyCode, text.copyThinking, h),
                       viewMarkdownToggleButton(
                         isThinkingMarkdown,
                         props.onToggleThinkingMarkdown,
-                        "Thinking-Markdown umschalten",
+                        text.toggleThinkingMarkdown,
                         h,
                       ),
                     ],
@@ -163,7 +162,7 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
               isThinkingMarkdown
                 ? viewMarkdown(
                     props.reasoning,
-                    { heal: props.isStreaming, onCopyCode: props.onCopyCode },
+                    { heal: props.isStreaming, onCopyCode: props.onCopyCode, language },
                     h,
                   )
                 : h.p([h.Class("llm-response-text")], [props.reasoning]),
@@ -178,7 +177,7 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                 ? h.div(
                     [h.Class("llm-response-section-header")],
                     [
-                      h.span([h.Class("llm-response-label")], ["Antwort"]),
+                      h.span([h.Class("llm-response-label")], [text.answer]),
                       h.div(
                         [h.Class("llm-response-section-actions")],
                         [
@@ -186,14 +185,14 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                             ? viewHeaderCopyButton(
                                 displayContent,
                                 props.onCopyCode,
-                                "Antwort kopieren",
+                                text.copyAnswer,
                                 h,
                               )
                             : h.empty,
                           viewMarkdownToggleButton(
                             isContentMarkdown,
                             props.onToggleContentMarkdown,
-                            "Antwort-Markdown umschalten",
+                            text.toggleAnswerMarkdown,
                             h,
                           ),
                         ],
@@ -205,7 +204,7 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                 ? isContentMarkdown
                   ? viewMarkdown(
                       displayContent,
-                      { heal: props.isStreaming, onCopyCode: props.onCopyCode },
+                      { heal: props.isStreaming, onCopyCode: props.onCopyCode, language },
                       h,
                     )
                   : h.p([h.Class("llm-response-text")], [displayContent])
@@ -242,26 +241,26 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
                     [
                       argsText !== ""
                         ? viewToolSection(
-                            "Argumente",
+                            text.arguments,
                             argsText,
-                            "Argumente kopieren",
+                            text.copyArguments,
                             argsKey,
                             isArgsPretty,
                             false,
-                            "Tool-Ansicht umschalten",
+                            text.toggleToolView,
                             props,
                             h,
                           )
                         : h.empty,
                       resultText !== ""
                         ? viewToolSection(
-                            "Ergebnis",
+                            text.result,
                             resultText,
-                            "Ergebnis kopieren",
+                            text.copyResult,
                             resultKey,
                             isResultMarkdown,
                             isResultMarkdown,
-                            "Ergebnis-Markdown umschalten",
+                            text.toggleResultMarkdown,
                             props,
                             h,
                           )
@@ -275,7 +274,7 @@ export const view = <Message>(props: LlmResponseProps<Message>, h: HtmlBuilder<M
         : h.empty,
       props.isStreaming
         ? h.span(
-            [h.Class("llm-response-streaming"), h.Role("status"), h.AriaLabel("Schreibt …")],
+            [h.Class("llm-response-streaming"), h.Role("status"), h.AriaLabel(text.writing)],
             [
               h.span([h.Class("llm-response-streaming-dot")]),
               h.span([h.Class("llm-response-streaming-dot")]),

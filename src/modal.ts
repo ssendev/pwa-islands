@@ -24,7 +24,7 @@ import {
   setPendingImportFiles,
 } from "./files"
 import * as Help from "./help"
-import { type Language, t } from "./i18n"
+import { getDocumentLanguage, type Language, t } from "./i18n"
 import { hasFileHistory } from "./history"
 import { viewIcon } from "./icons"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
@@ -204,36 +204,47 @@ export const cancelOverwrite = (state: ModalState): ModalState =>
     Help: () => state,
   })
 
-const HELP_TOPIC_TITLES: Readonly<Record<HelpTopic, string>> = {
-  quickstart: "Quickstart: Mit KI bearbeiten",
-  api: "PWA Islands bauen",
-  fs: "Speicher: App (Tauri), FS API und OPFS",
+const getHelpTopicTitle = (topic: HelpTopic, language: Language): string => {
+  const h = t(language).help
+  if (topic === "quickstart") {
+    return h.topicQuickstart
+  }
+  if (topic === "api") {
+    return h.topicApi
+  }
+  return h.topicFs
 }
 
-export const formatDocumentTitle = (state: ModalState, folderTitle: string): string =>
-  ModalState.match(state, {
+export const formatDocumentTitle = (
+  state: ModalState,
+  folderTitle: string,
+  language: Language = getDocumentLanguage(),
+): string => {
+  const m = t(language).modals
+  return ModalState.match(state, {
     Closed: () => folderTitle,
     Editor: ({ editor }) =>
       Editor.Model.match(editor, {
-        CreateFile: () => `Neue Datei — ${folderTitle}`,
-        CreateFolder: () => `Neuer Ordner — ${folderTitle}`,
+        CreateFile: () => m.docTitleNewFile(folderTitle),
+        CreateFolder: () => m.docTitleNewFolder(folderTitle),
         EditFolder: ({ originalName, isConfirmingDelete }) =>
           isConfirmingDelete
-            ? `${originalName} löschen — ${folderTitle}`
-            : `${originalName} bearbeiten — ${folderTitle}`,
+            ? m.docTitleDelete(originalName, folderTitle)
+            : m.docTitleEdit(originalName, folderTitle),
         EditFile: ({ originalName, isConfirmingDelete }) =>
           isConfirmingDelete
-            ? `${originalName} löschen — ${folderTitle}`
-            : `${originalName} bearbeiten — ${folderTitle}`,
-        ConfirmOverwrite: ({ targetName }) => `${targetName} überschreiben — ${folderTitle}`,
+            ? m.docTitleDelete(originalName, folderTitle)
+            : m.docTitleEdit(originalName, folderTitle),
+        ConfirmOverwrite: ({ targetName }) => m.docTitleOverwrite(targetName, folderTitle),
       }),
-    ImportConflict: () => `Import-Konflikt — ${folderTitle}`,
+    ImportConflict: () => m.docTitleImportConflict(folderTitle),
     Help: ({ help }) =>
       Option.match(help.maybeOpenTopic, {
-        onNone: () => `Hilfe — ${folderTitle}`,
-        onSome: (topic) => `${HELP_TOPIC_TITLES[topic]} — Hilfe — ${folderTitle}`,
+        onNone: () => m.docTitleHelp(folderTitle),
+        onSome: (topic) => m.docTitleHelpTopic(getHelpTopicTitle(topic, language), folderTitle),
       }),
   })
+}
 
 export const openCreate = (
   target: NewTarget | "file" | "folder",
@@ -247,7 +258,7 @@ export const openCreate = (
     editor:
       target === "folder"
         ? Editor.Model.CreateFolder({
-            name: "Neuer Ordner",
+            name: t(getDocumentLanguage()).modals.newFolderTitle,
             maybeValidationError: Option.none(),
           })
         : Editor.makeCreateFile(templates, defaults),
@@ -459,7 +470,7 @@ export const resolveModalForRoute = async (
         maybeModalState: Option.none(),
         maybeAlertBanner: didFallback
           ? Option.some<AlertBanner>({
-              message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+              message: t(getDocumentLanguage()).errors.pathNotFound(`/${subPath.join("/")}`),
               variant: "warning",
             })
           : Option.none(),
@@ -470,7 +481,7 @@ export const resolveModalForRoute = async (
         maybeModalState: Option.none(),
         maybeAlertBanner: didFallback
           ? Option.some<AlertBanner>({
-              message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+              message: t(getDocumentLanguage()).errors.pathNotFound(`/${subPath.join("/")}`),
               variant: "warning",
             })
           : Option.none(),
@@ -490,7 +501,7 @@ export const resolveModalForRoute = async (
         maybeModalState: Option.some(openCreate(target, templates)),
         maybeAlertBanner: didFallback
           ? Option.some<AlertBanner>({
-              message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+              message: t(getDocumentLanguage()).errors.pathNotFound(`/${subPath.join("/")}`),
               variant: "warning",
             })
           : Option.none(),
@@ -502,7 +513,7 @@ export const resolveModalForRoute = async (
         return {
           maybeModalState: Option.none(),
           maybeAlertBanner: Option.some<AlertBanner>({
-            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            message: t(getDocumentLanguage()).errors.pathNotFound(`/${subPath.join("/")}`),
             variant: "warning",
           }),
         }
@@ -568,7 +579,7 @@ export const resolveModalForRoute = async (
         return {
           maybeModalState: Option.none(),
           maybeAlertBanner: Option.some<AlertBanner>({
-            message: `Pfad "/${subPath.join("/")}" wurde nicht gefunden.`,
+            message: t(getDocumentLanguage()).errors.pathNotFound(`/${subPath.join("/")}`),
             variant: "warning",
           }),
         }
@@ -583,7 +594,7 @@ export const resolveModalForRoute = async (
           Promise.resolve({
             maybeModalState: Option.none(),
             maybeAlertBanner: Option.some<AlertBanner>({
-              message: `Eintrag "${name}" wurde in diesem Ordner nicht gefunden.`,
+              message: t(getDocumentLanguage()).errors.entryNotFoundInFolder(name),
               variant: "warning",
             }),
           }),
@@ -747,7 +758,7 @@ export const InspectFileForEditor = Command.define("InspectFileForEditor", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedInspectFileForEditor({
-            message: `Datei "${args.entryName}" konnte nicht gelesen werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.fileReadFailed(args.entryName, error.message),
           }),
         ),
       ),
@@ -841,7 +852,10 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
           return Message.CompletedWritePendingImportFiles({
             entries,
             maybeAlertBanner: Option.some({
-              message: `Fehler beim Importieren (${importResults.importedCount} erfolgreich): ${Array.join(importResults.errors, "; ")}`,
+              message: t(getDocumentLanguage()).errors.importPartialFailed(
+                importResults.importedCount,
+                Array.join(importResults.errors, "; "),
+              ),
               variant: "danger",
             }),
           })
@@ -859,7 +873,7 @@ export const WritePendingImportFiles = Command.define("WritePendingImportFiles",
           Message.CompletedWritePendingImportFiles({
             entries: [],
             maybeAlertBanner: Option.some({
-              message: `Fehler beim Datei-Import: ${error.message}`,
+              message: t(getDocumentLanguage()).errors.importFailed(error.message),
               variant: "danger",
             }),
           }),

@@ -12,6 +12,7 @@ import {
   formatUpdatedHashlines,
   hashLine,
 } from "./hashline"
+import { getDocumentLanguage, type Language, t } from "./i18n"
 import { parseJsonObjectLenient } from "./tool-format"
 
 export const EditFormat = Schema.Literals(["hashline", "search-replace", "unified-diff"])
@@ -27,14 +28,21 @@ export const parseEditFormat = (value: string): EditFormat =>
     Match.orElse(() => DEFAULT_EDIT_FORMAT),
   )
 
+export const getEditFormatOptions = (
+  language: Language = getDocumentLanguage(),
+): ReadonlyArray<{
+  readonly value: EditFormat
+  readonly label: string
+}> => [
+  { value: "hashline", label: "Hash-Anchored Edits" },
+  { value: "search-replace", label: "Search & Replace" },
+  { value: "unified-diff", label: t(language).agent.editFormatUnifiedDiff },
+]
+
 export const EDIT_FORMAT_OPTIONS: ReadonlyArray<{
   readonly value: EditFormat
   readonly label: string
-}> = [
-  { value: "hashline", label: "Hash-Anchored Edits" },
-  { value: "search-replace", label: "Search & Replace" },
-  { value: "unified-diff", label: "Vereinfachter Unified Diff" },
-]
+}> = getEditFormatOptions("de")
 
 export const EditApplyResult = defineTaggedUnion({
   Ok: {

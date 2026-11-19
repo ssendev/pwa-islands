@@ -4,9 +4,11 @@ import {
   type DateFormat,
   type Language,
   type TimeFormat,
+  getDocumentLanguage,
   isDateFormat,
   isLanguage,
   isTimeFormat,
+  t,
 } from "./i18n"
 
 export class DirectoryIterationError extends Data.TaggedError("DirectoryIterationError")<{
@@ -313,7 +315,7 @@ export async function getStoredLlmSettings(): Promise<LlmSettings> {
               ? [
                   {
                     id: "default",
-                    name: "Standard",
+                    name: t(getDocumentLanguage()).common.defaultName,
                     enabled,
                     baseUrl,
                     apiKey,
@@ -768,7 +770,10 @@ export async function collectDirectoryHandles(
         Stream.fromAsyncIterable(
           dir.values(),
           (cause) =>
-            new DirectoryIterationError({ message: "Fehler beim Lesen der Einträge", cause }),
+            new DirectoryIterationError({
+              message: t(getDocumentLanguage()).errors.dirReadEntriesFailed,
+              cause,
+            }),
         ),
       ),
     )
@@ -781,7 +786,10 @@ export async function collectDirectoryHandles(
           Stream.fromAsyncIterable(
             dir.entries(),
             (cause) =>
-              new DirectoryIterationError({ message: "Fehler beim Lesen der Einträge", cause }),
+              new DirectoryIterationError({
+                message: t(getDocumentLanguage()).errors.dirReadEntriesFailed,
+                cause,
+              }),
           ),
           ([, handle]) => handle,
         ),
@@ -789,7 +797,7 @@ export async function collectDirectoryHandles(
     )
     return Array.fromIterable(chunk)
   }
-  throw new Error("Das Verzeichnis-Handle unterstützt keine Iteration über Einträge.")
+  throw new Error(t(getDocumentLanguage()).errors.dirHandleNoIteration)
 }
 
 export const DEFAULT_INDEX_FILE = "index.html"
@@ -1047,7 +1055,7 @@ export function checkTextBytes(bytes: Uint8Array): TextCheck {
 
   const decoded = decodeUtf8Strict(bytes)
   if (Option.isNone(decoded)) {
-    return { kind: "binary", reason: "ungültiges UTF-8" }
+    return { kind: "binary", reason: t(getDocumentLanguage()).errors.invalidUtf8 }
   }
   const text = decoded.value
 
@@ -1055,7 +1063,10 @@ export function checkTextBytes(bytes: Uint8Array): TextCheck {
   if (roundTrip.byteLength !== bytes.byteLength) {
     return {
       kind: "binary",
-      reason: `${bytes.byteLength} Bytes gelesen, ${roundTrip.byteLength} Bytes beim Zurückschreiben`,
+      reason: t(getDocumentLanguage()).errors.utf8ByteLengthMismatch(
+        bytes.byteLength,
+        roundTrip.byteLength,
+      ),
     }
   }
 
@@ -1063,7 +1074,11 @@ export function checkTextBytes(bytes: Uint8Array): TextCheck {
   if (firstMismatch !== -1) {
     return {
       kind: "binary",
-      reason: `Abweichung an Byte ${firstMismatch} (gelesen ${toHex(bytes[firstMismatch])}, zurückgeschrieben ${toHex(roundTrip[firstMismatch])})`,
+      reason: t(getDocumentLanguage()).errors.utf8ByteMismatch(
+        firstMismatch,
+        bytes[firstMismatch],
+        roundTrip[firstMismatch],
+      ),
     }
   }
 
@@ -1077,7 +1092,7 @@ export async function checkTextBlob(blob: Blob): Promise<TextCheck> {
 export async function readTextOrThrow(blob: Blob, path: string): Promise<string> {
   const result = await checkTextBlob(blob)
   if (result.kind === "binary") {
-    throw new Error(`Datei ist kein gültiger UTF-8-Text: ${result.reason} (${path}).`)
+    throw new Error(t(getDocumentLanguage()).errors.fileNotValidUtf8(result.reason, path))
   }
   return result.kind === "text" ? result.text : ""
 }
@@ -1115,10 +1130,6 @@ function decodeUtf8Strict(bytes: Uint8Array): Option.Option<string> {
   }
 }
 
-function toHex(byte: number): string {
-  return `0x${byte.toString(16).padStart(2, "0")}`
-}
-
 export interface StoredUserTemplate {
   readonly id: string
   readonly label: string
@@ -1152,7 +1163,7 @@ export const sanitizeTemplateName = (label: string): string => {
     .replace(/[\\/:*?"<>|]+/g, "_")
     .trim()
     .replace(/[. ]+$/, "")
-  return cleaned === "" ? "Vorlage" : cleaned
+  return cleaned === "" ? t(getDocumentLanguage()).editor.templateFallbackName : cleaned
 }
 
 export async function getStoredUserTemplates(

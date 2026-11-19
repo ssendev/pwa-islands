@@ -43,7 +43,14 @@ import {
   loadFileHistoryIndex,
   truncateLatestFileHistoryEntry,
 } from "./history"
-import { type DateFormat, type Language, type TimeFormat, formatDateTime, t } from "./i18n"
+import {
+  type DateFormat,
+  type Language,
+  type TimeFormat,
+  formatDateTime,
+  getDocumentLanguage,
+  t,
+} from "./i18n"
 import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { viewMarkdown, viewUserMarkdown } from "./markdown"
@@ -62,7 +69,12 @@ import {
   storeHistoryEnabled,
   saveUserTemplate,
 } from "./storage"
-import { BUILTIN_TEMPLATES, replaceFileExtension, StarterTemplate } from "./templates"
+import {
+  BUILTIN_TEMPLATES,
+  getBuiltinTemplates,
+  replaceFileExtension,
+  StarterTemplate,
+} from "./templates"
 import { AlertBanner, AlertVariant } from "./toast"
 
 export { BinaryEdit, EditorFileMode, PreviewContent }
@@ -284,7 +296,7 @@ export const makeCreateFile = (
   },
 ): CreateFileModel => ({
   _tag: "CreateFile",
-  name: "Neu.html",
+  name: t(getDocumentLanguage()).editor.defaultFileName,
   content: "",
   selectedTemplateId: "builtin:empty",
   userTemplates,
@@ -1170,7 +1182,7 @@ export const LoadBase64 = Command.define("LoadBase64", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedLoadBase64({
-            message: `Dateiinhalt konnte nicht als Base64 geladen werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.loadBase64Failed(error.message),
           }),
         ),
       ),
@@ -1311,7 +1323,7 @@ export const SaveChanges = Command.define("SaveChanges", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedSaveChanges({
-            message: `Speichern fehlgeschlagen: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.saveFailed(error.message),
           }),
         ),
       ),
@@ -1359,7 +1371,7 @@ export const DeleteEntry = Command.define("DeleteEntry", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedDeleteEntry({
-            message: `Löschen fehlgeschlagen: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.deleteFailed(error.message),
           }),
         ),
       ),
@@ -1372,7 +1384,7 @@ export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
     try: async () => {
       const res = await fetch("/api.d.ts", { cache: "no-cache" })
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
+        throw new Error(t(getDocumentLanguage()).errors.httpLoadingApiDts(res.status))
       }
       const dtsText = await res.text()
       await navigator.clipboard.writeText(dtsText)
@@ -1383,7 +1395,7 @@ export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
     Effect.catch((error) =>
       Effect.succeed(
         Message.FailedCopyApiDtsToClipboard({
-          message: `Kopieren fehlgeschlagen: ${error.message}`,
+          message: t(getDocumentLanguage()).errors.copyFailed(error.message),
         }),
       ),
     ),
@@ -1410,7 +1422,7 @@ export const CopyFileHashesToClipboard = Command.define("CopyFileHashesToClipboa
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedCopyFileHashes({
-            message: `Kopieren fehlgeschlagen: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.copyFailed(error.message),
           }),
         ),
       ),
@@ -1429,7 +1441,7 @@ export const CopyLlmContextToClipboard = Command.define("CopyLlmContextToClipboa
       try: async () => {
         const res = await fetch("/api.d.ts", { cache: "no-cache" })
         if (!res.ok) {
-          throw new Error(`HTTP ${res.status} beim Laden von /api.d.ts`)
+          throw new Error(t(getDocumentLanguage()).errors.httpLoadingApiDts(res.status))
         }
         const dtsText = await res.text()
         const promptText = formatLlmContextForFormat(editFormat, fileName, content, dtsText)
@@ -1441,7 +1453,7 @@ export const CopyLlmContextToClipboard = Command.define("CopyLlmContextToClipboa
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedCopyLlmContext({
-            message: `Kopieren fehlgeschlagen: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.copyFailed(error.message),
           }),
         ),
       ),
@@ -1460,7 +1472,7 @@ export const ReadClipboardForLlmEdits = Command.define("ReadClipboardForLlmEdits
     Effect.catch((error) =>
       Effect.succeed(
         Message.FailedReadClipboardForLlmEdits({
-          message: `Zwischenablage konnte nicht gelesen werden: ${error.message}`,
+          message: t(getDocumentLanguage()).errors.readClipboardFailed(error.message),
         }),
       ),
     ),
@@ -1484,7 +1496,7 @@ export const CopyUpdatedHashesToClipboard = Command.define("CopyUpdatedHashesToC
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedCopyUpdatedHashes({
-            message: `Neue Hashes konnten nicht kopiert werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.copyUpdatedHashesFailed(error.message),
           }),
         ),
       ),
@@ -1599,7 +1611,7 @@ export const LoadFullHistory = Command.define("LoadFullHistory", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedLoadFullHistory({
-            message: `Verlauf konnte nicht geladen werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.loadHistoryFailed(error.message),
           }),
         ),
       ),
@@ -1661,7 +1673,7 @@ export const LoadHistoryEntryAt = Command.define("LoadHistoryEntryAt", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedLoadHistoryEntryAt({
-            message: `Version konnte nicht geladen werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.loadVersionFailed(error.message),
           }),
         ),
       ),
@@ -1739,7 +1751,7 @@ export const RestoreBinaryHistoryEntryAt = Command.define("RestoreBinaryHistoryE
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedRestoreBinaryHistoryEntry({
-            message: `Version konnte nicht geladen werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.loadVersionFailed(error.message),
           }),
         ),
       ),
@@ -1771,7 +1783,7 @@ export const LoadHistoryPreviewAt = Command.define("LoadHistoryPreviewAt", {
           return Option.match(getPreviewType(args.fileName), {
             onNone: () =>
               Message.FailedLoadHistoryPreviewAt({
-                message: "Für Binärdateien ist keine Vorschau verfügbar.",
+                message: t(getDocumentLanguage()).errors.noBinaryPreview,
               }),
             onSome: (previewKind) => {
               const mimeType =
@@ -1804,7 +1816,7 @@ export const LoadHistoryPreviewAt = Command.define("LoadHistoryPreviewAt", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedLoadHistoryPreviewAt({
-            message: `Vorschau konnte nicht geladen werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.loadPreviewFailed(error.message),
           }),
         ),
       ),
@@ -1836,7 +1848,7 @@ export const DeleteLatestFileHistoryEntry = Command.define("DeleteLatestFileHist
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedDeleteLatestHistoryEntry({
-            message: `Neueste Version konnte nicht gelöscht werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.deleteLatestVersionFailed(error.message),
           }),
         ),
       ),
@@ -1860,7 +1872,7 @@ export const ClearFileHistory = Command.define("ClearFileHistory", {
       Effect.catch((error) =>
         Effect.succeed(
           Message.FailedClearHistory({
-            message: `Verlauf konnte nicht gelöscht werden: ${error.message}`,
+            message: t(getDocumentLanguage()).errors.clearHistoryFailed(error.message),
           }),
         ),
       ),
@@ -1930,13 +1942,15 @@ const handleSaveAction = (
     if (!trimmed) {
       return Option.some(
         isFolder
-          ? "Bitte geben Sie einen Ordnernamen ein."
-          : "Bitte geben Sie einen Dateinamen ein.",
+          ? t(getDocumentLanguage()).errors.enterFolderName
+          : t(getDocumentLanguage()).errors.enterFileName,
       )
     }
     if (trimmed.includes("/") || trimmed.includes("\\")) {
       return Option.some(
-        `Der ${isFolder ? "Ordnername" : "Dateiname"} darf keine Schrägstriche enthalten.`,
+        isFolder
+          ? t(getDocumentLanguage()).errors.folderNameNoSlashes
+          : t(getDocumentLanguage()).errors.fileNameNoSlashes,
       )
     }
     return Option.none()
@@ -1965,7 +1979,7 @@ const handleSaveAction = (
         return {
           model: modifyFields(createFolder, {
             maybeValidationError: () =>
-              Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+              Option.some(t(getDocumentLanguage()).errors.entryAlreadyExists(trimmed)),
           }),
           outMessage: OutMessage.None(),
         }
@@ -1992,7 +2006,7 @@ const handleSaveAction = (
         return {
           model: modifyFields(editFolder, {
             maybeValidationError: () =>
-              Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+              Option.some(t(getDocumentLanguage()).errors.entryAlreadyExists(trimmed)),
           }),
           outMessage: OutMessage.None(),
         }
@@ -2066,7 +2080,7 @@ const handleSaveAction = (
           return {
             model: modifyFields(editFile, {
               maybeValidationError: () =>
-                Option.some("Ungültige Base64-Kodierung. Bitte überprüfen Sie die Eingabe."),
+                Option.some(t(getDocumentLanguage()).errors.invalidBase64),
             }),
             outMessage: OutMessage.None(),
           }
@@ -2082,7 +2096,7 @@ const handleSaveAction = (
           return {
             model: modifyFields(editFile, {
               maybeValidationError: () =>
-                Option.some(`Ein Eintrag mit dem Namen "${trimmed}" existiert bereits.`),
+                Option.some(t(getDocumentLanguage()).errors.entryAlreadyExists(trimmed)),
             }),
             outMessage: OutMessage.None(),
           }
@@ -2204,7 +2218,8 @@ export const update = (
         model: modifyFields(state, {
           isSavingTemplate: () => true,
           isDeletingTemplate: () => false,
-          newTemplateLabel: () => state.name.trim() || "Meine Vorlage",
+          newTemplateLabel: () =>
+            state.name.trim() || t(getDocumentLanguage()).editor.defaultTemplateName,
         }),
         outMessage: OutMessage.None(),
       })),
@@ -2802,7 +2817,7 @@ export const update = (
       model,
       outMessage: OutMessage.ShowAlert({
         banner: {
-          message: "/api.d.ts in die Zwischenablage kopiert",
+          message: t(getDocumentLanguage()).editor.copiedApiDts,
           variant: "info",
         },
         closeModal: false,
@@ -2838,7 +2853,7 @@ export const update = (
       model,
       outMessage: OutMessage.ShowAlert({
         banner: {
-          message: "Datei und /api.d.ts für KI in die Zwischenablage kopiert",
+          message: t(getDocumentLanguage()).editor.copiedLlmContext,
           variant: "info",
         },
         closeModal: false,
@@ -2876,8 +2891,8 @@ export const update = (
         banner: {
           message:
             context.llmEditFormat === "hashline"
-              ? "Datei mit Hashes in die Zwischenablage kopiert"
-              : "Datei in die Zwischenablage kopiert",
+              ? t(getDocumentLanguage()).editor.copiedFileWithHashes
+              : t(getDocumentLanguage()).editor.copiedFile,
           variant: "info",
         },
         closeModal: false,
@@ -2917,7 +2932,8 @@ export const update = (
                     ],
                     outMessage: OutMessage.ShowAlert({
                       banner: {
-                        message: `${appliedCount} Bearbeitung(en) angewendet – neue Hashes in die Zwischenablage kopiert`,
+                        message:
+                          t(getDocumentLanguage()).editor.appliedEditsCopiedHashes(appliedCount),
                         variant: "info",
                       },
                       closeModal: false,
@@ -2929,7 +2945,10 @@ export const update = (
                     commands: [ClearClipboardAfterPaste()],
                     outMessage: OutMessage.ShowAlert({
                       banner: {
-                        message: `${appliedCount} Bearbeitung(en) angewendet – Zwischenablage geleert`,
+                        message:
+                          t(getDocumentLanguage()).editor.appliedEditsClearedClipboard(
+                            appliedCount,
+                          ),
                         variant: "info",
                       },
                       closeModal: false,
@@ -3218,7 +3237,7 @@ export const update = (
             entries,
             closeModal: false,
             maybeAlertBanner: Option.some({
-              message: "Gespeichert.",
+              message: t(getDocumentLanguage()).editor.savedNotice,
               variant: "info",
             }),
             maybeReplaceUrl,
@@ -3256,7 +3275,7 @@ export const update = (
             entries,
             closeModal: false,
             maybeAlertBanner: Option.some({
-              message: "Gespeichert.",
+              message: t(getDocumentLanguage()).editor.savedNotice,
               variant: "info",
             }),
             maybeReplaceUrl: Option.some(
@@ -3531,7 +3550,7 @@ export const update = (
           }),
           outMessage: OutMessage.ShowAlert({
             banner: {
-              message: "Version konnte nicht geladen werden.",
+              message: t(getDocumentLanguage()).errors.loadVersionFailedGeneric,
               variant: "danger",
             },
             closeModal: false,
@@ -3578,7 +3597,7 @@ export const update = (
           }),
           outMessage: OutMessage.ShowAlert({
             banner: {
-              message: "Version konnte nicht geladen werden.",
+              message: t(getDocumentLanguage()).errors.loadVersionFailedGeneric,
               variant: "danger",
             },
             closeModal: false,
@@ -3595,7 +3614,7 @@ export const update = (
             entries,
             closeModal: model.isHistoryOnly === true,
             maybeAlertBanner: Option.some({
-              message: "Version wiederhergestellt.",
+              message: t(getDocumentLanguage()).editor.versionRestoredNotice,
               variant: "info",
             }),
             maybeReplaceUrl: Option.none(),
@@ -3653,7 +3672,7 @@ export const update = (
           model,
           outMessage: OutMessage.ShowAlert({
             banner: {
-              message: "Version konnte nicht geladen werden.",
+              message: t(getDocumentLanguage()).errors.loadVersionFailedGeneric,
               variant: "danger",
             },
             closeModal: false,
@@ -3938,13 +3957,13 @@ const viewTemplatePicker = (
                   ]
                 : []),
               h.optgroup(
-                [h.LabelAttr("Standard-Vorlagen")],
+                [h.LabelAttr(t(language).editor.standardTemplates)],
                 pipe(
-                  BUILTIN_TEMPLATES,
-                  Array.map((t) =>
+                  getBuiltinTemplates(language),
+                  Array.map((tmpl) =>
                     h.option(
-                      [h.Value(t.id), h.Selected(t.id === state.selectedTemplateId)],
-                      [t.label],
+                      [h.Value(tmpl.id), h.Selected(tmpl.id === state.selectedTemplateId)],
+                      [tmpl.label],
                     ),
                   ),
                 ),
@@ -3957,8 +3976,8 @@ const viewTemplatePicker = (
                   h.Type("button"),
                   h.Id("modal-btn-save-template"),
                   h.Class("btn btn-secondary btn-icon"),
-                  h.Title("Aktuellen Inhalt als eigene Vorlage speichern"),
-                  h.AriaLabel("Aktuellen Inhalt als eigene Vorlage speichern"),
+                  h.Title(t(language).editor.saveAsTemplateTitle),
+                  h.AriaLabel(t(language).editor.saveAsTemplateTitle),
                   h.OnClick(Message.ClickedOpenSaveTemplate()),
                 ],
                 [viewIcon("save", h)],
@@ -3970,8 +3989,8 @@ const viewTemplatePicker = (
                   h.Type("button"),
                   h.Id("modal-btn-delete-template"),
                   h.Class("btn btn-danger btn-icon"),
-                  h.Title("Ausgewählte eigene Vorlage löschen"),
-                  h.AriaLabel("Ausgewählte eigene Vorlage löschen"),
+                  h.Title(t(language).editor.deleteCustomTemplateTitle),
+                  h.AriaLabel(t(language).editor.deleteCustomTemplateTitle),
                   h.OnClick(Message.ClickedOpenDeleteTemplate()),
                 ],
                 [viewIcon("trash", h)],
@@ -3987,7 +4006,7 @@ const viewTemplatePicker = (
                 h.Type("text"),
                 h.Id("modal-template-name"),
                 h.Class("form-input"),
-                h.Placeholder("Name der Vorlage (z. B. Mein Dashboard)"),
+                h.Placeholder(t(language).editor.templateNamePlaceholder),
                 h.Value(state.newTemplateLabel),
                 h.OnInput((label) => Message.UpdatedNewTemplateLabel({ label })),
               ]),
@@ -3996,8 +4015,8 @@ const viewTemplatePicker = (
                   h.Type("button"),
                   h.Id("modal-btn-cancel-save-template"),
                   h.Class("btn btn-secondary icon-label-btn"),
-                  h.AriaLabel("Abbrechen"),
-                  h.DataAttribute("tip", "Abbrechen"),
+                  h.AriaLabel(t(language).common.cancel),
+                  h.DataAttribute("tip", t(language).common.cancel),
                   h.OnClick(Message.ClickedCancelSaveTemplate()),
                 ],
                 [
@@ -4005,7 +4024,7 @@ const viewTemplatePicker = (
                     [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                     [viewIcon("close", h)],
                   ),
-                  h.span([h.Class("icon-label-btn-text")], ["Abbrechen"]),
+                  h.span([h.Class("icon-label-btn-text")], [t(language).common.cancel]),
                 ],
               ),
               h.button(
@@ -4013,8 +4032,8 @@ const viewTemplatePicker = (
                   h.Type("button"),
                   h.Id("modal-btn-confirm-save-template"),
                   h.Class("btn btn-primary icon-label-btn"),
-                  h.AriaLabel("Speichern"),
-                  h.DataAttribute("tip", "Speichern"),
+                  h.AriaLabel(t(language).common.save),
+                  h.DataAttribute("tip", t(language).common.save),
                   h.OnClick(Message.ClickedConfirmSaveTemplate()),
                 ],
                 [
@@ -4022,7 +4041,7 @@ const viewTemplatePicker = (
                     [h.Class("icon-label-btn-icon"), h.AriaHidden(true)],
                     [viewIcon("save", h)],
                   ),
-                  h.span([h.Class("icon-label-btn-text")], ["Speichern"]),
+                  h.span([h.Class("icon-label-btn-text")], [t(language).common.save]),
                 ],
               ),
             ],
@@ -4032,20 +4051,22 @@ const viewTemplatePicker = (
   )
 }
 
-const viewPreviewContent = (preview: PreviewContent, h: Html.HtmlBuilder<Message>): Html.Html =>
-  PreviewContent.match(preview, {
+const viewPreviewContent = (preview: PreviewContent, h: Html.HtmlBuilder<Message>): Html.Html => {
+  const previewAlt = t(getDocumentLanguage()).editor.filePreviewAlt
+  return PreviewContent.match(preview, {
     None: () => h.empty,
     Image: ({ objectUrl }) =>
       h.figure(
         [h.Id("modal-file-preview"), h.Class("file-preview")],
-        [h.img([h.Src(objectUrl), h.Alt("Vorschau der Datei"), h.Class("file-preview-image")])],
+        [h.img([h.Src(objectUrl), h.Alt(previewAlt), h.Class("file-preview-image")])],
       ),
     Pdf: ({ objectUrl }) =>
       h.figure(
         [h.Id("modal-file-preview"), h.Class("file-preview")],
-        [h.iframe([h.Src(objectUrl), h.Title("Vorschau der Datei"), h.Class("file-preview-pdf")])],
+        [h.iframe([h.Src(objectUrl), h.Title(previewAlt), h.Class("file-preview-pdf")])],
       ),
   })
+}
 
 const viewEditorFileBody = (
   fileMode: EditorFileMode,
@@ -4080,7 +4101,7 @@ const viewEditorFileBody = (
               monacoEditor.OnSettingsRequested(() => Message.RequestedSettings()),
               h.Id("modal-file-content"),
               h.Class("monaco-editor-host"),
-              h.AriaLabel("Inhalt"),
+              h.AriaLabel(t(getDocumentLanguage()).editor.contentAria),
             ]),
           ],
         ),
@@ -4143,7 +4164,7 @@ const viewEditorFileBody = (
                         }),
                       ),
                     ]),
-                    h.span([], ["Binärdatei bearbeiten"]),
+                    h.span([], [t(getDocumentLanguage()).editor.editBinaryFile]),
                   ],
                 )
               : h.p([h.Class("form-hint")], [lockReason]),
@@ -4151,12 +4172,15 @@ const viewEditorFileBody = (
               ? h.div(
                   [h.Id("modal-base64-editor"), h.Class("form-group")],
                   [
-                    h.label([h.For("modal-file-content-b64")], ["Base64-Inhalt:"]),
+                    h.label(
+                      [h.For("modal-file-content-b64")],
+                      [t(getDocumentLanguage()).editor.base64ContentLabel],
+                    ),
                     h.textarea([
                       h.Id("modal-file-content-b64"),
                       h.Class("form-textarea form-textarea-mono"),
                       h.Spellcheck(false),
-                      h.Placeholder("Base64-Daten dieser Datei"),
+                      h.Placeholder(t(getDocumentLanguage()).editor.base64ContentPlaceholder),
                       h.Value(base64Content),
                       h.OnInput((value) =>
                         Message.UpdatedBase64Content({
@@ -4287,9 +4311,10 @@ const viewLlmChatHistory = (
   userName: string,
   editFormat: EditFormat,
   showTools: boolean,
-  _language: Language,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
+  const tr = t(language)
   const systemMessages = Array.filter(llmChatMessages, (msg) => msg._tag === "System")
   const autoUserMessages =
     llmChatMessages.length >= 4 &&
@@ -4312,8 +4337,8 @@ const viewLlmChatHistory = (
                 [h.Class("modal-llm-chat-details-summary")],
                 [
                   Array.isReadonlyArrayNonEmpty(autoUserMessages)
-                    ? "System-Nachricht & Kontext"
-                    : "System-Nachricht",
+                    ? tr.editor.systemMessageAndContext
+                    : tr.editor.systemMessage,
                 ],
               ),
               h.div(
@@ -4323,8 +4348,8 @@ const viewLlmChatHistory = (
                     h.div(
                       [h.Class("modal-llm-chat-context-block")],
                       [
-                        h.span([h.Class("llm-response-label")], ["System"]),
-                        viewMarkdown(msg.content, { onCopyCode }, h),
+                        h.span([h.Class("llm-response-label")], [tr.editor.systemLabel]),
+                        viewMarkdown(msg.content, { onCopyCode, language }, h),
                       ],
                     ),
                   ),
@@ -4333,8 +4358,12 @@ const viewLlmChatHistory = (
                         h.div(
                           [h.Class("modal-llm-chat-context-block")],
                           [
-                            h.span([h.Class("llm-response-label")], ["Tools"]),
-                            viewMarkdown(toolsMarkdown, { onCopyCode, codeblocksOpen: false }, h),
+                            h.span([h.Class("llm-response-label")], [tr.editor.toolsLabel]),
+                            viewMarkdown(
+                              toolsMarkdown,
+                              { onCopyCode, codeblocksOpen: false, language },
+                              h,
+                            ),
                           ],
                         ),
                       ]
@@ -4343,8 +4372,12 @@ const viewLlmChatHistory = (
                     h.div(
                       [h.Class("modal-llm-chat-context-block")],
                       [
-                        h.span([h.Class("llm-response-label")], ["Kontext"]),
-                        viewUserMarkdown(msg.content, { onCopyCode, codeblocksOpen: false }, h),
+                        h.span([h.Class("llm-response-label")], [tr.editor.contextLabel]),
+                        viewUserMarkdown(
+                          msg.content,
+                          { onCopyCode, codeblocksOpen: false, language },
+                          h,
+                        ),
                       ],
                     ),
                   ),
@@ -4386,7 +4419,10 @@ const viewLlmChatHistory = (
         ),
       ],
       [
-        hBuilder.span([hBuilder.Class("modal-llm-chat-role")], [isError ? "Fehler" : aiName]),
+        hBuilder.span(
+          [hBuilder.Class("modal-llm-chat-role")],
+          [isError ? tr.common.error : aiName],
+        ),
         LlmResponse.view(
           {
             content,
@@ -4396,6 +4432,7 @@ const viewLlmChatHistory = (
             isContentMarkdown,
             rawToolKeys: llmToolRawKeys,
             toolKeyPrefix,
+            language,
             onToggleThinkingMarkdown: Message.ToggledLlmThinkingMarkdown(),
             onToggleContentMarkdown: Message.ToggledLlmContentMarkdown(),
             onToggleToolMarkdown: (toolKey) => Message.ToggledLlmToolMarkdown({ toolKey }),
@@ -4425,8 +4462,8 @@ const viewLlmChatHistory = (
                       [
                         h.Type("button"),
                         h.Class("llm-markdown-toggle-btn"),
-                        h.AriaLabel("Nachricht kopieren"),
-                        h.DataAttribute("tip", "Nachricht kopieren"),
+                        h.AriaLabel(tr.editor.copyMessage),
+                        h.DataAttribute("tip", tr.editor.copyMessage),
                         h.OnClick(onCopyCode(content)),
                       ],
                       [viewIcon("clipboard", h)],
@@ -4436,7 +4473,7 @@ const viewLlmChatHistory = (
                         h.Type("button"),
                         h.Class("llm-markdown-toggle-btn"),
                         h.AriaPressed(isUserMarkdown ? "true" : "false"),
-                        h.AriaLabel("Nutzer-Markdown umschalten"),
+                        h.AriaLabel(tr.editor.toggleUserMarkdown),
                         h.OnClick(Message.ToggledLlmUserMarkdown()),
                       ],
                       [isUserMarkdown ? "md" : "txt"],
@@ -4530,7 +4567,12 @@ const renderModelSelectChildren = (
   h: Html.HtmlBuilder<Message>,
 ): ReadonlyArray<Html.Html> => {
   if (!Array.isReadonlyArrayNonEmpty(llmModelOptions)) {
-    return [h.option([h.Value(""), h.Selected(true)], ["Noch keine Modelle"])]
+    return [
+      h.option(
+        [h.Value(""), h.Selected(true)],
+        [t(getDocumentLanguage()).settings.providerNoModelsYet],
+      ),
+    ]
   }
   const children: globalThis.Array<Html.Html> = []
   let currentGroupName: string | undefined = undefined
@@ -4583,7 +4625,7 @@ const viewLlmChatModelControls = (
       [
         h.Id("modal-llm-model-select"),
         h.Class("form-input modal-llm-select"),
-        h.AriaLabel("Modell"),
+        h.AriaLabel(t(getDocumentLanguage()).settings.providerModelLabel),
         h.Disabled(isSending || Array.isReadonlyArrayEmpty(llmModelOptions)),
         h.Value(llmSelectedModel),
         h.OnChange((value) => Message.SelectedLlmModel({ value })),
@@ -4595,13 +4637,16 @@ const viewLlmChatModelControls = (
           [
             h.Id("modal-llm-thinking-select"),
             h.Class("form-input modal-llm-select"),
-            h.AriaLabel("Thinking-Level"),
+            h.AriaLabel(t(getDocumentLanguage()).settings.providerThinkingLevelLabel),
             h.Disabled(isSending),
             h.Value(llmSelectedThinkingLevel),
             h.OnChange((value) => Message.SelectedLlmThinkingLevel({ value })),
           ],
           [
-            h.option([h.Value(""), h.Selected(llmSelectedThinkingLevel === "")], ["Standard"]),
+            h.option(
+              [h.Value(""), h.Selected(llmSelectedThinkingLevel === "")],
+              [t(getDocumentLanguage()).settings.providerDefault],
+            ),
             ...Array.map(llmThinkingLevels, (item) =>
               h.option(
                 [h.Value(item.value), h.Selected(llmSelectedThinkingLevel === item.value)],
@@ -4619,10 +4664,12 @@ type ChatSlashCommand = {
   readonly description: string
 }
 
-const CHAT_SLASH_COMMANDS: ReadonlyArray<ChatSlashCommand> = [
+const getChatSlashCommands = (
+  language: Language = getDocumentLanguage(),
+): ReadonlyArray<ChatSlashCommand> => [
   {
     name: "/clear",
-    description: "Chat-Verlauf leeren",
+    description: t(language).editor.slashClearDescription,
   },
 ]
 
@@ -4631,7 +4678,7 @@ const matchingChatSlashCommands = (input: string): ReadonlyArray<ChatSlashComman
     return []
   }
   const query = input.toLowerCase()
-  return Array.filter(CHAT_SLASH_COMMANDS, (cmd) => cmd.name.startsWith(query))
+  return Array.filter(getChatSlashCommands(), (cmd) => cmd.name.startsWith(query))
 }
 
 const getOpenSlashCommands = (
@@ -4821,7 +4868,7 @@ const viewLlmSlashCommandMenu = (
           h.Id("modal-llm-slash-menu"),
           h.Class("modal-llm-slash-menu"),
           h.Role("listbox"),
-          h.AriaLabel("Verfügbare Chat-Befehle"),
+          h.AriaLabel(t(getDocumentLanguage()).editor.slashMenuAria),
         ],
         Array.map(commands, (cmd, index) => {
           const isSelected = index === selectedIndex
@@ -4968,7 +5015,7 @@ const viewEditorSplitter = (isDragging: boolean, h: Html.HtmlBuilder<Message>): 
     h.Class(isDragging ? "modal-editor-splitter is-dragging" : "modal-editor-splitter"),
     h.Role("separator"),
     h.AriaOrientation("vertical"),
-    h.AriaLabel("Editor-Größe anpassen"),
+    h.AriaLabel(t(getDocumentLanguage()).editor.resizeEditorAria),
     h.OnPointerDown(
       (_pointerType, button, screenX, screenY, _timeStamp, _clientX, _clientY, pointerId) =>
         button === 0 || button === -1
@@ -5245,8 +5292,8 @@ const viewEditorModal = (
                     isLlmContentMarkdown,
                     llmToolRawKeys,
                     isLlmUserMarkdown,
-                    llmViewInputs.llmChatAiName?.trim() || "KI",
-                    llmViewInputs.llmChatUserName?.trim() || "Du",
+                    llmViewInputs.llmChatAiName?.trim() || t(language).common.aiDefaultName,
+                    llmViewInputs.llmChatUserName?.trim() || t(language).common.userDefaultName,
                     llmViewInputs.llmEditFormat ?? "hashline",
                     llmViewInputs.llmToolCalls ??
                       !isLanguageModelSelection(llmViewInputs.llmSelectedModel),
@@ -5274,8 +5321,10 @@ const viewEditorModal = (
                               h.Type("button"),
                               h.Id("modal-llm-mode-select"),
                               h.Class("btn btn-secondary btn-icon modal-llm-mode-trigger"),
-                              h.Title(`Modus: ${activeLlmBarModeOption.label}`),
-                              h.AriaLabel(`Modus: ${activeLlmBarModeOption.label}`),
+                              h.Title(t(language).editor.modePrefix(activeLlmBarModeOption.label)),
+                              h.AriaLabel(
+                                t(language).editor.modePrefix(activeLlmBarModeOption.label),
+                              ),
                               h.AriaHasPopup("true"),
                               h.AriaExpanded(isLlmModeMenuOpenProp),
                               h.Attribute("data-mode", effectiveLlmBarMode),
@@ -5319,7 +5368,11 @@ const viewEditorModal = (
                   ...(historyControls !== undefined
                     ? [
                         h.div(
-                          [h.Class("editor-history-nav"), h.Role("group"), h.AriaLabel("Verlauf")],
+                          [
+                            h.Class("editor-history-nav"),
+                            h.Role("group"),
+                            h.AriaLabel(t(language).editor.history),
+                          ],
                           [
                             showStepButtons && !undoInTitlebar
                               ? viewStepButton(
@@ -6007,6 +6060,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                     confirmButtonId: "modal-btn-confirm-delete-template",
                     confirmLabel: tr.common.delete,
                     onConfirm: Message.ClickedConfirmDeleteTemplate(),
+                    language,
                   },
                   h,
                 )

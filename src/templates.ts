@@ -1,4 +1,5 @@
 import { Schema } from "effect"
+import { getDocumentLanguage, type Language, t } from "./i18n"
 import { getFileExtension } from "./storage"
 
 export const StarterTemplate = Schema.Struct({
@@ -10,24 +11,32 @@ export const StarterTemplate = Schema.Struct({
 })
 export type StarterTemplate = typeof StarterTemplate.Type
 
-export const BUILTIN_TEMPLATES: ReadonlyArray<StarterTemplate> = [
-  {
-    id: "builtin:empty",
-    label: "Leere Datei",
-    defaultFileName: "Neu.html",
-    content: "",
-    isBuiltin: true,
-  },
-  {
-    id: "builtin:island",
-    label: "PWA Island (mit /api.js)",
-    defaultFileName: "island.html",
-    content: `<!doctype html>
-<html lang="de">
+export const getBuiltinTemplates = (
+  language: Language = getDocumentLanguage(),
+): ReadonlyArray<StarterTemplate> => {
+  const text = t(language).editor
+  const isEn = language === "en"
+  const htmlTitle = isEn ? "My Island" : "Meine Island"
+  const loadingFiles = isEn ? "Loading files…" : "Lade Dateien…"
+
+  return [
+    {
+      id: "builtin:empty",
+      label: text.templateEmptyLabel,
+      defaultFileName: text.defaultFileName,
+      content: "",
+      isBuiltin: true,
+    },
+    {
+      id: "builtin:island",
+      label: text.templateIslandLabel,
+      defaultFileName: "island.html",
+      content: `<!doctype html>
+<html lang="${language}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Meine Island</title>
+    <title>${htmlTitle}</title>
     <style>
       *, *::before, *::after {
         box-sizing: border-box;
@@ -70,8 +79,8 @@ export const BUILTIN_TEMPLATES: ReadonlyArray<StarterTemplate> = [
       <nav><a href="/?pwaislands">PWA Islands</a></nav>
     </header>
     <main>
-      <h1>Meine Island</h1>
-      <pre id="output">Lade Dateien…</pre>
+      <h1>${htmlTitle}</h1>
+      <pre id="output">${loadingFiles}</pre>
     </main>
 
     <script type="module">
@@ -83,18 +92,18 @@ export const BUILTIN_TEMPLATES: ReadonlyArray<StarterTemplate> = [
   </body>
 </html>
 `,
-    isBuiltin: true,
-  },
-  {
-    id: "builtin:html",
-    label: "HTML5 Grundgerüst",
-    defaultFileName: "index.html",
-    content: `<!doctype html>
-<html lang="de">
+      isBuiltin: true,
+    },
+    {
+      id: "builtin:html",
+      label: text.templateHtmlLabel,
+      defaultFileName: "index.html",
+      content: `<!doctype html>
+<html lang="${language}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Meine Island</title>
+    <title>${htmlTitle}</title>
     <style>
       *, *::before, *::after {
         box-sizing: border-box;
@@ -137,28 +146,33 @@ export const BUILTIN_TEMPLATES: ReadonlyArray<StarterTemplate> = [
       <nav><a href="/?pwaislands">PWA Islands</a></nav>
     </header>
     <main>
-      <h1>Meine Island</h1>
+      <h1>${htmlTitle}</h1>
     </main>
   </body>
 </html>
 `,
-    isBuiltin: true,
-  },
-  {
-    id: "builtin:json",
-    label: "JSON-Datei",
-    defaultFileName: "daten.json",
-    content: `{\n  "hallo": [1,2,3],\n  "welt": "!"\n}\n`,
-    isBuiltin: true,
-  },
-  {
-    id: "builtin:markdown",
-    label: "Markdown-Notiz",
-    defaultFileName: "notiz.md",
-    content: `# Notiz\n\n`,
-    isBuiltin: true,
-  },
-]
+      isBuiltin: true,
+    },
+    {
+      id: "builtin:json",
+      label: text.templateJsonLabel,
+      defaultFileName: isEn ? "data.json" : "daten.json",
+      content: isEn
+        ? `{\n  "hello": [1,2,3],\n  "world": "!"\n}\n`
+        : `{\n  "hallo": [1,2,3],\n  "welt": "!"\n}\n`,
+      isBuiltin: true,
+    },
+    {
+      id: "builtin:markdown",
+      label: text.templateMarkdownLabel,
+      defaultFileName: isEn ? "note.md" : "notiz.md",
+      content: isEn ? `# Note\n\n` : `# Notiz\n\n`,
+      isBuiltin: true,
+    },
+  ]
+}
+
+export const BUILTIN_TEMPLATES: ReadonlyArray<StarterTemplate> = getBuiltinTemplates("de")
 
 export function replaceFileExtension(currentName: string, templateFileName: string): string {
   const templateExt = getFileExtension(templateFileName)

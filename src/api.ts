@@ -1,6 +1,7 @@
 import { Array, Clock, Effect, Option, Order } from "effect"
 import { invoke } from "@tauri-apps/api/core"
 import { appendFileHistoryBytes, recordPreviousTauriApiFileVersion } from "./history"
+import { getDocumentLanguage, t } from "./i18n"
 import {
   checkTextBytes,
   collectDirectoryHandles,
@@ -40,7 +41,7 @@ async function resolveDirectory(path: string, create = false): Promise<FileSyste
 async function requireRoot(): Promise<FileSystemDirectoryHandle> {
   return Option.match(await findActiveStorage(), {
     onNone: () => {
-      throw new Error("Kein Speicher ausgewählt. Bitte zuerst einen Ordner auswählen.")
+      throw new Error(t(getDocumentLanguage()).errors.apiNoStorageSelected)
     },
     onSome: (root) => root,
   })
@@ -54,7 +55,7 @@ async function isTauriActive(): Promise<boolean> {
 function splitEntryPath(path: string): { dirs: ReadonlyArray<string>; name: string } {
   const parts = splitPath(normalizePath(path))
   if (!Array.isReadonlyArrayNonEmpty(parts)) {
-    throw new Error("Ungültiger Pfad: Datei- oder Ordnername fehlt.")
+    throw new Error(t(getDocumentLanguage()).errors.apiInvalidPath)
   }
   return {
     dirs: Array.dropRight(parts, 1),
@@ -191,7 +192,7 @@ const api: IslandsApi = {
       if (options?.ensureText) {
         const check = checkTextBytes(bytes)
         if (check.kind === "binary") {
-          throw new Error(`Datei ist kein gültiger UTF-8-Text: ${check.reason} (${path}).`)
+          throw new Error(t(getDocumentLanguage()).errors.fileNotValidUtf8(check.reason, path))
         }
         return check.kind === "text" ? check.text : ""
       }
@@ -237,7 +238,7 @@ const api: IslandsApi = {
     const overwrite = options?.overwrite ?? false
 
     if (!overwrite && (await api.exists(path))) {
-      throw new Error(`Datei existiert bereits: ${path}`)
+      throw new Error(t(getDocumentLanguage()).errors.apiFileAlreadyExists(path))
     }
 
     if (overwrite) {
