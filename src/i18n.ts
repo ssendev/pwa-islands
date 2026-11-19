@@ -895,6 +895,7 @@ const de = {
     showInstallInMenu: "App installieren im Menü anzeigen",
     openDownloads: "Downloads öffnen",
     currentPlatform: "Aktuelles System",
+    loading: "Lade aktuelle Releases …",
   },
   modals: {
     confirmTitle: "Bestätigung",
@@ -1696,6 +1697,7 @@ const en: Translations = {
     showInstallInMenu: "Show Install App in menu",
     openDownloads: "Open Downloads",
     currentPlatform: "Current system",
+    loading: "Loading latest releases…",
   },
   modals: {
     confirmTitle: "Confirmation",

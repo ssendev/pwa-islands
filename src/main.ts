@@ -365,6 +365,22 @@ export const Flags = Schema.Struct({
 })
 export type Flags = typeof Flags.Type
 
+const DownloadsReleaseAsset = Schema.Struct({
+  name: Schema.String,
+  url: Schema.String,
+})
+
+export const DownloadsReleaseState = defineTaggedUnion({
+  Idle: {},
+  Loading: {},
+  Loaded: {
+    tagName: Schema.String,
+    assets: Schema.Array(DownloadsReleaseAsset),
+  },
+  Failed: {},
+})
+export type DownloadsReleaseState = typeof DownloadsReleaseState.Type
+
 export const Model = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
@@ -383,6 +399,7 @@ export const Model = Schema.Struct({
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
   isDownloadsDialogOpen: Schema.Boolean,
+  downloadsReleaseState: DownloadsReleaseState,
   isEditingLlmSettings: Schema.Boolean,
   isConfirmingDeleteLlmProvider: Schema.Boolean,
   editingLlmProviderId: Schema.Option(Schema.String),
@@ -596,6 +613,11 @@ export const Message = defineMessageUnion({
   ClickedCloseSettingsDialog: {},
   ClickedOpenDownloadsDialog: {},
   ClickedCloseDownloadsDialog: {},
+  SucceededFetchLatestRelease: {
+    tagName: Schema.String,
+    assets: Schema.Array(DownloadsReleaseAsset),
+  },
+  FailedFetchLatestRelease: {},
   ClickedSaveSettingsDialog: {},
   ClickedEditLlmSettings: {},
   ClickedRequestClearAllHistory: {},
@@ -1238,6 +1260,41 @@ export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
       Effect.map(() => Message.CompletedSaveMonacoSettings()),
       Effect.catch(() => Effect.succeed(Message.CompletedSaveMonacoSettings())),
     ),
+})
+
+const GITHUB_LATEST_RELEASE_API_URL =
+  "https://api.github.com/repos/ssendev/pwa-islands/releases/latest"
+
+export const FetchLatestRelease = Command.define("FetchLatestRelease", {
+  messages: [Message.SucceededFetchLatestRelease, Message.FailedFetchLatestRelease],
+  execute: Effect.tryPromise({
+    try: async () => {
+      const response = await fetch(GITHUB_LATEST_RELEASE_API_URL, {
+        headers: { Accept: "application/vnd.github+json" },
+      })
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
+      const data: unknown = await response.json()
+      if (typeof data !== "object" || data === null) {
+        throw new Error("Invalid release payload")
+      }
+      const record = data as Record<string, unknown>
+      const tagName = typeof record.tag_name === "string" ? record.tag_name : ""
+      const rawAssets = Array.isArray(record.assets) ? record.assets : []
+      const assets: Array<{ readonly name: string; readonly url: string }> = []
+      for (const item of rawAssets) {
+        if (typeof item === "object" && item !== null) {
+          const asset = item as Record<string, unknown>
+          if (typeof asset.name === "string" && typeof asset.browser_download_url === "string") {
+            assets.push({ name: asset.name, url: asset.browser_download_url })
+          }
+        }
+      }
+      return Message.SucceededFetchLatestRelease({ tagName, assets })
+    },
+    catch: () => undefined,
+  }).pipe(Effect.catch(() => Effect.succeed(Message.FailedFetchLatestRelease()))),
 })
 
 export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
@@ -2263,6 +2320,9 @@ export const init = (
         showInstallInMenu: true,
         isSettingsDialogOpen: isInitialSettingsOpen,
         isDownloadsDialogOpen: isInitialDownloadsOpen,
+        downloadsReleaseState: isInitialDownloadsOpen
+          ? DownloadsReleaseState.Loading()
+          : DownloadsReleaseState.Idle(),
         isEditingLlmSettings: false,
         isConfirmingDeleteLlmProvider: false,
         editingLlmProviderId: Option.none(),
@@ -2354,6 +2414,9 @@ export const init = (
       showInstallInMenu: true,
       isSettingsDialogOpen: isInitialSettingsOpen,
       isDownloadsDialogOpen: isInitialDownloadsOpen,
+      downloadsReleaseState: isInitialDownloadsOpen
+        ? DownloadsReleaseState.Loading()
+        : DownloadsReleaseState.Idle(),
       isEditingLlmSettings: false,
       isConfirmingDeleteLlmProvider: false,
       editingLlmProviderId: Option.none(),
@@ -2427,6 +2490,7 @@ export const init = (
       LoadFileInfoPreference(),
       LoadLlmSettings(),
       LoadEditorPreferences(),
+      ...(isInitialDownloadsOpen ? [FetchLatestRelease()] : []),
       DetectLanguageModel(),
     ],
   }
@@ -3470,11 +3534,17 @@ export const update = (
         },
 
         Downloads: ({ subPath }) => {
+          const shouldFetch =
+            modelWithRoute.downloadsReleaseState._tag === "Idle" ||
+            modelWithRoute.downloadsReleaseState._tag === "Failed"
           const openedDownloadsModel = modifyFields(modelWithRoute, {
             isSettingsOpen: () => false,
             isSettingsDialogOpen: () => false,
             isDownloadsDialogOpen: () => true,
+            downloadsReleaseState: (current) =>
+              shouldFetch ? DownloadsReleaseState.Loading() : current,
           })
+          const fetchCommands = shouldFetch ? [FetchLatestRelease()] : []
 
           return Match.value(openedDownloadsModel.storageState).pipe(
             Match.tag("Ready", (readyState) => {
@@ -3484,6 +3554,7 @@ export const update = (
                   model: modifyFields(openedDownloadsModel, {
                     modalState: Modal.close,
                   }),
+                  ...(fetchCommands.length > 0 ? { commands: fetchCommands } : {}),
                 }
               }
               return {
@@ -3494,13 +3565,14 @@ export const update = (
                       entriesState: () => EntriesState.Loading(),
                     }),
                 }),
-                commands: [NavigateToSubfolder({ targetSubPath: subPath })],
+                commands: [NavigateToSubfolder({ targetSubPath: subPath }), ...fetchCommands],
               }
             }),
             Match.orElse(() => ({
               model: modifyFields(openedDownloadsModel, {
                 modalState: Modal.close,
               }),
+              ...(fetchCommands.length > 0 ? { commands: fetchCommands } : {}),
             })),
           )
         },
@@ -3567,15 +3639,34 @@ export const update = (
 
     ClickedOpenDownloadsDialog: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
+      const shouldFetch =
+        model.downloadsReleaseState._tag === "Idle" || model.downloadsReleaseState._tag === "Failed"
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           isSettingsDialogOpen: () => false,
           isDownloadsDialogOpen: () => true,
+          downloadsReleaseState: (current) =>
+            shouldFetch ? DownloadsReleaseState.Loading() : current,
         }),
-        commands: [PushUrl({ url: buildDownloadsUrl(subPath) })],
+        commands: [
+          PushUrl({ url: buildDownloadsUrl(subPath) }),
+          ...(shouldFetch ? [FetchLatestRelease()] : []),
+        ],
       }
     },
+
+    SucceededFetchLatestRelease: ({ tagName, assets }) => ({
+      model: modifyFields(model, {
+        downloadsReleaseState: () => DownloadsReleaseState.Loaded({ tagName, assets }),
+      }),
+    }),
+
+    FailedFetchLatestRelease: () => ({
+      model: modifyFields(model, {
+        downloadsReleaseState: () => DownloadsReleaseState.Failed(),
+      }),
+    }),
 
     ClickedCloseDownloadsDialog: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
@@ -6122,10 +6213,11 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
 }
 
 const GITHUB_RELEASES_URL = "https://github.com/ssendev/pwa-islands/releases"
-const GITHUB_LATEST_DOWNLOAD_BASE = `${GITHUB_RELEASES_URL}/latest/download`
 const PWA_WEB_URL = "https://pwaislands.ssen.dev"
 
-const detectDownloadPlatform = (): "Android" | "Windows" | "Linux" | "macOS" | null => {
+type DownloadPlatform = "Android" | "Windows" | "Linux" | "macOS"
+
+const detectDownloadPlatform = (): DownloadPlatform | null => {
   if (typeof navigator === "undefined") {
     return null
   }
@@ -6134,6 +6226,39 @@ const detectDownloadPlatform = (): "Android" | "Windows" | "Linux" | "macOS" | n
   if (/windows/i.test(ua)) return "Windows"
   if (/macintosh|mac os x/i.test(ua)) return "macOS"
   if (/linux/i.test(ua)) return "Linux"
+  return null
+}
+
+const classifyDownloadAsset = (
+  name: string,
+  tr: ReturnType<typeof t>,
+): { readonly platform: DownloadPlatform; readonly label: string } | null => {
+  const lower = name.toLowerCase()
+  if (lower.endsWith(".apk")) {
+    return { platform: "Android", label: tr.downloads.androidApk }
+  }
+  if (lower.endsWith(".exe")) {
+    return { platform: "Windows", label: tr.downloads.windowsSetup }
+  }
+  if (lower.endsWith(".msi")) {
+    return { platform: "Windows", label: tr.downloads.windowsMsi }
+  }
+  if (lower.endsWith(".appimage")) {
+    return { platform: "Linux", label: tr.downloads.linuxAppImage }
+  }
+  if (lower.endsWith(".deb")) {
+    return { platform: "Linux", label: tr.downloads.linuxDeb }
+  }
+  if (lower.endsWith(".rpm")) {
+    return { platform: "Linux", label: tr.downloads.linuxRpm }
+  }
+  if (lower.endsWith(".dmg")) {
+    const isArm = lower.includes("arm64") || lower.includes("aarch64")
+    return {
+      platform: "macOS",
+      label: isArm ? tr.downloads.macosArm64 : tr.downloads.macosX64,
+    }
+  }
   return null
 }
 
@@ -6154,45 +6279,117 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
             : "Linux"
       : detectDownloadPlatform()
 
-  const baseGroups: ReadonlyArray<{
-    readonly platform: "Android" | "Windows" | "Linux" | "macOS"
-    readonly items: ReadonlyArray<{ readonly label: string; readonly file: string }>
-  }> = [
-    {
-      platform: "Android",
-      items: [{ label: tr.downloads.androidApk, file: "pwa-islands.universal.apk" }],
-    },
-    {
-      platform: "Windows",
-      items: [
-        { label: tr.downloads.windowsSetup, file: "pwa-islands.x64.exe" },
-        { label: tr.downloads.windowsMsi, file: "pwa-islands.x64.msi" },
-      ],
-    },
-    {
-      platform: "Linux",
-      items: [
-        { label: tr.downloads.linuxAppImage, file: "pwa-islands.x64.AppImage" },
-        { label: tr.downloads.linuxDeb, file: "pwa-islands.x64.deb" },
-        { label: tr.downloads.linuxRpm, file: "pwa-islands.x64.rpm" },
-      ],
-    },
-    {
-      platform: "macOS",
-      items: [
-        { label: tr.downloads.macosArm64, file: "pwa-islands.arm64.dmg" },
-        { label: tr.downloads.macosX64, file: "pwa-islands.x64.dmg" },
-      ],
-    },
-  ]
+  const platformOrder: ReadonlyArray<DownloadPlatform> = ["Android", "Windows", "Linux", "macOS"]
 
-  const groups =
-    currentPlatform === null
-      ? baseGroups
-      : [
-          ...baseGroups.filter((g) => g.platform === currentPlatform),
-          ...baseGroups.filter((g) => g.platform !== currentPlatform),
-        ]
+  const viewReleasesFallback = () =>
+    h.div(
+      [h.Class("downloads-card-links")],
+      [
+        h.a(
+          [
+            h.Class("downloads-link"),
+            h.Href(GITHUB_RELEASES_URL),
+            h.Target("_blank"),
+            h.Rel("noopener noreferrer"),
+          ],
+          [h.span([h.Class("downloads-link-label")], ["PWA Islands Releases ↗"])],
+        ),
+      ],
+    )
+
+  let hasLoadedDownloads = false
+  const downloadsBody = DownloadsReleaseState.match(model.downloadsReleaseState, {
+    Idle: () => h.p([h.Class("downloads-subtitle")], [tr.downloads.loading]),
+    Loading: () => h.p([h.Class("downloads-subtitle")], [tr.downloads.loading]),
+    Failed: viewReleasesFallback,
+    Loaded: ({ assets }) => {
+      const byPlatform = new Map<
+        DownloadPlatform,
+        Array<{ readonly label: string; readonly file: string; readonly url: string }>
+      >()
+      for (const asset of assets) {
+        const classified = classifyDownloadAsset(asset.name, tr)
+        if (classified === null) continue
+        const list = byPlatform.get(classified.platform) ?? []
+        list.push({ label: classified.label, file: asset.name, url: asset.url })
+        byPlatform.set(classified.platform, list)
+      }
+
+      const existingGroups = platformOrder
+        .filter((platform) => (byPlatform.get(platform)?.length ?? 0) > 0)
+        .map((platform) => ({
+          platform,
+          items: byPlatform.get(platform) ?? [],
+        }))
+
+      if (existingGroups.length === 0) {
+        return viewReleasesFallback()
+      }
+
+      hasLoadedDownloads = true
+
+      const groups =
+        currentPlatform === null
+          ? existingGroups
+          : [
+              ...existingGroups.filter((g) => g.platform === currentPlatform),
+              ...existingGroups.filter((g) => g.platform !== currentPlatform),
+            ]
+
+      return h.div(
+        [h.Class("downloads-grid")],
+        groups.map((group) => {
+          const isCurrentPlatform = currentPlatform === group.platform
+          const orderedItems =
+            installedFile === null
+              ? group.items
+              : [
+                  ...group.items.filter((i) => i.file === installedFile),
+                  ...group.items.filter((i) => i.file !== installedFile),
+                ]
+          return h.section(
+            [h.Class(isCurrentPlatform ? "downloads-card is-current" : "downloads-card")],
+            [
+              h.div(
+                [h.Class("downloads-card-header")],
+                [
+                  h.h4([h.Class("downloads-card-title")], [group.platform]),
+                  isCurrentPlatform
+                    ? h.span(
+                        [h.Class("downloads-current-badge")],
+                        [
+                          model.hasTauri
+                            ? `${tr.downloads.currentPlatform} · v${__APP_VERSION__}`
+                            : tr.downloads.currentPlatform,
+                        ],
+                      )
+                    : h.empty,
+                ],
+              ),
+              h.div(
+                [h.Class("downloads-card-links")],
+                orderedItems.map((item) => {
+                  const isCurrentFile = installedFile !== null && item.file === installedFile
+                  return h.a(
+                    [
+                      h.Class(isCurrentFile ? "downloads-link is-current" : "downloads-link"),
+                      h.Href(item.url),
+                      h.Target("_blank"),
+                      h.Rel("noopener noreferrer"),
+                    ],
+                    [
+                      h.span([h.Class("downloads-link-label")], [item.label]),
+                      h.span([h.Class("downloads-link-file")], [item.file]),
+                    ],
+                  )
+                }),
+              ),
+            ],
+          )
+        }),
+      )
+    },
+  })
 
   return h.div(
     [h.Class("settings-dialog-host")],
@@ -6258,79 +6455,23 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.p([h.Class("downloads-subtitle")], [tr.downloads.subtitle]),
                     ],
                   ),
-                  h.div(
-                    [h.Class("downloads-grid")],
-                    groups.map((group) => {
-                      const isCurrentPlatform = currentPlatform === group.platform
-                      const orderedItems =
-                        installedFile === null
-                          ? group.items
-                          : [
-                              ...group.items.filter((i) => i.file === installedFile),
-                              ...group.items.filter((i) => i.file !== installedFile),
-                            ]
-                      return h.section(
+                  downloadsBody,
+                  hasLoadedDownloads
+                    ? h.div(
+                        [h.Class("downloads-footer")],
                         [
-                          h.Class(
-                            isCurrentPlatform ? "downloads-card is-current" : "downloads-card",
-                          ),
-                        ],
-                        [
-                          h.div(
-                            [h.Class("downloads-card-header")],
+                          h.a(
                             [
-                              h.h4([h.Class("downloads-card-title")], [group.platform]),
-                              isCurrentPlatform
-                                ? h.span(
-                                    [h.Class("downloads-current-badge")],
-                                    [
-                                      model.hasTauri
-                                        ? `${tr.downloads.currentPlatform} · v${__APP_VERSION__}`
-                                        : tr.downloads.currentPlatform,
-                                    ],
-                                  )
-                                : h.empty,
+                              h.Class("downloads-releases-link"),
+                              h.Href(GITHUB_RELEASES_URL),
+                              h.Target("_blank"),
+                              h.Rel("noopener noreferrer"),
                             ],
-                          ),
-                          h.div(
-                            [h.Class("downloads-card-links")],
-                            orderedItems.map((item) => {
-                              const isCurrentFile =
-                                installedFile !== null && item.file === installedFile
-                              return h.a(
-                                [
-                                  h.Class(
-                                    isCurrentFile ? "downloads-link is-current" : "downloads-link",
-                                  ),
-                                  h.Href(`${GITHUB_LATEST_DOWNLOAD_BASE}/${item.file}`),
-                                  h.Target("_blank"),
-                                  h.Rel("noopener noreferrer"),
-                                ],
-                                [
-                                  h.span([h.Class("downloads-link-label")], [item.label]),
-                                  h.span([h.Class("downloads-link-file")], [item.file]),
-                                ],
-                              )
-                            }),
+                            [tr.downloads.olderVersions, " ↗"],
                           ),
                         ],
                       )
-                    }),
-                  ),
-                  h.div(
-                    [h.Class("downloads-footer")],
-                    [
-                      h.a(
-                        [
-                          h.Class("downloads-releases-link"),
-                          h.Href(GITHUB_RELEASES_URL),
-                          h.Target("_blank"),
-                          h.Rel("noopener noreferrer"),
-                        ],
-                        [tr.downloads.olderVersions, " ↗"],
-                      ),
-                    ],
-                  ),
+                    : h.empty,
                 ],
               ),
             ],

@@ -98,6 +98,7 @@ const readyModel: Model = {
   showInstallInMenu: true,
   isSettingsDialogOpen: false,
   isDownloadsDialogOpen: false,
+  downloadsReleaseState: { _tag: "Idle" },
   isEditingLlmSettings: false,
   isConfirmingDeleteLlmProvider: false,
   editingLlmProviderId: Option.none(),
