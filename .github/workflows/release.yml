@@ -21,6 +21,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm run test
+
       - name: Compute version and tag
         id: meta
         run: |
@@ -103,6 +115,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Run Rust tests
+        if: matrix.name != 'macos-x64'
+        run: cargo test --manifest-path src-tauri/Cargo.toml
 
       - name: Build Tauri app
         env:
