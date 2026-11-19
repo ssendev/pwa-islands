@@ -241,6 +241,7 @@ function islandsApiPlugin(): Plugin[] {
 }
 
 export default defineConfig({
+  base: process.env.VITE_BASE || "/",
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },
