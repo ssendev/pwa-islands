@@ -277,6 +277,21 @@ const de = {
     editFileTitle: (name: string) => `Datei bearbeiten: ${name}`,
     deleteTemplateTitle: "Vorlage löschen",
     deleteTemplatePrompt: (label: string) => `Vorlage „${label}“ wirklich löschen?`,
+    deleteEntryTitle: "Eintrag löschen",
+    deleteFolderPrompt: (name: string) =>
+      `Möchten Sie den Ordner „${name}“ und dessen gesamten Inhalt wirklich unwiderruflich löschen?`,
+    deleteFilePrompt: (name: string) =>
+      `Möchten Sie die Datei „${name}“ wirklich unwiderruflich löschen?`,
+    overwriteFileTitle: "Datei überschreiben?",
+    overwriteFilePrompt: (name: string) =>
+      `Ein Eintrag mit dem Namen „${name}“ existiert bereits. Möchten Sie ihn überschreiben?`,
+    overwrite: "Überschreiben",
+    versionPreviewAlt: "Vorschau der Version",
+    closeHistory: "Verlauf schließen",
+    loadingHistory: "Verlauf wird geladen...",
+    chatInputPlaceholder: "Nachricht an die KI …",
+    chatInputAria: "Nachricht an die KI",
+    stop: "Stopp",
   },
   help: {
     title: "Hilfe & Dokumentation",
@@ -537,6 +552,21 @@ const en: Translations = {
     editFileTitle: (name: string) => `Edit file: ${name}`,
     deleteTemplateTitle: "Delete template",
     deleteTemplatePrompt: (label: string) => `Really delete template "${label}"?`,
+    deleteEntryTitle: "Delete entry",
+    deleteFolderPrompt: (name: string) =>
+      `Are you sure you want to permanently delete the folder "${name}" and all of its contents?`,
+    deleteFilePrompt: (name: string) =>
+      `Are you sure you want to permanently delete the file "${name}"?`,
+    overwriteFileTitle: "Overwrite file?",
+    overwriteFilePrompt: (name: string) =>
+      `An entry named "${name}" already exists. Do you want to overwrite it?`,
+    overwrite: "Overwrite",
+    versionPreviewAlt: "Version preview",
+    closeHistory: "Close history",
+    loadingHistory: "Loading history...",
+    chatInputPlaceholder: "Message the AI …",
+    chatInputAria: "Message the AI",
+    stop: "Stop",
   },
   help: {
     title: "Help & Documentation",

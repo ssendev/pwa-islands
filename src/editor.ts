@@ -4285,6 +4285,7 @@ const viewLlmChatHistory = (
   userName: string,
   editFormat: EditFormat,
   showTools: boolean,
+  _language: Language,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const systemMessages = Array.filter(llmChatMessages, (msg) => msg._tag === "System")
@@ -4854,8 +4855,10 @@ const viewLlmChatBar = (
   userName: string,
   editFormat: EditFormat,
   showTools: boolean,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
+  const tr = t(language).editor
   const isSending = llmChatState._tag === "Sending"
   const slashCommands = getOpenSlashCommands(llmChatInput, llmChatState, isLlmSlashMenuDismissed)
   const selectedSlashIndex = clampSlashIndex(llmSlashMenuSelectedIndex, slashCommands.length)
@@ -4875,6 +4878,7 @@ const viewLlmChatBar = (
         userName,
         editFormat,
         showTools,
+        language,
         h,
       ),
       h.div(
@@ -4888,8 +4892,8 @@ const viewLlmChatBar = (
                 h.Id("modal-llm-chat-input"),
                 h.Class("form-input modal-llm-chat-input"),
                 h.Rows(1),
-                h.Placeholder("Nachricht an die KI …"),
-                h.AriaLabel("Nachricht an die KI"),
+                h.Placeholder(tr.chatInputPlaceholder),
+                h.AriaLabel(tr.chatInputAria),
                 h.Autocomplete("off"),
                 h.Value(llmChatInput),
                 h.OnInput((value) => Message.UpdatedLlmChatInput({ value })),
@@ -4930,8 +4934,8 @@ const viewLlmChatBar = (
                   h.Type("button"),
                   h.Id("modal-btn-send-llm"),
                   h.Class("btn btn-danger modal-llm-send-btn"),
-                  h.AriaLabel("Stopp"),
-                  h.Title("Stopp"),
+                  h.AriaLabel(tr.stop),
+                  h.Title(tr.stop),
                   h.Disabled(false),
                   h.OnClick(Message.ClickedStopLlmChat()),
                 ],
@@ -4943,8 +4947,8 @@ const viewLlmChatBar = (
                   h.Type("button"),
                   h.Id("modal-btn-send-llm"),
                   h.Class("btn btn-primary modal-llm-send-btn"),
-                  h.AriaLabel("Senden"),
-                  h.Title("Senden"),
+                  h.AriaLabel(tr.sendMessage),
+                  h.Title(tr.sendMessage),
                   h.Disabled(llmChatInput.trim() === ""),
                   h.OnClick(Message.SubmittedLlmChat()),
                 ],
@@ -5244,6 +5248,7 @@ const viewEditorModal = (
                     llmViewInputs.llmEditFormat ?? "hashline",
                     llmViewInputs.llmToolCalls ??
                       !isLanguageModelSelection(llmViewInputs.llmSelectedModel),
+                    language,
                     h,
                   )
                 : h.empty,
@@ -5422,6 +5427,7 @@ export const viewConfirmDeleteDialog = <Msg>(
     confirmButtonId,
     confirmLabel,
     onConfirm,
+    language = "en",
   }: {
     readonly overlayId?: string
     readonly titleId: string
@@ -5432,10 +5438,12 @@ export const viewConfirmDeleteDialog = <Msg>(
     readonly confirmButtonId?: string
     readonly confirmLabel: string
     readonly onConfirm: Msg
+    readonly language?: Language
   },
   h: Html.HtmlBuilder<Msg>,
-): Html.Html =>
-  h.div(
+): Html.Html => {
+  const tr = t(language).common
+  return h.div(
     [
       ...(overlayId ? [h.Id(overlayId)] : []),
       h.Class("modal-overlay"),
@@ -5455,7 +5463,7 @@ export const viewConfirmDeleteDialog = <Msg>(
                 [
                   h.Type("button"),
                   h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
+                  h.AriaLabel(tr.close),
                   h.OnClick(onCancel),
                 ],
                 [viewIcon("close", h)],
@@ -5477,7 +5485,7 @@ export const viewConfirmDeleteDialog = <Msg>(
                       h.Class("btn btn-secondary"),
                       h.OnClick(onCancel),
                     ],
-                    ["Abbrechen"],
+                    [tr.cancel],
                   ),
                   h.button(
                     [
@@ -5496,32 +5504,40 @@ export const viewConfirmDeleteDialog = <Msg>(
       ),
     ],
   )
+}
 
 const viewConfirmDeleteModal = (
   entryName: string,
   entryKind: FileEntryKind,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   const isFolder = entryKind === "directory"
-  const noun = isFolder ? "den Ordner" : "die Datei"
+  const tr = t(language)
   return viewConfirmDeleteDialog(
     {
       titleId: "modal-confirm-delete-title",
-      title: "Eintrag löschen",
+      title: tr.editor.deleteEntryTitle,
       prompt: isFolder
-        ? `Möchten Sie ${noun} „${entryName}“ und dessen gesamten Inhalt wirklich unwiderruflich löschen?`
-        : `Möchten Sie ${noun} „${entryName}“ wirklich unwiderruflich löschen?`,
+        ? tr.editor.deleteFolderPrompt(entryName)
+        : tr.editor.deleteFilePrompt(entryName),
       cancelButtonId: "modal-btn-cancel-delete",
       onCancel: Message.ClickedCancelDelete(),
-      confirmLabel: "Löschen",
+      confirmLabel: tr.common.delete,
       onConfirm: Message.ClickedConfirmDelete(),
+      language,
     },
     h,
   )
 }
 
-const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Message>): Html.Html =>
-  h.div(
+const viewConfirmOverwriteModal = (
+  targetName: string,
+  language: Language,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html => {
+  const tr = t(language)
+  return h.div(
     [
       h.Class("modal-overlay"),
       h.Role("dialog"),
@@ -5535,29 +5551,19 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
           h.header(
             [h.Class("modal-header")],
             [
-              h.h3([h.Id("modal-title"), h.Class("modal-title")], ["Datei überschreiben?"]),
+              h.h3([h.Id("modal-title"), h.Class("modal-title")], [tr.editor.overwriteFileTitle]),
               h.button(
                 [
                   h.Type("button"),
                   h.Class("modal-close-btn"),
-                  h.AriaLabel("Schließen"),
+                  h.AriaLabel(tr.common.close),
                   h.OnClick(Message.ClickedCancelOverwrite()),
                 ],
                 [viewIcon("close", h)],
               ),
             ],
           ),
-          h.div(
-            [h.Class("modal-body")],
-            [
-              h.p(
-                [],
-                [
-                  `Ein Eintrag mit dem Namen „${targetName}“ existiert bereits. Möchten Sie ihn überschreiben?`,
-                ],
-              ),
-            ],
-          ),
+          h.div([h.Class("modal-body")], [h.p([], [tr.editor.overwriteFilePrompt(targetName)])]),
           h.footer(
             [h.Class("modal-footer")],
             [
@@ -5571,7 +5577,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
                       h.Class("btn btn-secondary"),
                       h.OnClick(Message.ClickedCancelOverwrite()),
                     ],
-                    ["Abbrechen"],
+                    [tr.common.cancel],
                   ),
                   h.button(
                     [
@@ -5579,7 +5585,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
                       h.Class("btn btn-danger"),
                       h.OnClick(Message.ClickedConfirmOverwrite()),
                     ],
-                    ["Überschreiben"],
+                    [tr.editor.overwrite],
                   ),
                 ],
               ),
@@ -5589,6 +5595,7 @@ const viewConfirmOverwriteModal = (targetName: string, h: Html.HtmlBuilder<Messa
       ),
     ],
   )
+}
 
 const PREVIEW_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
@@ -6038,7 +6045,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
               },
               h,
             ),
-            isConfirmingDelete ? viewConfirmDeleteModal(originalName, "directory", h) : h.empty,
+            isConfirmingDelete
+              ? viewConfirmDeleteModal(originalName, "directory", language, h)
+              : h.empty,
           ],
         ),
 
@@ -6156,12 +6165,14 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
             historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
               ? viewHistoryPreviewOverlay(historyState.maybePreviewContent.value, h)
               : h.empty,
-            isConfirmingDelete ? viewConfirmDeleteModal(originalName, "file", h) : h.empty,
+            isConfirmingDelete
+              ? viewConfirmDeleteModal(originalName, "file", language, h)
+              : h.empty,
           ],
         )
       },
 
-      ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, h),
+      ConfirmOverwrite: ({ targetName }) => viewConfirmOverwriteModal(targetName, language, h),
     })
   },
 )
