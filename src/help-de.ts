@@ -29,7 +29,8 @@ export const viewHelpDe = (
   context: ViewInputs,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
-  const isQuickstartOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "quickstart")
+  const isAboutOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "about")
+  const isAiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "ai")
   const isApiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "api")
   const isFsOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "fs")
   const isFsaSupported = !context.hasTauri && context.hasDirectoryPicker
@@ -78,9 +79,9 @@ export const viewHelpDe = (
                     [
                       h.Class("help-topic"),
                       h.Name("help-topic"),
-                      h.DataAttribute("topic", "quickstart"),
-                      h.Open(isQuickstartOpen),
-                      h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "quickstart", isOpen })),
+                      h.DataAttribute("topic", "about"),
+                      h.Open(isAboutOpen),
+                      h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "about", isOpen })),
                     ],
                     [
                       h.summary(
@@ -88,9 +89,103 @@ export const viewHelpDe = (
                         [
                           h.span(
                             [h.Class("help-topic-marker"), h.AriaHidden(true)],
-                            [viewIcon("quickstart", h)],
+                            [viewIcon("file-info", h)],
                           ),
-                          h.span([h.Class("help-topic-title")], ["Quickstart: Mit KI bearbeiten"]),
+                          h.span([h.Class("help-topic-title")], ["Über PWA Islands"]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("help-topic-body")],
+                        [
+                          h.p(
+                            [h.Class("help-text")],
+                            [
+                              h.em(
+                                [],
+                                [
+                                  "HTML-Dateien ablegen und in einem sicheren Kontext ausführen — ohne ",
+                                  h.code([], ["file://"]),
+                                  ", ohne Server, ohne Internet.",
+                                ],
+                              ),
+                            ],
+                          ),
+                          h.p(
+                            [h.Class("help-text")],
+                            [
+                              "Mit PWA Islands kannst du einzelne ",
+                              h.code([], [".html"]),
+                              "-Mini-Apps lokal in einem sicheren Kontext speichern, bearbeiten und ausführen. Nutze es direkt im Browser als offline-fähige PWA oder installiere es als native Desktop-/Mobile-App.",
+                            ],
+                          ),
+                          h.h4([h.Class("help-subheading")], ["Funktionen"]),
+                          h.ul(
+                            [h.Class("help-list")],
+                            [
+                              h.li(
+                                [],
+                                [
+                                  h.strong([], ["Offline-first & sicherer Kontext"]),
+                                  " — Lokale ",
+                                  h.code([], [".html"]),
+                                  "-Dateien ohne ",
+                                  h.code([], ["file://"]),
+                                  "-Einschränkungen und ohne Internetverbindung ausführen.",
+                                ],
+                              ),
+                              h.li(
+                                [],
+                                [
+                                  h.strong([], ["PWA & Tauri"]),
+                                  " — Läuft im Browser (File System API / OPFS) und als native App (Linux, Windows, macOS, Android).",
+                                ],
+                              ),
+                              h.li(
+                                [],
+                                [
+                                  h.strong([], ["Integrierter Editor"]),
+                                  " — HTML-Apps direkt im eingebauten Monaco-Editor ansehen und bearbeiten.",
+                                ],
+                              ),
+                              h.li(
+                                [],
+                                [
+                                  h.strong([], ["Islands API"]),
+                                  " — Lese- und Schreibzugriff für Mini-Apps auf Dateien im gewählten Arbeitsordner über ",
+                                  h.code([], ["import islands from '/api.js'"]),
+                                  ".",
+                                ],
+                              ),
+                              h.li(
+                                [],
+                                [
+                                  h.strong([], ["Mehrsprachige Oberfläche"]),
+                                  " — Unterstützt Deutsch und Englisch.",
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  h.details(
+                    [
+                      h.Class("help-topic"),
+                      h.Name("help-topic"),
+                      h.DataAttribute("topic", "ai"),
+                      h.Open(isAiOpen),
+                      h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "ai", isOpen })),
+                    ],
+                    [
+                      h.summary(
+                        [h.Class("help-topic-summary")],
+                        [
+                          h.span(
+                            [h.Class("help-topic-marker"), h.AriaHidden(true)],
+                            [viewIcon("ai", h)],
+                          ),
+                          h.span([h.Class("help-topic-title")], ["Mit KI bearbeiten"]),
                         ],
                       ),
                       h.div(

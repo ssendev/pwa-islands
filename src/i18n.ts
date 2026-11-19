@@ -873,7 +873,8 @@ const de = {
   help: {
     title: "Hilfe & Dokumentation",
     backToHome: "Zurück zur Übersicht",
-    topicQuickstart: "Quickstart: Mit KI bearbeiten",
+    topicAbout: "Über PWA Islands",
+    topicAi: "Mit KI bearbeiten",
     topicApi: "PWA Islands bauen",
     topicFs: "Speicher: App (Tauri), FS API und OPFS",
   },
@@ -1675,7 +1676,8 @@ const en: Translations = {
   help: {
     title: "Help & Documentation",
     backToHome: "Back to overview",
-    topicQuickstart: "Quickstart: Editing with AI",
+    topicAbout: "About PWA Islands",
+    topicAi: "Editing with AI",
     topicApi: "Building PWA Islands",
     topicFs: "Storage: App (Tauri), FS API, and OPFS",
   },

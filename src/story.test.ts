@@ -899,14 +899,14 @@ describe("PWA Islands Story Tests", () => {
         update,
         given(readyModel),
         message(Message.ClickedOpenHelp()),
-        Command.expectExact(PushUrl({ url: "/?pwaislands=help-quickstart" })),
+        Command.expectExact(PushUrl({ url: "/?pwaislands=help-about" })),
         Command.resolve(PushUrl, Message.CompletedPushUrl()),
         message(helpMsg(Help.Message.ClickedCopyDts())),
         model((m) => {
           expect(m.modalState).toEqual(
             ModalState.Help({
               help: {
-                maybeOpenTopic: Option.some("quickstart"),
+                maybeOpenTopic: Option.some("about"),
                 copyDtsState: CopyDtsState.Copying(),
               },
             }),
@@ -918,7 +918,7 @@ describe("PWA Islands Story Tests", () => {
           expect(m.modalState).toEqual(
             ModalState.Help({
               help: {
-                maybeOpenTopic: Option.some("quickstart"),
+                maybeOpenTopic: Option.some("about"),
                 copyDtsState: CopyDtsState.Copied(),
               },
             }),
@@ -930,7 +930,7 @@ describe("PWA Islands Story Tests", () => {
           expect(m.modalState).toEqual(
             ModalState.Help({
               help: {
-                maybeOpenTopic: Option.some("quickstart"),
+                maybeOpenTopic: Option.some("about"),
                 copyDtsState: CopyDtsState.Idle(),
               },
             }),

@@ -24,11 +24,11 @@ Mini-apps can import the public API from `/api.js` (typed in [src/api-types.ts](
 
 ```html
 <script type="module">
-  import islands from '/api.js'
+  import islands from "/api.js"
 
   const entries = await islands.list()
-  await islands.write('notes/hello.txt', 'Hello from an island!', { overwrite: true })
-  const text = await islands.read('notes/hello.txt')
+  await islands.write("notes/hello.txt", "Hello from an island!", { overwrite: true })
+  const text = await islands.read("notes/hello.txt")
 </script>
 ```
 

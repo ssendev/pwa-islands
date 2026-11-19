@@ -4879,7 +4879,7 @@ export const update = (
     ClickedOpenHelp: () => {
       const subPath = currentSubPathFromStorageState(model.storageState)
       const isFolderViewVisible = isReadyStorage(model.storageState)
-      const activeTopic = isFolderViewVisible ? ("quickstart" as const) : ("fs" as const)
+      const activeTopic = isFolderViewVisible ? ("about" as const) : ("fs" as const)
       return {
         model: modifyFields(model, {
           isSettingsOpen: () => false,

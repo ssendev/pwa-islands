@@ -206,8 +206,11 @@ export const cancelOverwrite = (state: ModalState): ModalState =>
 
 const getHelpTopicTitle = (topic: HelpTopic, language: Language): string => {
   const h = t(language).help
-  if (topic === "quickstart") {
-    return h.topicQuickstart
+  if (topic === "about") {
+    return h.topicAbout
+  }
+  if (topic === "ai") {
+    return h.topicAi
   }
   if (topic === "api") {
     return h.topicApi
@@ -422,7 +425,7 @@ export const openHelp = (
   const topicToUse = Option.match(maybeTopic, {
     onNone: () =>
       Option.match(maybeExistingHelp, {
-        onNone: () => Option.some<HelpTopic>("quickstart"),
+        onNone: () => Option.some<HelpTopic>("about"),
         onSome: (existing) => existing.maybeOpenTopic,
       }),
     onSome: (topic) => Option.some(topic),
