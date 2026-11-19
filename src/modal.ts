@@ -443,6 +443,7 @@ export const initFromRoute = (route: AppRoute): Option.Option<ModalState> =>
   AppRoute.match(route, {
     Folder: () => Option.none(),
     Settings: () => Option.none(),
+    Downloads: () => Option.none(),
     New: () => Option.none(), // Wait for resolveModalForRoute!
     Edit: () => Option.none(),
     History: () => Option.none(),
@@ -477,6 +478,17 @@ export const resolveModalForRoute = async (
       }),
 
     Settings: ({ subPath }) =>
+      Promise.resolve({
+        maybeModalState: Option.none(),
+        maybeAlertBanner: didFallback
+          ? Option.some<AlertBanner>({
+              message: t(getDocumentLanguage()).errors.pathNotFound(`/${subPath.join("/")}`),
+              variant: "warning",
+            })
+          : Option.none(),
+      }),
+
+    Downloads: ({ subPath }) =>
       Promise.resolve({
         maybeModalState: Option.none(),
         maybeAlertBanner: didFallback

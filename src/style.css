@@ -3534,13 +3534,13 @@ code {
 
 /* Downloads Dialog */
 .downloads-dialog {
-  max-width: 640px;
+  max-width: 560px;
 }
 
 .downloads-dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .downloads-subtitle {
@@ -3551,40 +3551,38 @@ code {
 }
 
 .downloads-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .downloads-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-subtle, var(--code-bg));
+  gap: 6px;
 }
 
 .downloads-card-title {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
   color: var(--text);
 }
 
 .downloads-card-links {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .downloads-link {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
+  gap: 1px;
+  padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg);

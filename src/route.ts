@@ -35,6 +35,9 @@ export const AppRoute = defineRouteUnion({
   Settings: {
     subPath: Schema.Array(Schema.String),
   },
+  Downloads: {
+    subPath: Schema.Array(Schema.String),
+  },
 })
 export type AppRoute = typeof AppRoute.Type
 
@@ -92,6 +95,12 @@ export const buildSettingsUrl = (subPath: ReadonlyArray<string>): string => {
   const encoded = encodeSubPath(subPath)
   const pathPart = encoded !== "" ? `/${encoded}` : "/"
   return `${pathPart}?pwaislands=settings`
+}
+
+export const buildDownloadsUrl = (subPath: ReadonlyArray<string>): string => {
+  const encoded = encodeSubPath(subPath)
+  const pathPart = encoded !== "" ? `/${encoded}` : "/"
+  return `${pathPart}?pwaislands=downloads`
 }
 
 export const parseHelpParam = (
@@ -193,6 +202,10 @@ export const parsePathAndSearchToRoute = (pathname: string, search: string): App
     return AppRoute.Settings({ subPath: segments })
   }
 
+  if (isDownloadsActionParam(maybePwaislandsParam)) {
+    return AppRoute.Downloads({ subPath: segments })
+  }
+
   const maybeNew = parseNewActionParam(maybePwaislandsParam)
   if (Option.isSome(maybeNew)) {
     return AppRoute.New({
@@ -249,3 +262,6 @@ export const isHistoryActionParam = (maybeRaw: Option.Option<string>): boolean =
 
 export const isSettingsActionParam = (maybeRaw: Option.Option<string>): boolean =>
   Option.exists(maybeRaw, (raw) => raw === "settings")
+
+export const isDownloadsActionParam = (maybeRaw: Option.Option<string>): boolean =>
+  Option.exists(maybeRaw, (raw) => raw === "downloads")

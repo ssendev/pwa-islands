@@ -69,6 +69,7 @@ import {
   buildHelpUrl,
   buildNewUrl,
   buildSettingsUrl,
+  buildDownloadsUrl,
   decodeUrlPathnameSegments,
   encodeSubPath,
   parseIslandPath,
@@ -838,6 +839,7 @@ const resolveRouteDeepLink = async (
   const targetSubPath = AppRoute.match(route, {
     Help: ({ subPath }) => subPath,
     Settings: ({ subPath }) => subPath,
+    Downloads: ({ subPath }) => subPath,
     Folder: ({ subPath }) => subPath,
     New: ({ subPath }) => subPath,
     Edit: ({ subPath }) => subPath,
@@ -2238,6 +2240,7 @@ export const init = (
   const isSupported = flags.hasTauri || flags.hasDirectoryPicker || flags.hasOPFS
   const initialRoute = parseUrlToRoute(url)
   const isInitialSettingsOpen = initialRoute._tag === "Settings"
+  const isInitialDownloadsOpen = initialRoute._tag === "Downloads"
   const maybeInitialModal: Option.Option<Modal.ModalState> = Modal.initFromRoute(initialRoute)
 
   if (!isSupported) {
@@ -2259,7 +2262,7 @@ export const init = (
         showDownloadsInMenu: true,
         showInstallInMenu: true,
         isSettingsDialogOpen: isInitialSettingsOpen,
-        isDownloadsDialogOpen: false,
+        isDownloadsDialogOpen: isInitialDownloadsOpen,
         isEditingLlmSettings: false,
         isConfirmingDeleteLlmProvider: false,
         editingLlmProviderId: Option.none(),
@@ -2350,7 +2353,7 @@ export const init = (
       showDownloadsInMenu: true,
       showInstallInMenu: true,
       isSettingsDialogOpen: isInitialSettingsOpen,
-      isDownloadsDialogOpen: false,
+      isDownloadsDialogOpen: isInitialDownloadsOpen,
       isEditingLlmSettings: false,
       isConfirmingDeleteLlmProvider: false,
       editingLlmProviderId: Option.none(),
@@ -3440,12 +3443,14 @@ export const update = (
               if (isSamePath) {
                 return {
                   model: modifyFields(openedSettingsModel, {
+                    isDownloadsDialogOpen: () => false,
                     modalState: Modal.close,
                   }),
                 }
               }
               return {
                 model: modifyFields(openedSettingsModel, {
+                  isDownloadsDialogOpen: () => false,
                   modalState: Modal.close,
                   storageState: () =>
                     modifyFields(readyState, {
@@ -3457,6 +3462,43 @@ export const update = (
             }),
             Match.orElse(() => ({
               model: modifyFields(openedSettingsModel, {
+                isDownloadsDialogOpen: () => false,
+                modalState: Modal.close,
+              }),
+            })),
+          )
+        },
+
+        Downloads: ({ subPath }) => {
+          const openedDownloadsModel = modifyFields(modelWithRoute, {
+            isSettingsOpen: () => false,
+            isSettingsDialogOpen: () => false,
+            isDownloadsDialogOpen: () => true,
+          })
+
+          return Match.value(openedDownloadsModel.storageState).pipe(
+            Match.tag("Ready", (readyState) => {
+              const isSamePath = isSameSubPath(readyState.subPath, subPath)
+              if (isSamePath) {
+                return {
+                  model: modifyFields(openedDownloadsModel, {
+                    modalState: Modal.close,
+                  }),
+                }
+              }
+              return {
+                model: modifyFields(openedDownloadsModel, {
+                  modalState: Modal.close,
+                  storageState: () =>
+                    modifyFields(readyState, {
+                      entriesState: () => EntriesState.Loading(),
+                    }),
+                }),
+                commands: [NavigateToSubfolder({ targetSubPath: subPath })],
+              }
+            }),
+            Match.orElse(() => ({
+              model: modifyFields(openedDownloadsModel, {
                 modalState: Modal.close,
               }),
             })),
@@ -3523,19 +3565,28 @@ export const update = (
       }
     },
 
-    ClickedOpenDownloadsDialog: () => ({
-      model: modifyFields(model, {
-        isSettingsOpen: () => false,
-        isSettingsDialogOpen: () => false,
-        isDownloadsDialogOpen: () => true,
-      }),
-    }),
+    ClickedOpenDownloadsDialog: () => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      return {
+        model: modifyFields(model, {
+          isSettingsOpen: () => false,
+          isSettingsDialogOpen: () => false,
+          isDownloadsDialogOpen: () => true,
+        }),
+        commands: [PushUrl({ url: buildDownloadsUrl(subPath) })],
+      }
+    },
 
-    ClickedCloseDownloadsDialog: () => ({
-      model: modifyFields(model, {
-        isDownloadsDialogOpen: () => false,
-      }),
-    }),
+    ClickedCloseDownloadsDialog: () => {
+      const subPath = currentSubPathFromStorageState(model.storageState)
+      const isModalOpen = model.modalState._tag !== "Closed"
+      return {
+        model: modifyFields(model, {
+          isDownloadsDialogOpen: () => false,
+        }),
+        ...(isModalOpen ? {} : { commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })] }),
+      }
+    },
 
     ToggledShowDownloadsInMenu: ({ isEnabled }) => ({
       model: modifyFields(model, {
@@ -4771,10 +4822,14 @@ export const update = (
         }
       }
       if (model.isDownloadsDialogOpen) {
+        const subPath = currentSubPathFromStorageState(model.storageState)
         return {
           model: modifyFields(model, {
             isDownloadsDialogOpen: () => false,
           }),
+          ...(Modal.isOpen(model.modalState)
+            ? {}
+            : { commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })] }),
         }
       }
       if (model.isSettingsDialogOpen) {
@@ -6253,80 +6308,6 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 [h.Class("modal-body settings-groups")],
                 [
                   h.section(
-                    [h.Class("settings-group"), h.Id("settings-group-app-downloads")],
-                    [
-                      h.h4([h.Class("settings-group-title")], [tr.downloads.settingsTitle]),
-                      h.div(
-                        [h.Class("form-group")],
-                        [
-                          h.label(
-                            [h.Class("form-check")],
-                            [
-                              h.input([
-                                h.Type("checkbox"),
-                                h.Id("settings-show-downloads-in-menu"),
-                                h.Checked(model.showDownloadsInMenu),
-                                h.OnChange(() =>
-                                  Message.ToggledShowDownloadsInMenu({
-                                    isEnabled: !model.showDownloadsInMenu,
-                                  }),
-                                ),
-                              ]),
-                              h.span([], [tr.downloads.showDownloadsInMenu]),
-                            ],
-                          ),
-                        ],
-                      ),
-                      h.div(
-                        [h.Class("form-group")],
-                        [
-                          h.label(
-                            [h.Class("form-check")],
-                            [
-                              h.input([
-                                h.Type("checkbox"),
-                                h.Id("settings-show-install-in-menu"),
-                                h.Checked(model.showInstallInMenu),
-                                h.OnChange(() =>
-                                  Message.ToggledShowInstallInMenu({
-                                    isEnabled: !model.showInstallInMenu,
-                                  }),
-                                ),
-                              ]),
-                              h.span([], [tr.downloads.showInstallInMenu]),
-                            ],
-                          ),
-                        ],
-                      ),
-                      h.div(
-                        [h.Class("settings-actions")],
-                        [
-                          h.button(
-                            [
-                              h.Type("button"),
-                              h.Id("btn-settings-open-downloads"),
-                              h.Class("btn btn-secondary"),
-                              h.OnClick(Message.ClickedOpenDownloadsDialog()),
-                            ],
-                            [viewIcon("install", h), ` ${tr.downloads.openDownloads}`],
-                          ),
-                          isInstallAvailable
-                            ? h.button(
-                                [
-                                  h.Type("button"),
-                                  h.Id("btn-settings-install-app"),
-                                  h.Class("btn btn-secondary"),
-                                  h.Title(tr.settings.installAppTitle),
-                                  h.OnClick(Message.ClickedInstallApp()),
-                                ],
-                                [viewIcon("install", h), ` ${tr.settings.installApp}`],
-                              )
-                            : h.empty,
-                        ],
-                      ),
-                    ],
-                  ),
-                  h.section(
                     [h.Class("settings-group"), h.Id("settings-group-language")],
                     [
                       h.h4([h.Class("settings-group-title")], [tr.settings.language]),
@@ -6902,6 +6883,80 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               ),
                             ],
                           ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  h.section(
+                    [h.Class("settings-group"), h.Id("settings-group-app-downloads")],
+                    [
+                      h.h4([h.Class("settings-group-title")], [tr.downloads.settingsTitle]),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-show-downloads-in-menu"),
+                                h.Checked(model.showDownloadsInMenu),
+                                h.OnChange(() =>
+                                  Message.ToggledShowDownloadsInMenu({
+                                    isEnabled: !model.showDownloadsInMenu,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], [tr.downloads.showDownloadsInMenu]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-show-install-in-menu"),
+                                h.Checked(model.showInstallInMenu),
+                                h.OnChange(() =>
+                                  Message.ToggledShowInstallInMenu({
+                                    isEnabled: !model.showInstallInMenu,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], [tr.downloads.showInstallInMenu]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("settings-actions")],
+                        [
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-settings-open-downloads"),
+                              h.Class("btn btn-secondary"),
+                              h.OnClick(Message.ClickedOpenDownloadsDialog()),
+                            ],
+                            [viewIcon("install", h), ` ${tr.downloads.openDownloads}`],
+                          ),
+                          isInstallAvailable
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-settings-install-app"),
+                                  h.Class("btn btn-secondary"),
+                                  h.Title(tr.settings.installAppTitle),
+                                  h.OnClick(Message.ClickedInstallApp()),
+                                ],
+                                [viewIcon("install", h), ` ${tr.settings.installApp}`],
+                              )
+                            : h.empty,
                         ],
                       ),
                     ],

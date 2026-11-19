@@ -879,8 +879,8 @@ const de = {
   },
   downloads: {
     title: "App herunterladen",
-    subtitle: "Neueste native Versionen direkt von GitHub Releases.",
-    olderVersions: "Ältere Versionen & Release Notes auf GitHub",
+    subtitle: "Native Apps — keine PWA, sondern 100 % offline nutzbar.",
+    olderVersions: "Ältere Versionen",
     androidApk: "Universal APK",
     windowsSetup: "Setup (x64)",
     windowsMsi: "MSI-Installer (x64)",
@@ -1678,8 +1678,8 @@ const en: Translations = {
   },
   downloads: {
     title: "Download App",
-    subtitle: "Latest native builds directly from GitHub Releases.",
-    olderVersions: "Older versions & release notes on GitHub",
+    subtitle: "Native apps — not a PWA, 100% offline.",
+    olderVersions: "Older versions",
     androidApk: "Universal APK",
     windowsSetup: "Setup (x64)",
     windowsMsi: "MSI Installer (x64)",
