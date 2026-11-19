@@ -9,7 +9,6 @@
     "tauri:build": "node scripts/tauri.mjs build",
     "dev": "vite",
     "build": "vite build",
-    "build:downloads": "node scripts/prepare-downloads.mjs",
     "build:android": "scripts/build-android.sh",
     "build:windows": "node scripts/tauri.mjs build --runner cargo-xwin --target x86_64-pc-windows-msvc",
     "preview": "vite preview",

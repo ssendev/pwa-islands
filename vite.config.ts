@@ -9,7 +9,6 @@ import { fileURLToPath } from "node:url"
 
 import { maskableIcon } from "./tools/maskable-icon.ts"
 import { notoEmoji } from "./tools/noto-emoji.ts"
-import { downloadsPlugin } from "./tools/downloads-page.ts"
 
 const root = fileURLToPath(new URL(".", import.meta.url))
 const apiTypesEntry = join(root, "src", "api-types.ts")
@@ -263,7 +262,6 @@ export default defineConfig({
   plugins: [
     foldkit(),
     ...islandsApiPlugin(),
-    downloadsPlugin(),
     maskableIcon(),
     notoEmoji(),
     VitePWA({

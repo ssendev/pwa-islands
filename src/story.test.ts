@@ -108,6 +108,7 @@ const readyModel: Model = {
   showFileInfo: true,
   isSettingsOpen: false,
   isSettingsDialogOpen: false,
+  isDownloadsDialogOpen: false,
   isEditingLlmSettings: false,
   isConfirmingDeleteLlmProvider: false,
   editingLlmProviderId: Option.none(),

@@ -375,6 +375,7 @@ export const Model = Schema.Struct({
   showFileInfo: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
+  isDownloadsDialogOpen: Schema.Boolean,
   isEditingLlmSettings: Schema.Boolean,
   isConfirmingDeleteLlmProvider: Schema.Boolean,
   editingLlmProviderId: Schema.Option(Schema.String),
@@ -586,6 +587,8 @@ export const Message = defineMessageUnion({
   ClickedOutsideLlmModeMenu: {},
   ClickedOpenSettingsDialog: {},
   ClickedCloseSettingsDialog: {},
+  ClickedOpenDownloadsDialog: {},
+  ClickedCloseDownloadsDialog: {},
   ClickedSaveSettingsDialog: {},
   ClickedEditLlmSettings: {},
   ClickedRequestClearAllHistory: {},
@@ -2207,6 +2210,7 @@ export const init = (
         showFileInfo: true,
         isSettingsOpen: false,
         isSettingsDialogOpen: isInitialSettingsOpen,
+        isDownloadsDialogOpen: false,
         isEditingLlmSettings: false,
         isConfirmingDeleteLlmProvider: false,
         editingLlmProviderId: Option.none(),
@@ -2295,6 +2299,7 @@ export const init = (
       showFileInfo: true,
       isSettingsOpen: false,
       isSettingsDialogOpen: isInitialSettingsOpen,
+      isDownloadsDialogOpen: false,
       isEditingLlmSettings: false,
       isConfirmingDeleteLlmProvider: false,
       editingLlmProviderId: Option.none(),
@@ -3466,6 +3471,19 @@ export const update = (
         ...(isModalOpen ? {} : { commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })] }),
       }
     },
+
+    ClickedOpenDownloadsDialog: () => ({
+      model: modifyFields(model, {
+        isSettingsOpen: () => false,
+        isDownloadsDialogOpen: () => true,
+      }),
+    }),
+
+    ClickedCloseDownloadsDialog: () => ({
+      model: modifyFields(model, {
+        isDownloadsDialogOpen: () => false,
+      }),
+    }),
 
     ClickedRequestClearAllHistory: () => ({
       model: modifyFields(model, {
@@ -4678,6 +4696,13 @@ export const update = (
           commands: [ReplaceUrl({ url: targetUrl }), RefreshEntries({ subPath: folderSubPath })],
         }
       }
+      if (model.isDownloadsDialogOpen) {
+        return {
+          model: modifyFields(model, {
+            isDownloadsDialogOpen: () => false,
+          }),
+        }
+      }
       if (model.isSettingsDialogOpen) {
         if (model.clearAllHistoryState._tag === "Confirming") {
           return {
@@ -5147,6 +5172,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           model.isWindowFullscreen ||
           model.isSettingsOpen ||
           model.isSettingsDialogOpen ||
+          model.isDownloadsDialogOpen ||
           Modal.isOpen(model.modalState) ||
           Option.isSome(model.maybeActiveIslandUrl),
       }),
@@ -5935,6 +5961,16 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
             ],
             [viewIcon("settings", h), ` ${tr.settings.title}`],
           ),
+          h.button(
+            [
+              h.Type("button"),
+              h.Id("btn-open-downloads"),
+              h.Class("settings-menu-item"),
+              h.Role("menuitem"),
+              h.OnClick(Message.ClickedOpenDownloadsDialog()),
+            ],
+            [viewIcon("install", h), ` ${tr.nav.downloads}`],
+          ),
           isInstallAvailable
             ? h.button(
                 [
@@ -5948,6 +5984,131 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                 [viewIcon("install", h), ` ${tr.settings.installApp}`],
               )
             : h.empty,
+        ],
+      ),
+    ],
+  )
+}
+
+const GITHUB_RELEASES_URL = "https://github.com/ssendev/pwa-islands/releases"
+const GITHUB_LATEST_DOWNLOAD_BASE = `${GITHUB_RELEASES_URL}/latest/download`
+
+const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
+  if (!model.isDownloadsDialogOpen) {
+    return h.empty
+  }
+  const tr = t(model.language)
+
+  const groups: ReadonlyArray<{
+    readonly platform: string
+    readonly items: ReadonlyArray<{ readonly label: string; readonly file: string }>
+  }> = [
+    {
+      platform: "Android",
+      items: [{ label: tr.downloads.androidApk, file: "pwa-islands.universal.apk" }],
+    },
+    {
+      platform: "Windows",
+      items: [
+        { label: tr.downloads.windowsSetup, file: "pwa-islands.x64.exe" },
+        { label: tr.downloads.windowsMsi, file: "pwa-islands.x64.msi" },
+      ],
+    },
+    {
+      platform: "Linux",
+      items: [
+        { label: tr.downloads.linuxAppImage, file: "pwa-islands.x64.AppImage" },
+        { label: tr.downloads.linuxDeb, file: "pwa-islands.x64.deb" },
+        { label: tr.downloads.linuxRpm, file: "pwa-islands.x64.rpm" },
+      ],
+    },
+    {
+      platform: "macOS",
+      items: [
+        { label: tr.downloads.macosArm64, file: "pwa-islands.arm64.dmg" },
+        { label: tr.downloads.macosX64, file: "pwa-islands.x64.dmg" },
+      ],
+    },
+  ]
+
+  return h.div(
+    [h.Class("settings-dialog-host")],
+    [
+      h.div(
+        [
+          h.Id("downloads-dialog"),
+          h.Class("modal-overlay"),
+          h.Role("dialog"),
+          h.AriaModal(true),
+          h.AriaLabelledBy("downloads-dialog-title"),
+        ],
+        [
+          h.div(
+            [h.Class("modal-content settings-dialog")],
+            [
+              h.header(
+                [h.Class("modal-header")],
+                [
+                  h.h3(
+                    [h.Id("downloads-dialog-title"), h.Class("modal-title")],
+                    [tr.downloads.title],
+                  ),
+                  h.button(
+                    [
+                      h.Type("button"),
+                      h.Id("btn-close-downloads"),
+                      h.Class("modal-close-btn"),
+                      h.AriaLabel(tr.common.close),
+                      h.OnClick(Message.ClickedCloseDownloadsDialog()),
+                    ],
+                    [viewIcon("close", h)],
+                  ),
+                ],
+              ),
+              h.div(
+                [h.Class("modal-body settings-groups")],
+                [
+                  h.p([h.Class("settings-description")], [tr.downloads.subtitle]),
+                  ...groups.map((group) =>
+                    h.section(
+                      [h.Class("settings-group")],
+                      [
+                        h.h4([h.Class("settings-group-title")], [group.platform]),
+                        h.div(
+                          [h.Class("settings-actions")],
+                          group.items.map((item) =>
+                            h.a(
+                              [
+                                h.Class("btn btn-secondary"),
+                                h.Href(`${GITHUB_LATEST_DOWNLOAD_BASE}/${item.file}`),
+                                h.Target("_blank"),
+                                h.Rel("noopener noreferrer"),
+                              ],
+                              [item.label],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  h.section(
+                    [h.Class("settings-group")],
+                    [
+                      h.a(
+                        [
+                          h.Class("btn btn-secondary"),
+                          h.Href(GITHUB_RELEASES_URL),
+                          h.Target("_blank"),
+                          h.Rel("noopener noreferrer"),
+                        ],
+                        [tr.downloads.olderVersions],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
         ],
       ),
     ],
@@ -7981,6 +8142,7 @@ const viewManagerMain = (model: Model, title: string, h: HtmlBuilder): Html.Html
           viewContentSection(model, h),
           viewModalContainer(model, h),
           viewSettingsDialog(model, h),
+          viewDownloadsDialog(model, h),
         ],
       ),
     ],
