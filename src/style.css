@@ -3531,3 +3531,101 @@ code {
 .editor-history-restore-btn {
   flex-shrink: 0;
 }
+
+/* Downloads Dialog */
+.downloads-dialog {
+  max-width: 640px;
+}
+
+.downloads-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.downloads-subtitle {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted, var(--text));
+  opacity: 0.85;
+}
+
+.downloads-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.downloads-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-subtle, var(--code-bg));
+}
+
+.downloads-card-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.downloads-card-links {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.downloads-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  text-decoration: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    transform 0.1s ease;
+}
+
+.downloads-link:hover {
+  border-color: var(--accent, #2e69c9);
+  background: var(--bg-hover, var(--code-bg));
+  transform: translateY(-1px);
+}
+
+.downloads-link-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.downloads-link-file {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  opacity: 0.7;
+}
+
+.downloads-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.downloads-releases-link {
+  font-size: 13px;
+  color: var(--accent, #2e69c9);
+  text-decoration: none;
+}
+
+.downloads-releases-link:hover {
+  text-decoration: underline;
+}

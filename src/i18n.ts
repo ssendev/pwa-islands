@@ -889,6 +889,10 @@ const de = {
     linuxRpm: "Fedora / RHEL (.rpm)",
     macosArm64: "Apple Silicon (arm64)",
     macosX64: "Intel (x64)",
+    settingsTitle: "App & Downloads",
+    showDownloadsInMenu: "Downloads im Menü anzeigen",
+    showInstallInMenu: "App installieren im Menü anzeigen",
+    openDownloads: "Downloads öffnen",
   },
   modals: {
     confirmTitle: "Bestätigung",
@@ -1684,6 +1688,10 @@ const en: Translations = {
     linuxRpm: "Fedora / RHEL (.rpm)",
     macosArm64: "Apple Silicon (arm64)",
     macosX64: "Intel (x64)",
+    settingsTitle: "App & Downloads",
+    showDownloadsInMenu: "Show Downloads in menu",
+    showInstallInMenu: "Show Install App in menu",
+    openDownloads: "Open Downloads",
   },
   modals: {
     confirmTitle: "Confirmation",

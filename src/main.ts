@@ -142,6 +142,8 @@ import {
   getStoredDateFormat,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
+  getStoredShowDownloadsInMenu,
+  getStoredShowInstallInMenu,
   getStoredLanguage,
   getStoredLlmChatNames,
   getStoredLlmSettings,
@@ -152,6 +154,8 @@ import {
   storeDateFormat,
   storeEditorPreferences,
   storeHistoryEnabled,
+  storeShowDownloadsInMenu,
+  storeShowInstallInMenu,
   storeLanguage,
   storeLlmChatNames,
   storeLlmSettings,
@@ -373,6 +377,8 @@ export const Model = Schema.Struct({
   origin: Schema.String,
   storageState: StorageState,
   showFileInfo: Schema.Boolean,
+  showDownloadsInMenu: Schema.Boolean,
+  showInstallInMenu: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
   isDownloadsDialogOpen: Schema.Boolean,
@@ -600,6 +606,10 @@ export const Message = defineMessageUnion({
   CompletedSaveHistoryEnabledPreference: {},
   ToggledSettingsApiHistoryEnabled: { isEnabled: Schema.Boolean },
   CompletedSaveApiHistoryEnabledPreference: {},
+  ToggledShowDownloadsInMenu: { isEnabled: Schema.Boolean },
+  CompletedSaveShowDownloadsInMenu: {},
+  ToggledShowInstallInMenu: { isEnabled: Schema.Boolean },
+  CompletedSaveShowInstallInMenu: {},
   ToggledSettingsEditorLineNumbers: { isEnabled: Schema.Boolean },
   ToggledSettingsEditorFolding: { isEnabled: Schema.Boolean },
   ToggledSettingsEditorWordWrap: { isEnabled: Schema.Boolean },
@@ -681,6 +691,8 @@ export const Message = defineMessageUnion({
     editorSplitPercent: Schema.Number,
     historyEnabled: Schema.optionalKey(Schema.Boolean),
     apiHistoryEnabled: Schema.optionalKey(Schema.Boolean),
+    showDownloadsInMenu: Schema.optionalKey(Schema.Boolean),
+    showInstallInMenu: Schema.optionalKey(Schema.Boolean),
     monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
     appTheme: Schema.optionalKey(AppThemeSchema),
     language: Schema.optionalKey(LanguageSchema),
@@ -922,6 +934,35 @@ export const SaveApiHistoryEnabledPreference = Command.define("SaveApiHistoryEna
     }).pipe(
       Effect.map(() => Message.CompletedSaveApiHistoryEnabledPreference()),
       Effect.catch(() => Effect.succeed(Message.CompletedSaveApiHistoryEnabledPreference())),
+    ),
+})
+
+export const SaveShowDownloadsInMenuPreference = Command.define(
+  "SaveShowDownloadsInMenuPreference",
+  {
+    args: { isEnabled: Schema.Boolean },
+    messages: [Message.CompletedSaveShowDownloadsInMenu],
+    execute: (args) =>
+      Effect.tryPromise({
+        try: () => storeShowDownloadsInMenu(args.isEnabled),
+        catch: () => undefined,
+      }).pipe(
+        Effect.map(() => Message.CompletedSaveShowDownloadsInMenu()),
+        Effect.catch(() => Effect.succeed(Message.CompletedSaveShowDownloadsInMenu())),
+      ),
+  },
+)
+
+export const SaveShowInstallInMenuPreference = Command.define("SaveShowInstallInMenuPreference", {
+  args: { isEnabled: Schema.Boolean },
+  messages: [Message.CompletedSaveShowInstallInMenu],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () => storeShowInstallInMenu(args.isEnabled),
+      catch: () => undefined,
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveShowInstallInMenu()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveShowInstallInMenu())),
     ),
 })
 
@@ -1204,6 +1245,8 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredEditorPreferences(),
       getStoredHistoryEnabled(),
       getStoredApiHistoryEnabled(),
+      getStoredShowDownloadsInMenu(),
+      getStoredShowInstallInMenu(),
       getStoredMonacoSettings(),
       getStoredAppTheme(),
       getStoredLanguage(),
@@ -1217,6 +1260,8 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         prefs,
         historyEnabled,
         apiHistoryEnabled,
+        showDownloadsInMenu,
+        showInstallInMenu,
         monacoSettings,
         appTheme,
         maybeLanguage,
@@ -1231,6 +1276,8 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
           editorSplitPercent: prefs.editorSplitPercent,
           historyEnabled,
           apiHistoryEnabled,
+          showDownloadsInMenu,
+          showInstallInMenu,
           monacoSettings,
           appTheme,
           ...(Option.isSome(maybeLanguage) ? { language: maybeLanguage.value } : {}),
@@ -2209,6 +2256,8 @@ export const init = (
         storageState: StorageState.Unsupported(),
         showFileInfo: true,
         isSettingsOpen: false,
+        showDownloadsInMenu: true,
+        showInstallInMenu: true,
         isSettingsDialogOpen: isInitialSettingsOpen,
         isDownloadsDialogOpen: false,
         isEditingLlmSettings: false,
@@ -2298,6 +2347,8 @@ export const init = (
       storageState: StorageState.Initializing(),
       showFileInfo: true,
       isSettingsOpen: false,
+      showDownloadsInMenu: true,
+      showInstallInMenu: true,
       isSettingsDialogOpen: isInitialSettingsOpen,
       isDownloadsDialogOpen: false,
       isEditingLlmSettings: false,
@@ -3475,6 +3526,7 @@ export const update = (
     ClickedOpenDownloadsDialog: () => ({
       model: modifyFields(model, {
         isSettingsOpen: () => false,
+        isSettingsDialogOpen: () => false,
         isDownloadsDialogOpen: () => true,
       }),
     }),
@@ -3484,6 +3536,24 @@ export const update = (
         isDownloadsDialogOpen: () => false,
       }),
     }),
+
+    ToggledShowDownloadsInMenu: ({ isEnabled }) => ({
+      model: modifyFields(model, {
+        showDownloadsInMenu: () => isEnabled,
+      }),
+      commands: [SaveShowDownloadsInMenuPreference({ isEnabled })],
+    }),
+
+    CompletedSaveShowDownloadsInMenu: () => ({ model }),
+
+    ToggledShowInstallInMenu: ({ isEnabled }) => ({
+      model: modifyFields(model, {
+        showInstallInMenu: () => isEnabled,
+      }),
+      commands: [SaveShowInstallInMenuPreference({ isEnabled })],
+    }),
+
+    CompletedSaveShowInstallInMenu: () => ({ model }),
 
     ClickedRequestClearAllHistory: () => ({
       model: modifyFields(model, {
@@ -4310,6 +4380,8 @@ export const update = (
       editorSplitPercent,
       historyEnabled,
       apiHistoryEnabled,
+      showDownloadsInMenu,
+      showInstallInMenu,
       monacoSettings,
       appTheme,
       language,
@@ -4329,6 +4401,8 @@ export const update = (
           editorSplitPercent: () => editorSplitPercent,
           historyEnabled: () => historyEnabled ?? model.historyEnabled,
           apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
+          showDownloadsInMenu: () => showDownloadsInMenu ?? model.showDownloadsInMenu,
+          showInstallInMenu: () => showInstallInMenu ?? model.showInstallInMenu,
           appTheme: () => nextAppTheme,
           language: () => nextLanguage,
           dateFormat: () => dateFormat ?? model.dateFormat,
@@ -5961,17 +6035,19 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
             ],
             [viewIcon("settings", h), ` ${tr.settings.title}`],
           ),
-          h.button(
-            [
-              h.Type("button"),
-              h.Id("btn-open-downloads"),
-              h.Class("settings-menu-item"),
-              h.Role("menuitem"),
-              h.OnClick(Message.ClickedOpenDownloadsDialog()),
-            ],
-            [viewIcon("install", h), ` ${tr.nav.downloads}`],
-          ),
-          isInstallAvailable
+          model.showDownloadsInMenu
+            ? h.button(
+                [
+                  h.Type("button"),
+                  h.Id("btn-open-downloads"),
+                  h.Class("settings-menu-item"),
+                  h.Role("menuitem"),
+                  h.OnClick(Message.ClickedOpenDownloadsDialog()),
+                ],
+                [viewIcon("install", h), ` ${tr.nav.downloads}`],
+              )
+            : h.empty,
+          isInstallAvailable && model.showInstallInMenu
             ? h.button(
                 [
                   h.Type("button"),
@@ -6044,7 +6120,7 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
         ],
         [
           h.div(
-            [h.Class("modal-content settings-dialog")],
+            [h.Class("modal-content settings-dialog downloads-dialog")],
             [
               h.header(
                 [h.Class("modal-header")],
@@ -6066,42 +6142,48 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 ],
               ),
               h.div(
-                [h.Class("modal-body settings-groups")],
+                [h.Class("modal-body downloads-dialog-body")],
                 [
-                  h.p([h.Class("settings-description")], [tr.downloads.subtitle]),
-                  ...groups.map((group) =>
-                    h.section(
-                      [h.Class("settings-group")],
-                      [
-                        h.h4([h.Class("settings-group-title")], [group.platform]),
-                        h.div(
-                          [h.Class("settings-actions")],
-                          group.items.map((item) =>
-                            h.a(
-                              [
-                                h.Class("btn btn-secondary"),
-                                h.Href(`${GITHUB_LATEST_DOWNLOAD_BASE}/${item.file}`),
-                                h.Target("_blank"),
-                                h.Rel("noopener noreferrer"),
-                              ],
-                              [item.label],
+                  h.p([h.Class("downloads-subtitle")], [tr.downloads.subtitle]),
+                  h.div(
+                    [h.Class("downloads-grid")],
+                    groups.map((group) =>
+                      h.section(
+                        [h.Class("downloads-card")],
+                        [
+                          h.h4([h.Class("downloads-card-title")], [group.platform]),
+                          h.div(
+                            [h.Class("downloads-card-links")],
+                            group.items.map((item) =>
+                              h.a(
+                                [
+                                  h.Class("downloads-link"),
+                                  h.Href(`${GITHUB_LATEST_DOWNLOAD_BASE}/${item.file}`),
+                                  h.Target("_blank"),
+                                  h.Rel("noopener noreferrer"),
+                                ],
+                                [
+                                  h.span([h.Class("downloads-link-label")], [item.label]),
+                                  h.span([h.Class("downloads-link-file")], [item.file]),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                  h.section(
-                    [h.Class("settings-group")],
+                  h.div(
+                    [h.Class("downloads-footer")],
                     [
                       h.a(
                         [
-                          h.Class("btn btn-secondary"),
+                          h.Class("downloads-releases-link"),
                           h.Href(GITHUB_RELEASES_URL),
                           h.Target("_blank"),
                           h.Rel("noopener noreferrer"),
                         ],
-                        [tr.downloads.olderVersions],
+                        [tr.downloads.olderVersions, " ↗"],
                       ),
                     ],
                   ),
@@ -6120,6 +6202,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
     return h.empty
   }
   const tr = t(model.language)
+  const isInstallAvailable = InstallPrompt.match(model.installPrompt, INSTALL_AVAILABLE)
   const { isFsaReady, isFsaNoFolder, isFsaPermissionRequired, canSwitchToOpfs, canSwitchToFsa } =
     getStorageCapabilities(model)
   const currentStorageLabel = Option.map(
@@ -6169,6 +6252,80 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               h.div(
                 [h.Class("modal-body settings-groups")],
                 [
+                  h.section(
+                    [h.Class("settings-group"), h.Id("settings-group-app-downloads")],
+                    [
+                      h.h4([h.Class("settings-group-title")], [tr.downloads.settingsTitle]),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-show-downloads-in-menu"),
+                                h.Checked(model.showDownloadsInMenu),
+                                h.OnChange(() =>
+                                  Message.ToggledShowDownloadsInMenu({
+                                    isEnabled: !model.showDownloadsInMenu,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], [tr.downloads.showDownloadsInMenu]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
+                            [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-show-install-in-menu"),
+                                h.Checked(model.showInstallInMenu),
+                                h.OnChange(() =>
+                                  Message.ToggledShowInstallInMenu({
+                                    isEnabled: !model.showInstallInMenu,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], [tr.downloads.showInstallInMenu]),
+                            ],
+                          ),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("settings-actions")],
+                        [
+                          h.button(
+                            [
+                              h.Type("button"),
+                              h.Id("btn-settings-open-downloads"),
+                              h.Class("btn btn-secondary"),
+                              h.OnClick(Message.ClickedOpenDownloadsDialog()),
+                            ],
+                            [viewIcon("install", h), ` ${tr.downloads.openDownloads}`],
+                          ),
+                          isInstallAvailable
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-settings-install-app"),
+                                  h.Class("btn btn-secondary"),
+                                  h.Title(tr.settings.installAppTitle),
+                                  h.OnClick(Message.ClickedInstallApp()),
+                                ],
+                                [viewIcon("install", h), ` ${tr.settings.installApp}`],
+                              )
+                            : h.empty,
+                        ],
+                      ),
+                    ],
+                  ),
                   h.section(
                     [h.Class("settings-group"), h.Id("settings-group-language")],
                     [

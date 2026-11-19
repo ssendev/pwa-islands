@@ -25,6 +25,8 @@ export const STORAGE_TYPE_KEY = "selected_storage_type"
 export const FILE_INFO_VISIBLE_KEY = "file_info_visible"
 export const HISTORY_ENABLED_KEY = "history_enabled"
 export const API_HISTORY_ENABLED_KEY = "api_history_enabled"
+export const SHOW_DOWNLOADS_IN_MENU_KEY = "show_downloads_in_menu"
+export const SHOW_INSTALL_IN_MENU_KEY = "show_install_in_menu"
 export const ISLAND_PARAM = "pwaislands"
 
 // NOTE: OPFS has a single root per origin; files are placed in a subfolder
@@ -219,6 +221,18 @@ export const getStoredApiHistoryEnabled = (): Promise<boolean> =>
 
 export const storeApiHistoryEnabled = (enabled: boolean): Promise<void> =>
   storeBooleanFlag(API_HISTORY_ENABLED_KEY, enabled)
+
+export const getStoredShowDownloadsInMenu = (): Promise<boolean> =>
+  getStoredBooleanFlag(SHOW_DOWNLOADS_IN_MENU_KEY, true)
+
+export const storeShowDownloadsInMenu = (enabled: boolean): Promise<void> =>
+  storeBooleanFlag(SHOW_DOWNLOADS_IN_MENU_KEY, enabled)
+
+export const getStoredShowInstallInMenu = (): Promise<boolean> =>
+  getStoredBooleanFlag(SHOW_INSTALL_IN_MENU_KEY, true)
+
+export const storeShowInstallInMenu = (enabled: boolean): Promise<void> =>
+  storeBooleanFlag(SHOW_INSTALL_IN_MENU_KEY, enabled)
 
 import {
   emptyLlmSettings,

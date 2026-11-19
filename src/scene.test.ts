@@ -94,6 +94,8 @@ const readyModel: Model = {
   }),
   showFileInfo: true,
   isSettingsOpen: false,
+  showDownloadsInMenu: true,
+  showInstallInMenu: true,
   isSettingsDialogOpen: false,
   isDownloadsDialogOpen: false,
   isEditingLlmSettings: false,
