@@ -178,9 +178,9 @@ jobs:
       - name: Build Android APK
         env:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-          NDK_HOME: ${{ env.ANDROID_NDK_LATEST_HOME }}
-        run: npm run build:android
+        run: |
+          export NDK_HOME="${ANDROID_NDK_LATEST_HOME:-${NDK_HOME:-}}"
+          npm run build:android
 
       - name: Collect Android APK
         run: |
