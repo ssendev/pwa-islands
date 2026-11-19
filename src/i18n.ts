@@ -413,6 +413,85 @@ const de = {
       "Schreibt die aktuell geöffnete Datei komplett neu. Nur verwenden, wenn ein vollständiges Neuschreiben sinnvoller ist als gezielte Edits.",
     toolWriteContent: "Der vollständige neue Inhalt der Datei.",
     toolResultApplied: (fileName: string) => `Änderungen in \`${fileName}\` angewendet.`,
+    errToolArgsTruncated:
+      "Die Werkzeug-Argumente wurden abgeschnitten (unvollständiges JSON) – bitte den Aufruf vollständig wiederholen oder in kleinere Schritte aufteilen.",
+    errToolArgsNotObject: "Werkzeug-Argumente müssen ein JSON-Objekt sein.",
+    errToolArgsInvalidJson: (detail: string) =>
+      `Ungültiges JSON in den Werkzeug-Argumenten (${detail}). Erwartet wird ein gültiges JSON-Objekt.`,
+    errEditArgsEmpty:
+      'Argumente für `edit` sind leer. Erwartet wird ein JSON-Objekt wie `{"edits": "..."}`.',
+    errEditMissingParam: (presentHint: string) =>
+      `Parameter "edits" fehlt oder ist kein Text.${presentHint} Erwartet wird \`{"edits": "..."}\`.`,
+    errEditPresentKeysHint: (keys: string) => ` Vorhandene Parameter: ${keys}.`,
+    errEditArgsTruncated:
+      "Die Argumente für `edit` wurden abgeschnitten (unvollständiges JSON) – bitte kürzere Blöcke senden oder mehrere kleinere `edit`-Aufrufe verwenden.",
+    errEditArgsNotObject:
+      'Werkzeug-Argumente für `edit` müssen ein JSON-Objekt wie `{"edits": "..."}` sein.',
+    errEditArgsInvalidJson: (detail: string) =>
+      `Ungültiges JSON in den Argumenten für \`edit\` (${detail}). Erwartet wird \`{"edits": "..."}\`.`,
+    errInvalidJsonArgs: "Ungültige JSON-Argumente.",
+    errStartLineNotNumber: 'Parameter "startLine" muss eine Zahl sein.',
+    errEndLineNotNumber: 'Parameter "endLine" muss eine Zahl sein.',
+    errStartLinePastEof: (start: number, total: number) =>
+      `Startzeile ${start} liegt hinter dem Dateiende (${total} Zeilen).`,
+    errEndBeforeStart: (end: number, start: number) =>
+      `Endzeile (${end}) darf nicht vor der Startzeile (${start}) liegen.`,
+    readContinuationHint: (nextStart: number) =>
+      `\n\n(Weitere Zeilen vorhanden – nutze \`read\` mit \`startLine: ${nextStart}\`.)`,
+    readHeader: (fileName: string, start: number, end: number, total: number) =>
+      `Datei \`${fileName}\` (Zeilen ${start}–${end} von ${total}):`,
+    errSearchEmptyQuery: 'Suchbegriff ("query") darf nicht leer sein.',
+    errBeforeNotNonNeg: 'Parameter "before" muss eine nicht-negative Zahl sein.',
+    errAfterNotNonNeg: 'Parameter "after" muss eine nicht-negative Zahl sein.',
+    errInvalidRegex: (detail: string) => `Ungültiger regulärer Ausdruck: ${detail}`,
+    searchNoMatches: (query: string, fileName: string) =>
+      `Keine Treffer für „${query}“ in \`${fileName}\` gefunden.`,
+    searchMoreMatches: (count: number) => `\n\n(… und ${count} weitere Treffer.)`,
+    searchHeader: (query: string, fileName: string, count: number) =>
+      `Treffer für „${query}“ in \`${fileName}\` (${count}):`,
+    errWriteMissingContent: 'Parameter "content" fehlt oder ist kein Text.',
+    writeSuccess: (fileName: string, lineCount: number) =>
+      `Datei \`${fileName}\` wurde neu geschrieben (${lineCount} Zeilen).`,
+    srErrEmpty: "Keine SEARCH/REPLACE-Blöcke gefunden – die Eingabe ist leer.",
+    srErrUnexpectedSep: (lineNum: number) =>
+      `Zeile ${lineNum}: Unerwartetes „=======“ außerhalb eines SEARCH/REPLACE-Blocks.`,
+    srErrUnexpectedEnd: (lineNum: number) =>
+      `Zeile ${lineNum}: Unerwartetes „>>>>>>> REPLACE“ ohne vorheriges „<<<<<<< SEARCH“ und „=======“.`,
+    srErrNestedStartInSearch: (blockNum: number, startLine: number) =>
+      `Block ${blockNum} (ab Zeile ${startLine}): Unerwartetes „<<<<<<< SEARCH“ innerhalb des Suchteils – fehlt davor „=======“ und „>>>>>>> REPLACE“?`,
+    srErrEndBeforeSep: (blockNum: number, startLine: number) =>
+      `Block ${blockNum} (ab Zeile ${startLine}): „>>>>>>> REPLACE“ vor „=======“ gefunden. Trenne Such- und Ersetzungsteil mit „=======“.`,
+    srErrNestedStartInReplace: (blockNum: number, startLine: number) =>
+      `Block ${blockNum} (ab Zeile ${startLine}): Unerwartetes „<<<<<<< SEARCH“ innerhalb eines offenen Blocks – fehlt davor „>>>>>>> REPLACE“?`,
+    srErrIncompleteInSearch: (blockNum: number, startLine: number) =>
+      `Unvollständiger SEARCH/REPLACE-Block ${blockNum} (ab Zeile ${startLine}): Trennlinie „=======“ und Endmarkierung „>>>>>>> REPLACE“ fehlen.`,
+    srErrIncompleteInReplace: (blockNum: number, startLine: number) =>
+      `Unvollständiger SEARCH/REPLACE-Block ${blockNum} (ab Zeile ${startLine}): Endmarkierung „>>>>>>> REPLACE“ fehlt.`,
+    srErrNoBlocks: [
+      "Keine SEARCH/REPLACE-Blöcke gefunden. Erwartetes Format:",
+      "<<<<<<< SEARCH",
+      "alter Code",
+      "=======",
+      "neuer Code",
+      ">>>>>>> REPLACE",
+    ].join("\n"),
+    srBlockLabel: (num: number) => `SEARCH-Block ${num}`,
+    srNotFoundText: "wurde in der Datei nicht gefunden.",
+    srMissingContextText: "darf bei nicht-leerer Datei nicht leer sein.",
+    udErrEmpty: "Kein Unified Diff gefunden – die Eingabe ist leer.",
+    udErrInvalidLine: (hunkNum: number, lineNum: number, preview: string) =>
+      `Diff-Hunk ${hunkNum} (Zeile ${lineNum}): Ungültige Diff-Zeile „${preview}“ – jede Zeile im Hunk muss mit ' ' (Kontext), '-' (entfernen) oder '+' (hinzufügen) beginnen.`,
+    udErrNoHunks: [
+      "Keine @@-Hunks im Unified Diff gefunden. Erwartetes Format:",
+      "@@",
+      " unveränderte Kontextzeile",
+      "-entfernte Zeile",
+      "+neue Zeile",
+    ].join("\n"),
+    udHunkLabel: (num: number) => `Diff-Hunk ${num}`,
+    udNotFoundText: "konnte in der Datei nicht zugeordnet werden.",
+    udMissingContextText:
+      "hat keine Kontext- oder Löschzeilen zum Zuordnen. Gib mindestens eine unveränderte Nachbarzeile mit führendem Leerzeichen (' ') an.",
   },
   errors: {
     failedWithDetail: (detail: string) => `Fehlgeschlagen: ${detail}`,
@@ -1128,6 +1207,85 @@ const en: Translations = {
       "Rewrites the currently open file completely. Only use when a full rewrite makes more sense than targeted edits.",
     toolWriteContent: "The complete new content of the file.",
     toolResultApplied: (fileName: string) => `Edits applied to \`${fileName}\`.`,
+    errToolArgsTruncated:
+      "Tool arguments were truncated (incomplete JSON) — please repeat the call completely or split it into smaller steps.",
+    errToolArgsNotObject: "Tool arguments must be a JSON object.",
+    errToolArgsInvalidJson: (detail: string) =>
+      `Invalid JSON in tool arguments (${detail}). Expected a valid JSON object.`,
+    errEditArgsEmpty:
+      'Arguments for `edit` are empty. Expected a JSON object like `{"edits": "..."}`.',
+    errEditMissingParam: (presentHint: string) =>
+      `Parameter "edits" is missing or not a string.${presentHint} Expected \`{"edits": "..."}\`.`,
+    errEditPresentKeysHint: (keys: string) => ` Present parameters: ${keys}.`,
+    errEditArgsTruncated:
+      "Arguments for `edit` were truncated (incomplete JSON) — please send shorter blocks or use multiple smaller `edit` calls.",
+    errEditArgsNotObject:
+      'Tool arguments for `edit` must be a JSON object like `{"edits": "..."}`.',
+    errEditArgsInvalidJson: (detail: string) =>
+      `Invalid JSON in arguments for \`edit\` (${detail}). Expected \`{"edits": "..."}\`.`,
+    errInvalidJsonArgs: "Invalid JSON arguments.",
+    errStartLineNotNumber: 'Parameter "startLine" must be a number.',
+    errEndLineNotNumber: 'Parameter "endLine" must be a number.',
+    errStartLinePastEof: (start: number, total: number) =>
+      `Start line ${start} is past the end of the file (${total} lines).`,
+    errEndBeforeStart: (end: number, start: number) =>
+      `End line (${end}) must not be before start line (${start}).`,
+    readContinuationHint: (nextStart: number) =>
+      `\n\n(More lines available — use \`read\` with \`startLine: ${nextStart}\`.)`,
+    readHeader: (fileName: string, start: number, end: number, total: number) =>
+      `File \`${fileName}\` (lines ${start}–${end} of ${total}):`,
+    errSearchEmptyQuery: 'Search query ("query") must not be empty.',
+    errBeforeNotNonNeg: 'Parameter "before" must be a non-negative number.',
+    errAfterNotNonNeg: 'Parameter "after" must be a non-negative number.',
+    errInvalidRegex: (detail: string) => `Invalid regular expression: ${detail}`,
+    searchNoMatches: (query: string, fileName: string) =>
+      `No matches found for "${query}" in \`${fileName}\`.`,
+    searchMoreMatches: (count: number) => `\n\n(… and ${count} more matches.)`,
+    searchHeader: (query: string, fileName: string, count: number) =>
+      `Matches for "${query}" in \`${fileName}\` (${count}):`,
+    errWriteMissingContent: 'Parameter "content" is missing or not a string.',
+    writeSuccess: (fileName: string, lineCount: number) =>
+      `File \`${fileName}\` was rewritten (${lineCount} lines).`,
+    srErrEmpty: "No SEARCH/REPLACE blocks found — input is empty.",
+    srErrUnexpectedSep: (lineNum: number) =>
+      `Line ${lineNum}: unexpected "=======" outside of a SEARCH/REPLACE block.`,
+    srErrUnexpectedEnd: (lineNum: number) =>
+      `Line ${lineNum}: unexpected ">>>>>>> REPLACE" without preceding "<<<<<<< SEARCH" and "=======".`,
+    srErrNestedStartInSearch: (blockNum: number, startLine: number) =>
+      `Block ${blockNum} (from line ${startLine}): unexpected "<<<<<<< SEARCH" inside search part — missing "=======" and ">>>>>>> REPLACE" before it?`,
+    srErrEndBeforeSep: (blockNum: number, startLine: number) =>
+      `Block ${blockNum} (from line ${startLine}): found ">>>>>>> REPLACE" before "=======". Separate search and replace parts with "=======".`,
+    srErrNestedStartInReplace: (blockNum: number, startLine: number) =>
+      `Block ${blockNum} (from line ${startLine}): unexpected "<<<<<<< SEARCH" inside an open block — missing ">>>>>>> REPLACE" before it?`,
+    srErrIncompleteInSearch: (blockNum: number, startLine: number) =>
+      `Incomplete SEARCH/REPLACE block ${blockNum} (from line ${startLine}): separator "=======" and end marker ">>>>>>> REPLACE" are missing.`,
+    srErrIncompleteInReplace: (blockNum: number, startLine: number) =>
+      `Incomplete SEARCH/REPLACE block ${blockNum} (from line ${startLine}): end marker ">>>>>>> REPLACE" is missing.`,
+    srErrNoBlocks: [
+      "No SEARCH/REPLACE blocks found. Expected format:",
+      "<<<<<<< SEARCH",
+      "old code",
+      "=======",
+      "new code",
+      ">>>>>>> REPLACE",
+    ].join("\n"),
+    srBlockLabel: (num: number) => `SEARCH block ${num}`,
+    srNotFoundText: "was not found in the file.",
+    srMissingContextText: "must not be empty for a non-empty file.",
+    udErrEmpty: "No unified diff found — input is empty.",
+    udErrInvalidLine: (hunkNum: number, lineNum: number, preview: string) =>
+      `Diff hunk ${hunkNum} (line ${lineNum}): invalid diff line "${preview}" — each line in a hunk must start with ' ' (context), '-' (remove), or '+' (add).`,
+    udErrNoHunks: [
+      "No @@ hunks found in unified diff. Expected format:",
+      "@@",
+      " unchanged context line",
+      "-removed line",
+      "+new line",
+    ].join("\n"),
+    udHunkLabel: (num: number) => `Diff hunk ${num}`,
+    udNotFoundText: "could not be matched in the file.",
+    udMissingContextText:
+      "has no context or deletion lines to match. Provide at least one unchanged neighbor line with a leading space (' ').",
   },
   errors: {
     failedWithDetail: (detail: string) => `Failed: ${detail}`,

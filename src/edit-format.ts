@@ -397,17 +397,14 @@ const parseToolJsonObject = (rawArgs: string): Record<string, unknown> => {
   if (parsed._tag === "Valid" || parsed._tag === "Repaired") {
     return parsed.record
   }
+  const ef = t(getDocumentLanguage()).editFormat
   if (parsed._tag === "Truncated") {
-    throw new Error(
-      "Die Werkzeug-Argumente wurden abgeschnitten (unvollständiges JSON) – bitte den Aufruf vollständig wiederholen oder in kleinere Schritte aufteilen.",
-    )
+    throw new Error(ef.errToolArgsTruncated)
   }
   if (parsed._tag === "NotAnObject") {
-    throw new Error("Werkzeug-Argumente müssen ein JSON-Objekt sein.")
+    throw new Error(ef.errToolArgsNotObject)
   }
-  throw new Error(
-    `Ungültiges JSON in den Werkzeug-Argumenten (${parsed.detail}). Erwartet wird ein gültiges JSON-Objekt.`,
-  )
+  throw new Error(ef.errToolArgsInvalidJson(parsed.detail))
 }
 
 export type EditToolArgsResult =
@@ -429,12 +426,12 @@ const extractEditsFromRecord = (record: Record<string, unknown>): Option.Option<
   })
 
 export const parseEditToolArguments = (rawArgs: string, depth = 0): EditToolArgsResult => {
+  const ef = t(getDocumentLanguage()).editFormat
   const trimmed = rawArgs.trim()
   if (trimmed === "") {
     return {
       _tag: "Error",
-      message:
-        'Argumente für `edit` sind leer. Erwartet wird ein JSON-Objekt wie `{"edits": "..."}`.',
+      message: ef.errEditArgsEmpty,
     }
   }
 
@@ -444,10 +441,10 @@ export const parseEditToolArguments = (rawArgs: string, depth = 0): EditToolArgs
       onSome: (editsText) => ({ _tag: "Ok", editsText }),
       onNone: () => {
         const keys = Object.keys(parsed.record)
-        const presentHint = keys.length > 0 ? ` Vorhandene Parameter: ${keys.join(", ")}.` : ""
+        const presentHint = keys.length > 0 ? ef.errEditPresentKeysHint(keys.join(", ")) : ""
         return {
           _tag: "Error",
-          message: `Parameter "edits" fehlt oder ist kein Text.${presentHint} Erwartet wird \`{"edits": "..."}\`.`,
+          message: ef.errEditMissingParam(presentHint),
         }
       },
     })
@@ -456,8 +453,7 @@ export const parseEditToolArguments = (rawArgs: string, depth = 0): EditToolArgs
   if (parsed._tag === "Truncated") {
     return {
       _tag: "Error",
-      message:
-        "Die Argumente für `edit` wurden abgeschnitten (unvollständiges JSON) – bitte kürzere Blöcke senden oder mehrere kleinere `edit`-Aufrufe verwenden.",
+      message: ef.errEditArgsTruncated,
     }
   }
 
@@ -477,7 +473,7 @@ export const parseEditToolArguments = (rawArgs: string, depth = 0): EditToolArgs
     }
     return {
       _tag: "Error",
-      message: 'Werkzeug-Argumente für `edit` müssen ein JSON-Objekt wie `{"edits": "..."}` sein.',
+      message: ef.errEditArgsNotObject,
     }
   }
 
@@ -487,7 +483,7 @@ export const parseEditToolArguments = (rawArgs: string, depth = 0): EditToolArgs
 
   return {
     _tag: "Error",
-    message: `Ungültiges JSON in den Argumenten für \`edit\` (${parsed.detail}). Erwartet wird \`{"edits": "..."}\`.`,
+    message: ef.errEditArgsInvalidJson(parsed.detail),
   }
 }
 
@@ -512,12 +508,13 @@ export const executeReadTool = (
   content: string,
   rawArgs: string,
 ): EditorToolTextResult => {
+  const ef = t(getDocumentLanguage()).editFormat
   let args: Record<string, unknown>
   try {
     args = parseToolJsonObject(rawArgs)
   } catch (err) {
     return EditorToolTextResult.Error({
-      message: err instanceof Error ? err.message : "Ungültige JSON-Argumente.",
+      message: err instanceof Error ? err.message : ef.errInvalidJsonArgs,
     })
   }
 
@@ -526,17 +523,17 @@ export const executeReadTool = (
 
   const rawStart = args.startLine
   if (rawStart !== undefined && (typeof rawStart !== "number" || !Number.isFinite(rawStart))) {
-    return EditorToolTextResult.Error({ message: 'Parameter "startLine" muss eine Zahl sein.' })
+    return EditorToolTextResult.Error({ message: ef.errStartLineNotNumber })
   }
   const rawEnd = args.endLine
   if (rawEnd !== undefined && (typeof rawEnd !== "number" || !Number.isFinite(rawEnd))) {
-    return EditorToolTextResult.Error({ message: 'Parameter "endLine" muss eine Zahl sein.' })
+    return EditorToolTextResult.Error({ message: ef.errEndLineNotNumber })
   }
 
   const start = rawStart !== undefined ? Math.max(1, Math.floor(rawStart)) : 1
   if (start > totalLines) {
     return EditorToolTextResult.Error({
-      message: `Startzeile ${start} liegt hinter dem Dateiende (${totalLines} Zeilen).`,
+      message: ef.errStartLinePastEof(start, totalLines),
     })
   }
 
@@ -546,7 +543,7 @@ export const executeReadTool = (
       : Math.min(totalLines, start + MAX_READ_LINES - 1)
   if (end < start) {
     return EditorToolTextResult.Error({
-      message: `Endzeile (${end}) darf nicht vor der Startzeile (${start}) liegen.`,
+      message: ef.errEndBeforeStart(end, start),
     })
   }
 
@@ -555,19 +552,12 @@ export const executeReadTool = (
     formatNumberedLine(format, start + idx, line),
   ).join("\n")
   const continuationHint =
-    rawEnd === undefined && end < totalLines
-      ? `\n\n(Weitere Zeilen vorhanden – nutze \`read\` mit \`startLine: ${end + 1}\`.)`
-      : ""
+    rawEnd === undefined && end < totalLines ? ef.readContinuationHint(end + 1) : ""
 
   return EditorToolTextResult.Ok({
     text:
-      [
-        `Datei \`${fileName}\` (Zeilen ${start}–${end} von ${totalLines}):`,
-        "",
-        "```",
-        formatted,
-        "```",
-      ].join("\n") + continuationHint,
+      [ef.readHeader(fileName, start, end, totalLines), "", "```", formatted, "```"].join("\n") +
+      continuationHint,
   })
 }
 
@@ -577,18 +567,19 @@ export const executeSearchTool = (
   content: string,
   rawArgs: string,
 ): EditorToolTextResult => {
+  const ef = t(getDocumentLanguage()).editFormat
   let args: Record<string, unknown>
   try {
     args = parseToolJsonObject(rawArgs)
   } catch (err) {
     return EditorToolTextResult.Error({
-      message: err instanceof Error ? err.message : "Ungültige JSON-Argumente.",
+      message: err instanceof Error ? err.message : ef.errInvalidJsonArgs,
     })
   }
 
   const query = args.query
   if (typeof query !== "string" || query === "") {
-    return EditorToolTextResult.Error({ message: 'Suchbegriff ("query") darf nicht leer sein.' })
+    return EditorToolTextResult.Error({ message: ef.errSearchEmptyQuery })
   }
   const isRegex = args.isRegex === true
   const caseSensitive = args.caseSensitive === true
@@ -598,7 +589,7 @@ export const executeSearchTool = (
     (typeof rawBefore !== "number" || !Number.isFinite(rawBefore) || rawBefore < 0)
   ) {
     return EditorToolTextResult.Error({
-      message: 'Parameter "before" muss eine nicht-negative Zahl sein.',
+      message: ef.errBeforeNotNonNeg,
     })
   }
   const rawAfter = args.after
@@ -607,7 +598,7 @@ export const executeSearchTool = (
     (typeof rawAfter !== "number" || !Number.isFinite(rawAfter) || rawAfter < 0)
   ) {
     return EditorToolTextResult.Error({
-      message: 'Parameter "after" muss eine nicht-negative Zahl sein.',
+      message: ef.errAfterNotNonNeg,
     })
   }
   const beforeCount = rawBefore !== undefined ? Math.floor(rawBefore) : 0
@@ -620,7 +611,7 @@ export const executeSearchTool = (
       matcher = (line) => regex.test(line)
     } catch (err) {
       return EditorToolTextResult.Error({
-        message: `Ungültiger regulärer Ausdruck: ${err instanceof Error ? err.message : String(err)}`,
+        message: ef.errInvalidRegex(err instanceof Error ? err.message : String(err)),
       })
     }
   } else {
@@ -633,7 +624,7 @@ export const executeSearchTool = (
 
   if (Array.isReadonlyArrayEmpty(matchIndices)) {
     return EditorToolTextResult.Ok({
-      text: `Keine Treffer für „${query}“ in \`${fileName}\` gefunden.`,
+      text: ef.searchNoMatches(query, fileName),
     })
   }
 
@@ -664,35 +655,31 @@ export const executeSearchTool = (
 
   const moreHint =
     matchIndices.length > MAX_SEARCH_MATCHES
-      ? `\n\n(… und ${matchIndices.length - MAX_SEARCH_MATCHES} weitere Treffer.)`
+      ? ef.searchMoreMatches(matchIndices.length - MAX_SEARCH_MATCHES)
       : ""
 
   return EditorToolTextResult.Ok({
     text:
-      [
-        `Treffer für „${query}“ in \`${fileName}\` (${matchIndices.length}):`,
-        "",
-        "```",
-        shown,
-        "```",
-      ].join("\n") + moreHint,
+      [ef.searchHeader(query, fileName, matchIndices.length), "", "```", shown, "```"].join("\n") +
+      moreHint,
   })
 }
 
 export const executeWriteTool = (fileName: string, rawArgs: string): EditorWriteToolResult => {
+  const ef = t(getDocumentLanguage()).editFormat
   let args: Record<string, unknown>
   try {
     args = parseToolJsonObject(rawArgs)
   } catch (err) {
     return EditorWriteToolResult.Error({
-      message: err instanceof Error ? err.message : "Ungültige JSON-Argumente.",
+      message: err instanceof Error ? err.message : ef.errInvalidJsonArgs,
     })
   }
 
   const newContent = args.content
   if (typeof newContent !== "string") {
     return EditorWriteToolResult.Error({
-      message: 'Parameter "content" fehlt oder ist kein Text.',
+      message: ef.errWriteMissingContent,
     })
   }
 
@@ -700,7 +687,7 @@ export const executeWriteTool = (fileName: string, rawArgs: string): EditorWrite
   const lineCount = normalized.split("\n").length
   return EditorWriteToolResult.Ok({
     content: normalized,
-    message: `Datei \`${fileName}\` wurde neu geschrieben (${lineCount} Zeilen).`,
+    message: ef.writeSuccess(fileName, lineCount),
   })
 }
 
@@ -948,11 +935,12 @@ const parseSearchReplaceBlocks = (
 ):
   | { readonly _tag: "Ok"; readonly blocks: ReadonlyArray<SearchReplaceBlock> }
   | { readonly _tag: "Error"; readonly message: string } => {
+  const ef = t(getDocumentLanguage()).editFormat
   const cleaned = stripOuterMarkdownFence(raw)
   if (cleaned === "") {
     return {
       _tag: "Error",
-      message: "Keine SEARCH/REPLACE-Blöcke gefunden – die Eingabe ist leer.",
+      message: ef.srErrEmpty,
     }
   }
 
@@ -984,17 +972,13 @@ const parseSearchReplaceBlocks = (
         if (SEPARATOR_PATTERN.test(trimmed)) {
           return {
             ...state,
-            maybeError: Option.some(
-              `Zeile ${lineNum}: Unerwartetes „=======“ außerhalb eines SEARCH/REPLACE-Blocks.`,
-            ),
+            maybeError: Option.some(ef.srErrUnexpectedSep(lineNum)),
           }
         }
         if (REPLACE_END_PATTERN.test(trimmed)) {
           return {
             ...state,
-            maybeError: Option.some(
-              `Zeile ${lineNum}: Unerwartetes „>>>>>>> REPLACE“ ohne vorheriges „<<<<<<< SEARCH“ und „=======“.`,
-            ),
+            maybeError: Option.some(ef.srErrUnexpectedEnd(lineNum)),
           }
         }
         return state
@@ -1014,16 +998,14 @@ const parseSearchReplaceBlocks = (
           return {
             ...state,
             maybeError: Option.some(
-              `Block ${state.blocks.length + 1} (ab Zeile ${state.startLine}): Unerwartetes „<<<<<<< SEARCH“ innerhalb des Suchteils – fehlt davor „=======“ und „>>>>>>> REPLACE“?`,
+              ef.srErrNestedStartInSearch(state.blocks.length + 1, state.startLine),
             ),
           }
         }
         if (REPLACE_END_PATTERN.test(trimmed)) {
           return {
             ...state,
-            maybeError: Option.some(
-              `Block ${state.blocks.length + 1} (ab Zeile ${state.startLine}): „>>>>>>> REPLACE“ vor „=======“ gefunden. Trenne Such- und Ersetzungsteil mit „=======“.`,
-            ),
+            maybeError: Option.some(ef.srErrEndBeforeSep(state.blocks.length + 1, state.startLine)),
           }
         }
         return {
@@ -1048,7 +1030,7 @@ const parseSearchReplaceBlocks = (
         return {
           ...state,
           maybeError: Option.some(
-            `Block ${state.blocks.length + 1} (ab Zeile ${state.startLine}): Unerwartetes „<<<<<<< SEARCH“ innerhalb eines offenen Blocks – fehlt davor „>>>>>>> REPLACE“?`,
+            ef.srErrNestedStartInReplace(state.blocks.length + 1, state.startLine),
           ),
         }
       }
@@ -1065,26 +1047,19 @@ const parseSearchReplaceBlocks = (
   if (finalState._tag === "InSearch") {
     return {
       _tag: "Error",
-      message: `Unvollständiger SEARCH/REPLACE-Block ${finalState.blocks.length + 1} (ab Zeile ${finalState.startLine}): Trennlinie „=======“ und Endmarkierung „>>>>>>> REPLACE“ fehlen.`,
+      message: ef.srErrIncompleteInSearch(finalState.blocks.length + 1, finalState.startLine),
     }
   }
   if (finalState._tag === "InReplace") {
     return {
       _tag: "Error",
-      message: `Unvollständiger SEARCH/REPLACE-Block ${finalState.blocks.length + 1} (ab Zeile ${finalState.startLine}): Endmarkierung „>>>>>>> REPLACE“ fehlt.`,
+      message: ef.srErrIncompleteInReplace(finalState.blocks.length + 1, finalState.startLine),
     }
   }
   if (Array.isReadonlyArrayEmpty(finalState.blocks)) {
     return {
       _tag: "Error",
-      message: [
-        "Keine SEARCH/REPLACE-Blöcke gefunden. Erwartetes Format:",
-        "<<<<<<< SEARCH",
-        "alter Code",
-        "=======",
-        "neuer Code",
-        ">>>>>>> REPLACE",
-      ].join("\n"),
+      message: ef.srErrNoBlocks,
     }
   }
   return { _tag: "Ok", blocks: finalState.blocks }
@@ -1094,6 +1069,7 @@ export const applySearchReplaceEdits = (
   originalContent: string,
   editsText: string,
 ): EditApplyResult => {
+  const ef = t(getDocumentLanguage()).editFormat
   const parsed = parseSearchReplaceBlocks(editsText)
   if (parsed._tag === "Error") {
     return EditApplyResult.Error({ message: parsed.message })
@@ -1101,7 +1077,7 @@ export const applySearchReplaceEdits = (
 
   const initialLines = originalContent.replace(/\r\n/g, "\n").split("\n")
   const blocks: ReadonlyArray<LineEditBlock> = Array.map(parsed.blocks, (block, index) => ({
-    label: `SEARCH-Block ${index + 1}`,
+    label: ef.srBlockLabel(index + 1),
     searchLines: block.searchLines,
     replaceLines: block.replaceLines,
     maybeHintLine: Option.none(),
@@ -1110,8 +1086,8 @@ export const applySearchReplaceEdits = (
       search: block.searchLines.join("\n"),
       replace: block.replaceLines.join("\n"),
     }),
-    notFoundText: "wurde in der Datei nicht gefunden.",
-    missingContextText: "darf bei nicht-leerer Datei nicht leer sein.",
+    notFoundText: ef.srNotFoundText,
+    missingContextText: ef.srMissingContextText,
   }))
 
   const result = applyLineEditBlocks(initialLines, blocks)
@@ -1151,9 +1127,10 @@ const parseUnifiedDiffHunks = (
 ):
   | { readonly _tag: "Ok"; readonly hunks: ReadonlyArray<DiffHunk> }
   | { readonly _tag: "Error"; readonly message: string } => {
+  const ef = t(getDocumentLanguage()).editFormat
   const cleaned = stripOuterMarkdownFence(raw)
   if (cleaned === "") {
-    return { _tag: "Error", message: "Kein Unified Diff gefunden – die Eingabe ist leer." }
+    return { _tag: "Error", message: ef.udErrEmpty }
   }
 
   const lines = cleaned.split("\n")
@@ -1249,7 +1226,7 @@ const parseUnifiedDiffHunks = (
         return {
           ...state,
           hasError: Option.some(
-            `Diff-Hunk ${state.hunks.length + 1} (Zeile ${lineNum}): Ungültige Diff-Zeile „${previewLine(line)}“ – jede Zeile im Hunk muss mit ' ' (Kontext), '-' (entfernen) oder '+' (hinzufügen) beginnen.`,
+            ef.udErrInvalidLine(state.hunks.length + 1, lineNum, previewLine(line)),
           ),
         }
       }
@@ -1285,13 +1262,7 @@ const parseUnifiedDiffHunks = (
   if (Array.isReadonlyArrayEmpty(allHunks)) {
     return {
       _tag: "Error",
-      message: [
-        "Keine @@-Hunks im Unified Diff gefunden. Erwartetes Format:",
-        "@@",
-        " unveränderte Kontextzeile",
-        "-entfernte Zeile",
-        "+neue Zeile",
-      ].join("\n"),
+      message: ef.udErrNoHunks,
     }
   }
 
@@ -1302,6 +1273,7 @@ export const applyUnifiedDiffEdits = (
   originalContent: string,
   editsText: string,
 ): EditApplyResult => {
+  const ef = t(getDocumentLanguage()).editFormat
   const parsed = parseUnifiedDiffHunks(editsText)
   if (parsed._tag === "Error") {
     return EditApplyResult.Error({ message: parsed.message })
@@ -1309,15 +1281,14 @@ export const applyUnifiedDiffEdits = (
 
   const initialLines = originalContent.replace(/\r\n/g, "\n").split("\n")
   const blocks: ReadonlyArray<LineEditBlock> = Array.map(parsed.hunks, (hunk, index) => ({
-    label: `Diff-Hunk ${index + 1}`,
+    label: ef.udHunkLabel(index + 1),
     searchLines: hunk.searchLines,
     replaceLines: hunk.replaceLines,
     maybeHintLine: hunk.maybeHintLine,
     maybeInsertIndex: Option.map(hunk.maybeHintLine, (line) => Math.max(0, line - 1)),
     maybeExactText: Option.none(),
-    notFoundText: "konnte in der Datei nicht zugeordnet werden.",
-    missingContextText:
-      "hat keine Kontext- oder Löschzeilen zum Zuordnen. Gib mindestens eine unveränderte Nachbarzeile mit führendem Leerzeichen (' ') an.",
+    notFoundText: ef.udNotFoundText,
+    missingContextText: ef.udMissingContextText,
   }))
 
   const result = applyLineEditBlocks(initialLines, blocks)

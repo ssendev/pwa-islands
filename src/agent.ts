@@ -1287,14 +1287,13 @@ export const EDITOR_EDIT_TOOL = {
   type: "function",
   function: {
     name: "edit",
-    description:
-      "Wendet Hash-Anchored Line Edits (REPLACE, INSERT_AFTER, INSERT_BEFORE, DELETE) auf die aktuell geöffnete Datei an.",
+    description: t(getDocumentLanguage()).editFormat.toolEditDescHashline,
     parameters: {
       type: "object",
       properties: {
         edits: {
           type: "string",
-          description: "Die Hashline-Bearbeitungsbefehle für die Datei.",
+          description: t(getDocumentLanguage()).editFormat.toolEditParamHashline,
         },
       },
       required: ["edits"],
