@@ -984,8 +984,8 @@ export const SaveLlmChatNames = Command.define("SaveLlmChatNames", {
     Effect.tryPromise({
       try: () =>
         storeLlmChatNames({
-          aiName: aiName.trim() || DEFAULT_LLM_CHAT_AI_NAME,
-          userName: userName.trim() || DEFAULT_LLM_CHAT_USER_NAME,
+          aiName: aiName.trim() || t(getDocumentLanguage()).common.aiDefaultName,
+          userName: userName.trim() || t(getDocumentLanguage()).common.userDefaultName,
         }),
       catch: () => new Error("Failed to save LLM chat names"),
     }).pipe(
@@ -2043,7 +2043,7 @@ export const ResolveIslandBackNavigation = Command.define("ResolveIslandBackNavi
           shouldNavigate: true,
         })
       },
-      catch: () => new Error("Fehler beim Prüfen der Island-Rücknavigation"),
+      catch: () => new Error("Error checking island back navigation"),
     }).pipe(
       Effect.catch(() =>
         Effect.succeed(
@@ -6604,7 +6604,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 h.Id("llm-chat-ai-name"),
                                 h.Class("form-input"),
                                 h.Value(model.llmChatAiName),
-                                h.Placeholder(DEFAULT_LLM_CHAT_AI_NAME),
+                                h.Placeholder(t(model.language).common.aiDefaultName),
                                 h.OnInput((value) => Message.UpdatedLlmChatAiName({ value })),
                               ]),
                             ],
@@ -6618,7 +6618,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 h.Id("llm-chat-user-name"),
                                 h.Class("form-input"),
                                 h.Value(model.llmChatUserName),
-                                h.Placeholder(DEFAULT_LLM_CHAT_USER_NAME),
+                                h.Placeholder(t(model.language).common.userDefaultName),
                                 h.OnInput((value) => Message.UpdatedLlmChatUserName({ value })),
                               ]),
                             ],
@@ -7790,7 +7790,7 @@ const ISLAND_IFRAME_SANDBOX =
   "allow-scripts allow-forms allow-same-origin allow-modals allow-downloads"
 
 /**
- * Tauri-Titelleisten-Buttons für Windows (`.win-btn`).
+ * Tauri titlebar buttons for Windows (`.win-btn`).
  * Verwendet bewusst Windows-System-Glyphen aus „Segoe Fluent Icons“ / „Segoe MDL2 Assets“
  * (\uE73F, \uE740, \uE921, \uE922, \uE923, \uE8BB) – NICHT durch Noto-Emoji (`viewIcon`) ersetzen.
  */

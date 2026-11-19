@@ -5,7 +5,7 @@ import { getStoredApiHistoryEnabled, normalizePath, splitPath } from "./storage"
 
 export const OPFS_HISTORY_FOLDER = "pwa-islands-history"
 
-// Binärformat-Vertrag: muss exakt mit `src-tauri/src/lib.rs` (`HISTORY_TRAILER_SIZE_BYTES = 16`, LE) übereinstimmen
+// Binary format contract: must match `src-tauri/src/lib.rs` (`HISTORY_TRAILER_SIZE_BYTES = 16`, LE) exactly
 const TRAILER_SIZE_BYTES = 16
 const FNV_OFFSET_BASIS = 0x811c9dc5
 const FNV_PRIME = 0x01000193
@@ -37,13 +37,13 @@ export interface HistoryEntryMeta {
 }
 
 /**
- * Berechnet einen deterministischen 32-Bit-FNV-1a-Hash über UTF-8-Bytes.
+ * Computes a deterministic 32-bit FNV-1a hash over UTF-8 bytes.
  */
 export const hashContentBytes = (bytes: Uint8Array): number =>
   bytes.reduce((acc, byte) => Math.imul(acc ^ byte, FNV_PRIME), FNV_OFFSET_BASIS) >>> 0
 
 /**
- * Berechnet den 32-Bit-Hash sowie die UTF-8-Byte-Länge für einen Textinhalt.
+ * Computes the 32-bit hash and UTF-8 byte length for a text content.
  */
 export const hashAndMeasureHistoryContent = (
   content: string,
@@ -56,14 +56,14 @@ export const hashAndMeasureHistoryContent = (
 }
 
 /**
- * Berechnet den 32-Bit-Hash für einen Textinhalt.
+ * Computes the 32-bit hash for a text content.
  */
 export const hashHistoryContent = (content: string): number =>
   hashAndMeasureHistoryContent(content).contentHash
 
 /**
- * Kodiert einen Versions-Eintrag als Binärblock für die Append-Only-Historie:
- * `[UTF-8 Inhalt] [Hash (Uint32 LE, 4 Bytes)] [Zeitstempel (Float64 LE, 8 Bytes)] [Inhaltslänge (Uint32 LE, 4 Bytes)]`.
+ * Encodes a version entry as a binary block for the append-only history:
+ * `[UTF-8 Content] [Hash (Uint32 LE, 4 Bytes)] [Timestamp (Float64 LE, 8 Bytes)] [Content Length (Uint32 LE, 4 Bytes)]`.
  */
 export const encodeHistoryBytesRecord = (
   contentBytes: Uint8Array,
@@ -89,7 +89,7 @@ export const encodeHistoryRecord = (content: string, timestampMs: number): Uint8
 export type SliceReader = (start: number, end: number) => Promise<ArrayBuffer>
 
 /**
- * Liest nur den 16-Byte-Header (Hash + Zeitstempel + Länge) ab `endOffset`, ohne den Inhalt zu laden.
+ * Reads only the 16-byte header (hash + timestamp + length) from `endOffset` without loading the content.
  */
 export const readHistoryMetaAt = async (
   readSlice: SliceReader,
@@ -124,7 +124,7 @@ export const readHistoryMetaAt = async (
 }
 
 /**
- * Liest genau einen Eintrag rückwärts ab `endOffset` über die am Ende gespeicherte Länge.
+ * Reads exactly one entry backwards from `endOffset` using the length stored at the end.
  */
 export const readHistoryBytesRecordAt = async (
   readSlice: SliceReader,
@@ -165,7 +165,7 @@ export const readHistoryRecordAt = async (
 }
 
 /**
- * Liest alle Offsets und Zeitstempel einer binären Verlaufsdatei (neueste Version zuerst),
+ * Reads all offsets and timestamps of a binary history file (newest version first),
  * ohne die Version-Inhalte zu laden.
  */
 export const readAllHistoryMeta = async (
@@ -371,7 +371,7 @@ const isSameAsLatestVersion = async (
 }
 
 /**
- * Hängt den alten Dateiinhalt inkl. Bearbeitungszeitstempel an die Verlaufsdatei
+ * Appends the old file content including modification timestamp to the history file
  * (in Tauri im internen App-Speicher, im Browser im OPFS) an, sofern er sich
  * von der zuletzt gespeicherten Version unterscheidet.
  */
@@ -434,7 +434,7 @@ const recordTauriApiPathVersions = async (
     )
     return
   } catch {
-    // Kein Dateilesen möglich – prüfe ob es ein Verzeichnis ist
+    // Cannot read as file — check if it is a directory
   }
   const entries = await invoke<ReadonlyArray<{ readonly name: string }>>("tauri_fs_list_entries", {
     subPath: cleanPath,
@@ -467,12 +467,12 @@ export const recordPreviousTauriApiFileVersion = async (
     }
     await recordTauriApiPathVersions(cleanPath, timestampMs)
   } catch {
-    // NOTE: Fehlende Quelldatei oder Verlaufsfehler dürfen api.js-Operationen nicht blockieren
+    // NOTE: Missing source file or history errors must not block api.js operations
   }
 }
 
 /**
- * Liest genau die nächste ältere Version ab `maybeCursor` (oder ab Dateiende bei `Option.none()`).
+ * Reads the next older version from `maybeCursor` (or from end of file when `Option.none()`).
  */
 export const loadPreviousFileHistoryEntry = async (
   subPath: ReadonlyArray<string>,
@@ -495,7 +495,7 @@ export const loadPreviousFileHistoryEntry = async (
 }
 
 /**
- * Lädt nur Offsets, Größen und Zeitstempel aller gespeicherten Versionen einer Datei (neueste zuerst).
+ * Loads only offsets, sizes, and timestamps of all saved versions of a file (newest first).
  */
 export const loadFileHistoryIndex = async (
   subPath: ReadonlyArray<string>,
@@ -509,7 +509,7 @@ export const loadFileHistoryIndex = async (
 }
 
 /**
- * Springt direkt zu `endOffset` in der Verlaufsdatei, prüft den Header erneut und lädt den Inhalt.
+ * Jumps directly to `endOffset` in the history file, re-verifies the header, and loads the content.
  */
 export const loadFileHistoryEntryAt = async (
   subPath: ReadonlyArray<string>,
@@ -573,7 +573,7 @@ export const hasFileHistory = async (
 }
 
 /**
- * Listet alle Dateinamen im Verlaufsordner für `subPath`, die mindestens einen Eintrag besitzen.
+ * Lists all file names in the history folder for `subPath` that have at least one entry.
  */
 export const listHistoryFileNames = async (
   subPath: ReadonlyArray<string>,
@@ -619,7 +619,7 @@ export const listHistoryFileNames = async (
 }
 
 /**
- * Löscht die gespeicherte Versionshistorie einer Datei.
+ * Deletes the saved version history of a file.
  */
 export const clearFileHistory = async (
   subPath: ReadonlyArray<string>,
@@ -633,7 +633,7 @@ export const clearFileHistory = async (
 }
 
 /**
- * Löscht den gesamten gespeicherten Versionsverlauf aller Dateien.
+ * Deletes the entire saved version history of all files.
  */
 export const clearAllFileHistory = async (): Promise<void> => {
   if (supportsTauri()) {

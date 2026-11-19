@@ -25,10 +25,9 @@ const dispatchServiceWorkerToast = (banner: AlertBanner) => {
 registerMonacoEditorElement()
 
 if (supportsTauri()) {
-  // In nativen Tauri-Apps sind alle Web-Assets bereits lokal in der Binärdatei gebündelt.
-  // Ein Service Worker darf hier nicht aktiv sein, da er alte Builds im Webview-Cache
-  // festhält und Versionsupdates blockiert. Eventuell vorhandene Service Worker und
-  // Caches (z. B. aus vorherigen Builds) werden bereinigt.
+  // In native Tauri apps, all web assets are already bundled locally in the binary.
+  // A Service Worker must not be active here, as it holds onto old builds in the webview cache
+  // and blocks version updates. Clean up any existing Service Workers and caches (e.g. from previous builds).
   if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
     void navigator.serviceWorker.getRegistrations().then(async (registrations) => {
       let hadRegistrations = registrations.length > 0

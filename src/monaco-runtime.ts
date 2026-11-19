@@ -25,12 +25,11 @@ const globalWithMonaco = globalThis as typeof globalThis & {
 let monacoPromise: Promise<typeof Monaco> | undefined
 
 /**
- * Lädt Monaco mit deutscher Lokalisierung.
+ * Loads Monaco with German localization when the document language is `de`.
  *
- * `monaco-editor/nls/lang/de` muss zwingend vor `monaco-editor` ausgewertet werden,
- * da Monaco bereits bei der Modul-Initialisierung `localize()` aufruft. Bei einem
- * statischen Import kann Vite/Rolldown die Chunks so aufteilen, dass `editor.api`
- * vor `de` ausgeführt wird.
+ * `monaco-editor/nls/lang/de` must be evaluated before `monaco-editor`,
+ * because Monaco already calls `localize()` during module initialization. With a
+ * static import, Vite/Rolldown could split chunks so `editor.api` runs before `de`.
  */
 export function loadMonaco(): Promise<typeof Monaco> {
   if (monacoPromise === undefined) {

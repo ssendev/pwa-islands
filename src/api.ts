@@ -70,7 +70,7 @@ async function recordBrowserPathVersions(cleanPath: string, timestampMs: number)
     await appendFileHistoryBytes(dirs, name, new Uint8Array(await file.arrayBuffer()), timestampMs)
     return
   } catch {
-    // Keine Datei – prüfe ob es ein Verzeichnis ist
+    // Not a file — check if it is a directory
   }
   const dir = await resolveDirectory(cleanPath)
   const handles = await collectDirectoryHandles(dir)
@@ -108,7 +108,7 @@ async function recordPreviousApiFileVersion(path: string): Promise<void> {
     }
     await recordBrowserPathVersions(cleanPath, timestampMs)
   } catch {
-    // NOTE: Fehlende Quelldatei oder nicht verfügbares OPFS darf das Schreiben oder Löschen über api.js nicht blockieren
+    // NOTE: Missing source file or unavailable OPFS must not block writing or deleting via api.js
   }
 }
 

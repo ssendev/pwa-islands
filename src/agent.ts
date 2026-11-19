@@ -363,7 +363,7 @@ export const filterAndSortModelNames = (
   return filtered.sort((a, b) => a.localeCompare(b, "de", { sensitivity: "base" }))
 }
 
-/** Prüft `GET /models`: die Antwort muss eine OpenAI-Modellliste (`data`-Array) sein. */
+/** Checks `GET /models`: the response must contain an OpenAI model list (`data` array). */
 export const listModels = async (settings: LlmSettings): Promise<ReadonlyArray<string>> => {
   const response = await fetch(joinUrl(settings.baseUrl, "/models"), {
     headers: authHeaders(settings.apiKey),
@@ -485,7 +485,7 @@ export const resolveAllProviderModelOptions = (
     providerOptions.push(...currentProviderOptions)
   }
   const nativeOptions: ReadonlyArray<ModelOption> = includeLanguageModel
-    ? [{ label: LANGUAGE_MODEL_OPTION_LABEL, value: LANGUAGE_MODEL_OPTION_VALUE }]
+    ? [{ label: t(getDocumentLanguage()).agent.browserAi, value: LANGUAGE_MODEL_OPTION_VALUE }]
     : []
   const trimmedActive = activeModel.trim()
   const activeOptions: ReadonlyArray<ModelOption> =
@@ -548,7 +548,7 @@ export const resolveModelOptions = (
   const manualOptions = parseModelOptions(models)
   const trimmedActive = activeModel.trim()
   const nativeOptions: ReadonlyArray<ModelOption> = includeLanguageModel
-    ? [{ label: LANGUAGE_MODEL_OPTION_LABEL, value: LANGUAGE_MODEL_OPTION_VALUE }]
+    ? [{ label: t(getDocumentLanguage()).agent.browserAi, value: LANGUAGE_MODEL_OPTION_VALUE }]
     : []
   const activeOptions: ReadonlyArray<ModelOption> =
     trimmedActive !== "" && trimmedActive !== LANGUAGE_MODEL_OPTION_VALUE
@@ -626,7 +626,7 @@ const setNestedField = (
   return { ...target, [head]: setNestedField(nested, rest, value) }
 }
 
-/** Parst optionale zusätzliche Request-Parameter als JSON-Objekt. */
+/** Parses optional extra request parameters as a JSON object. */
 export const parseExtraArgs = (raw: string): Record<string, unknown> => {
   const trimmed = raw.trim()
   if (trimmed === "") {
@@ -644,7 +644,7 @@ export const parseExtraArgs = (raw: string): Record<string, unknown> => {
   return parsed
 }
 
-/** Baut den Request-Body für `/chat/completions` inkl. Thinking-Parameter und Extra-Parametern. */
+/** Builds the request body for `/chat/completions` including thinking and extra parameters. */
 export const buildChatRequestBody = (
   config: LlmRequestConfig,
   prompt: string,
@@ -670,7 +670,7 @@ export const buildChatRequestBody = (
   return setNestedField(baseBody, segments, parseThinkingValue(thinkingLevel))
 }
 
-/** Sendet eine kurze Chat-Anfrage und gibt Antworttext und Reasoning getrennt zurück. */
+/** Sends a short chat request and returns answer text and reasoning separately. */
 export const chatOnceParts = async (
   config: LlmRequestConfig,
   prompt: string,
@@ -693,13 +693,13 @@ export const chatOnceParts = async (
   return extractChatParts(body)
 }
 
-/** Sendet eine kurze Chat-Anfrage und gibt den Antworttext zurück. */
+/** Sends a short chat request and returns the answer text. */
 export const chatOnce = async (config: LlmRequestConfig, prompt: string): Promise<string> => {
   const parts = await chatOnceParts(config, prompt)
   return parts.content.trim() !== "" ? parts.content : parts.reasoning
 }
 
-/** Bestimmt das für einen LLM-Test zu verwendende Modell (leer, falls `/models` abgefragt wird). */
+/** Determines the model to use for an LLM test (empty if `/models` is queried). */
 export const resolveTestModel = (config: LlmRequestConfig): string => {
   const manualModels = parseModelList(config.models)
   return config.model.trim() !== "" ? config.model.trim() : (manualModels[0] ?? "")
@@ -1159,7 +1159,7 @@ export const extractToolCalls = (body: unknown): ReadonlyArray<LlmToolCall> => {
   })
 }
 
-/** Testet Tool-Calling über `/chat/completions` mit einem einfachen Ping-Tool. */
+/** Tests tool calling via `/chat/completions` using a simple ping tool. */
 export const testToolCall = async (config: LlmRequestConfig): Promise<LlmTestResult> => {
   const activeModel = resolveTestModel(config)
   if (activeModel === "") {
@@ -1215,9 +1215,9 @@ const runChatTest = async (config: LlmRequestConfig): Promise<LlmTestResult> => 
 
 /**
  * Testet den Zugang je nach Modus:
- * - `"models"`: Modellliste über `GET /models`
- * - `"chat"`: Chat-Anfrage über `/chat/completions`
- * - `"tools"`: Tool-Aufruf über `/chat/completions`
+ * - `"models"`: model list via `GET /models`
+ * - `"chat"`: chat request via `/chat/completions`
+ * - `"tools"`: tool call via `/chat/completions`
  * - ohne Modus (Standard): Chat mit aktivem/manuellem Modell, sonst `/models`.
  */
 export const testLlmConnection = async (

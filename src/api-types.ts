@@ -1,13 +1,13 @@
 export interface IslandEntry {
-  /** Name des Eintrags ohne übergeordneten Pfad. */
+  /** Entry name without parent path. */
   name: string
-  /** Pfad relativ zur ausgewählten Wurzel, z. B. "notizen/ideen.md". */
+  /** Path relative to the selected root, e.g. "notes/ideas.md". */
   path: string
-  /** Art des Eintrags. */
+  /** Entry kind. */
   kind: "file" | "directory"
-  /** Dateigröße in Bytes (nur bei kind === 'file'). */
+  /** File size in bytes (only when kind === 'file'). */
   size?: number
-  /** Zeitpunkt der letzten Änderung als Unix-Timestamp (nur bei kind === 'file'). */
+  /** Last modified timestamp as Unix timestamp (only when kind === 'file'). */
   lastModified?: number
 }
 
@@ -15,56 +15,56 @@ export type IslandInput = string | Blob | Uint8Array<ArrayBuffer> | ArrayBuffer
 
 export interface WriteOptions {
   /**
-   * Vorhandene Datei überschreiben. Standard: false.
-   * Bei false wird ein Fehler geworfen, wenn die Datei bereits existiert,
-   * und die bestehende Datei bleibt unverändert.
+   * Overwrite existing file. Default: false.
+   * When false, an error is thrown if the file already exists
+   * and the existing file remains unchanged.
    */
   overwrite?: boolean
 }
 
 export interface RemoveOptions {
   /**
-   * Ordner samt Inhalt löschen. Standard: false.
-   * Bei false wird ein Fehler geworfen, wenn der Ordner nicht leer ist.
-   * Für Dateien ohne Wirkung.
+   * Delete folder including its contents. Default: false.
+   * When false, an error is thrown if the folder is not empty.
+   * No effect for files.
    */
   recursive?: boolean
 }
 
 export interface ReadOptions {
   /**
-   * Nur lesen, wenn die Datei sich verlustfrei als Text darstellen lässt:
-   * Rundlauf über `TextEncoder`. sonst wird ein Fehler geworfen.
-   * Standard: false.
+   * Only read if the file can be losslessly represented as text:
+   * round-trip via `TextEncoder`, otherwise an error is thrown.
+   * Default: false.
    */
   ensureText?: boolean
 }
 
 export interface IslandsApi {
-  /** Listet den Inhalt eines Verzeichnisses auf (Standard: Wurzel). Sortiert: Ordner zuerst, dann alphabetisch. */
+  /** Lists the contents of a directory (default: root). Sorted: folders first, then alphabetically. */
   list(path?: string): Promise<ReadonlyArray<IslandEntry>>
 
-  /** Liest den Inhalt einer Datei als Text (Mit `ensureText: true` wird geprüft, ob die Datei verlustfrei Text ist). */
+  /** Reads the content of a file as text (with `ensureText: true`, checks that the file is lossless text). */
   read(path: string, options?: ReadOptions): Promise<string>
 
-  /** Liest den Inhalt einer Datei als Blob (für Binärdaten, Bilder, Downloads …). */
+  /** Reads the content of a file as a Blob (for binary data, images, downloads …). */
   readBlob(path: string): Promise<Blob>
 
-  /** Prüft, ob ein Eintrag existiert. */
+  /** Checks whether an entry exists. */
   exists(path: string): Promise<boolean>
 
-  /** Schreibt eine Datei (erzeugt sie bei Bedarf; überschreibt nur mit overwrite: true). Fehlende Elternordner werden angelegt. */
+  /** Writes a file (creates it if needed; only overwrites with overwrite: true). Missing parent folders are created. */
   write(path: string, content: IslandInput, options?: WriteOptions): Promise<void>
 
-  /** Erstellt einen Ordner (verschachtelt erlaubt). */
+  /** Creates a folder (nested paths allowed). */
   makeDir(path: string): Promise<void>
 
-  /** Benennt einen Eintrag um bzw. verschiebt ihn innerhalb der Wurzel. */
+  /** Renames or moves an entry within the root. */
   rename(from: string, to: string): Promise<void>
 
-  /** Löscht eine Datei oder einen Ordner (rekursiv nur mit recursive: true). */
+  /** Deletes a file or folder (recursively only with recursive: true). */
   remove(path: string, options?: RemoveOptions): Promise<void>
 
-  /** Kopiert einen Eintrag an einen neuen Ort innerhalb der Wurzel. */
+  /** Copies an entry to a new location within the root. */
   copy(from: string, to: string): Promise<void>
 }

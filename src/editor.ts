@@ -1203,7 +1203,7 @@ const recordPreviousFileVersion = async (
     const buffer = await storage.readFileBuffer(subPath, readFromName)
     await appendFileHistoryBytes(subPath, historyTargetName, new Uint8Array(buffer), timestampMs)
   } catch {
-    // NOTE: Fehlende Quelldatei oder nicht verfügbares OPFS darf das Speichern nicht blockieren
+    // NOTE: Missing source file or unavailable OPFS must not block saving
   }
 }
 
@@ -1229,7 +1229,7 @@ const recordDirectoryFileVersions = async (
       }
     }, Promise.resolve())
   } catch {
-    // NOTE: Nicht verfügbares OPFS darf das Löschen nicht blockieren
+    // NOTE: Unavailable OPFS must not block deleting
   }
 }
 
@@ -1660,7 +1660,7 @@ export const LoadHistoryEntryAt = Command.define("LoadHistoryEntryAt", {
                   timestampMs,
                 )
               } catch {
-                // NOTE: Nicht verfügbares OPFS darf die Wiederherstellung nicht blockieren
+                // NOTE: Unavailable OPFS must not block restoring
               }
             }
             return Message.SucceededLoadHistoryEntryAt({
@@ -1727,7 +1727,7 @@ export const RestoreBinaryHistoryEntryAt = Command.define("RestoreBinaryHistoryE
                   )
                 }
               } catch {
-                // NOTE: Nicht verfügbares OPFS darf die Wiederherstellung nicht blockieren
+                // NOTE: Unavailable OPFS must not block restoring
               }
             }
             await storage.writeFileBuffer(

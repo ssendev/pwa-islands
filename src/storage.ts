@@ -465,20 +465,23 @@ export async function getStoredLlmChatNames(): Promise<LlmChatNames> {
         const aiName =
           "aiName" in record && typeof record.aiName === "string" && record.aiName.trim() !== ""
             ? record.aiName.trim()
-            : DEFAULT_LLM_CHAT_AI_NAME
+            : t(getDocumentLanguage()).common.aiDefaultName
         const userName =
           "userName" in record &&
           typeof record.userName === "string" &&
           record.userName.trim() !== ""
             ? record.userName.trim()
-            : DEFAULT_LLM_CHAT_USER_NAME
+            : t(getDocumentLanguage()).common.userDefaultName
         resolve({ aiName, userName })
       }
       req.onerror = () => reject(req.error)
     })
   } catch (error) {
-    console.error("Fehler beim Abrufen der KI-Chat-Namen:", error)
-    return { aiName: DEFAULT_LLM_CHAT_AI_NAME, userName: DEFAULT_LLM_CHAT_USER_NAME }
+    console.error("Failed to load LLM chat names:", error)
+    return {
+      aiName: t(getDocumentLanguage()).common.aiDefaultName,
+      userName: t(getDocumentLanguage()).common.userDefaultName,
+    }
   }
 }
 
@@ -1137,9 +1140,31 @@ export interface StoredUserTemplate {
   readonly content: string
 }
 
-export const FS_TEMPLATES_FOLDER = "Vorlagen"
-export const OPFS_TEMPLATES_FOLDER = "PWA Islands Vorlagen"
-export const TAURI_TEMPLATES_FOLDER = "Vorlagen"
+export const FS_TEMPLATES_FOLDER_DE = "Vorlagen"
+export const FS_TEMPLATES_FOLDER_EN = "Templates"
+export const FS_TEMPLATES_FOLDER = FS_TEMPLATES_FOLDER_EN
+export const OPFS_TEMPLATES_FOLDER = "PWA Islands Templates"
+export const TAURI_TEMPLATES_FOLDER = FS_TEMPLATES_FOLDER_EN
+
+const getTemplateFolderCandidates = (): readonly [string, string] =>
+  getDocumentLanguage() === "de"
+    ? [FS_TEMPLATES_FOLDER_DE, FS_TEMPLATES_FOLDER_EN]
+    : [FS_TEMPLATES_FOLDER_EN, FS_TEMPLATES_FOLDER_DE]
+
+async function resolveTauriTemplatesFolder(): Promise<string> {
+  const [preferred, fallback] = getTemplateFolderCandidates()
+  try {
+    if (await invoke<boolean>("tauri_fs_exists", { subPath: preferred })) {
+      return preferred
+    }
+    if (await invoke<boolean>("tauri_fs_exists", { subPath: fallback })) {
+      return fallback
+    }
+  } catch {
+    // Fall back to preferred name if existence check fails
+  }
+  return preferred
+}
 
 async function getTemplatesDir(
   type: string,
@@ -1150,7 +1175,16 @@ async function getTemplatesDir(
     const realRoot = await navigator.storage.getDirectory()
     return realRoot.getDirectoryHandle(OPFS_TEMPLATES_FOLDER, { create })
   }
-  return rootHandle.getDirectoryHandle(FS_TEMPLATES_FOLDER, { create })
+  const [preferred, fallback] = getTemplateFolderCandidates()
+  try {
+    return await rootHandle.getDirectoryHandle(preferred, { create: false })
+  } catch {
+    try {
+      return await rootHandle.getDirectoryHandle(fallback, { create: false })
+    } catch {
+      return rootHandle.getDirectoryHandle(preferred, { create })
+    }
+  }
 }
 
 // NOTE: label doubles as file name; strip chars illegal on common filesystems
@@ -1172,6 +1206,7 @@ export async function getStoredUserTemplates(
 ): Promise<ReadonlyArray<StoredUserTemplate>> {
   if (type === "tauri") {
     try {
+      const templatesFolder = await resolveTauriTemplatesFolder()
       const files = await invoke<
         ReadonlyArray<{
           name: string
@@ -1179,13 +1214,13 @@ export async function getStoredUserTemplates(
           size: number | null
           lastModified: number | null
         }>
-      >("tauri_fs_list_entries", { subPath: TAURI_TEMPLATES_FOLDER })
+      >("tauri_fs_list_entries", { subPath: templatesFolder })
       const textFiles = Array.filter(files, (f) => !f.isDirectory)
       const results = await Promise.all(
         Array.map(textFiles, async (f): Promise<ReadonlyArray<StoredUserTemplate>> => {
           try {
             const data = await invoke<ArrayBuffer>("tauri_fs_read_file", {
-              subPath: `${TAURI_TEMPLATES_FOLDER}/${f.name}`,
+              subPath: `${templatesFolder}/${f.name}`,
             })
             const bytes = new Uint8Array(data)
             const text = decodeUtf8Strict(bytes)
@@ -1256,9 +1291,10 @@ export async function saveUserTemplate(
 ): Promise<void> {
   const fileName = sanitizeTemplateName(name)
   if (type === "tauri") {
+    const templatesFolder = await resolveTauriTemplatesFolder()
     const bytes = new TextEncoder().encode(content)
     await invoke("tauri_fs_write_file", {
-      subPath: `${TAURI_TEMPLATES_FOLDER}/${fileName}`,
+      subPath: `${templatesFolder}/${fileName}`,
       data: globalThis.Array.from(bytes),
     })
     return
@@ -1285,8 +1321,9 @@ export async function deleteUserTemplate(
 ): Promise<void> {
   const fileName = sanitizeTemplateName(name)
   if (type === "tauri") {
+    const templatesFolder = await resolveTauriTemplatesFolder()
     await invoke("tauri_fs_remove_entry", {
-      subPath: `${TAURI_TEMPLATES_FOLDER}/${fileName}`,
+      subPath: `${templatesFolder}/${fileName}`,
       isDirectory: false,
     })
     return
