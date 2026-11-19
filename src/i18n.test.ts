@@ -2,8 +2,8 @@ import { Option } from "effect"
 import { Command, given, message, model, story } from "foldkit/story"
 import { describe, expect, it } from "vitest"
 
-import { detectBrowserLanguage, isLanguage, t, translations } from "./i18n"
-import { Flags, Message, SaveLanguage, init, update } from "./main"
+import { detectBrowserLanguage, formatDateTime, isLanguage, t, translations } from "./i18n"
+import { Flags, Message, SaveDateFormat, SaveLanguage, SaveTimeFormat, init, update } from "./main"
 
 const defaultFlags: Flags = {
   hasDirectoryPicker: true,
@@ -61,6 +61,39 @@ describe("i18n", () => {
       Command.resolve(SaveLanguage({ language: "de" }), Message.CompletedSaveLanguage()),
       model((nextModel) => {
         expect(nextModel.language).toBe("de")
+      }),
+    )
+  })
+
+  it("formats dates and times according to dateFormat and timeFormat settings", () => {
+    const sample = new Date(2026, 2, 5, 14, 30, 0).getTime()
+    expect(
+      formatDateTime(sample, { language: "en", dateFormat: "iso", timeFormat: "24h" }),
+    ).toContain("2026-03-05")
+    expect(
+      formatDateTime(sample, { language: "en", dateFormat: "iso", timeFormat: "24h" }),
+    ).toContain("14:30")
+    expect(
+      formatDateTime(sample, { language: "en", dateFormat: "dmy", timeFormat: "24h" }),
+    ).toContain("05.03.2026")
+    expect(
+      formatDateTime(sample, { language: "de", dateFormat: "mdy", timeFormat: "12h" }),
+    ).toContain("03/05/2026")
+  })
+
+  it("updates dateFormat and timeFormat and dispatches save commands", () => {
+    const initial = init(defaultFlags, defaultUrl).model
+
+    story(
+      update,
+      given(initial),
+      message(Message.SelectedSettingsDateFormat({ dateFormat: "iso" })),
+      Command.resolve(SaveDateFormat({ dateFormat: "iso" }), Message.CompletedSaveDateFormat()),
+      message(Message.SelectedSettingsTimeFormat({ timeFormat: "24h" })),
+      Command.resolve(SaveTimeFormat({ timeFormat: "24h" }), Message.CompletedSaveTimeFormat()),
+      model((nextModel) => {
+        expect(nextModel.dateFormat).toBe("iso")
+        expect(nextModel.timeFormat).toBe("24h")
       }),
     )
   })

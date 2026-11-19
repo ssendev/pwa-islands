@@ -5,6 +5,66 @@ export type Language = typeof LanguageSchema.Type
 
 export const isLanguage = (value: unknown): value is Language => value === "de" || value === "en"
 
+export const DateFormatSchema = Schema.Literals(["auto", "iso", "dmy", "mdy"])
+export type DateFormat = typeof DateFormatSchema.Type
+
+export const isDateFormat = (value: unknown): value is DateFormat =>
+  value === "auto" || value === "iso" || value === "dmy" || value === "mdy"
+
+export const TimeFormatSchema = Schema.Literals(["auto", "24h", "12h"])
+export type TimeFormat = typeof TimeFormatSchema.Type
+
+export const isTimeFormat = (value: unknown): value is TimeFormat =>
+  value === "auto" || value === "24h" || value === "12h"
+
+const pad2 = (value: number): string => String(value).padStart(2, "0")
+
+export const formatDateTime = (
+  timestampMs: number,
+  options: {
+    readonly language: Language
+    readonly dateFormat?: DateFormat
+    readonly timeFormat?: TimeFormat
+    readonly includeSeconds?: boolean
+  },
+): string => {
+  const date = new Date(timestampMs)
+  const dateFormat = options.dateFormat ?? "auto"
+  const timeFormat = options.timeFormat ?? "auto"
+  const locale = options.language === "de" ? "de-DE" : "en-US"
+
+  const year = date.getFullYear()
+  const month = pad2(date.getMonth() + 1)
+  const day = pad2(date.getDate())
+
+  const datePart =
+    dateFormat === "iso"
+      ? `${year}-${month}-${day}`
+      : dateFormat === "dmy"
+        ? `${day}.${month}.${year}`
+        : dateFormat === "mdy"
+          ? `${month}/${day}/${year}`
+          : options.language === "de"
+            ? `${day}.${month}.${year}`
+            : date.toLocaleDateString("en-US", {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+              })
+
+  const hour12 =
+    timeFormat === "24h" ? false : timeFormat === "12h" ? true : options.language === "en"
+
+  const timePart = date.toLocaleTimeString(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(options.includeSeconds ? { second: "2-digit" } : {}),
+    hour12,
+  })
+
+  return `${datePart}, ${timePart}`
+}
+
 export const detectBrowserLanguage = (): Language => {
   if (typeof navigator === "undefined" || typeof navigator.language !== "string") {
     return "en"
@@ -83,6 +143,15 @@ const de = {
   settings: {
     title: "Einstellungen",
     language: "Sprache",
+    dateFormat: "Datumsformat",
+    dateFormatAuto: "Automatisch (nach Sprache)",
+    dateFormatIso: "YYYY-MM-DD (ISO)",
+    dateFormatDmy: "TT.MM.JJJJ",
+    dateFormatMdy: "MM/TT/JJJJ",
+    timeFormat: "Zeitformat",
+    timeFormatAuto: "Automatisch (nach Sprache)",
+    timeFormat24h: "24-Stunden (14:30)",
+    timeFormat12h: "12-Stunden (2:30 PM)",
     appTheme: "App-Theme",
     appThemeSystem: "System (Automatisch)",
     appThemeLight: "Hell",
@@ -409,6 +478,15 @@ const en: Translations = {
   settings: {
     title: "Settings",
     language: "Language",
+    dateFormat: "Date format",
+    dateFormatAuto: "Automatic (by language)",
+    dateFormatIso: "YYYY-MM-DD (ISO)",
+    dateFormatDmy: "DD.MM.YYYY",
+    dateFormatMdy: "MM/DD/YYYY",
+    timeFormat: "Time format",
+    timeFormatAuto: "Automatic (by language)",
+    timeFormat24h: "24-hour (14:30)",
+    timeFormat12h: "12-hour (2:30 PM)",
     appTheme: "App Theme",
     appThemeSystem: "System (Automatic)",
     appThemeLight: "Light",

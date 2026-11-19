@@ -43,7 +43,7 @@ import {
   loadFileHistoryIndex,
   truncateLatestFileHistoryEntry,
 } from "./history"
-import { type Language, t } from "./i18n"
+import { type DateFormat, type Language, type TimeFormat, formatDateTime, t } from "./i18n"
 import { type IconId, viewIcon } from "./icons"
 import * as LlmResponse from "./llm-response"
 import { viewMarkdown, viewUserMarkdown } from "./markdown"
@@ -4271,6 +4271,8 @@ export type ViewInputs = {
   readonly llmChatAiName?: string
   readonly llmChatUserName?: string
   readonly language?: Language
+  readonly dateFormat?: DateFormat
+  readonly timeFormat?: TimeFormat
 }
 
 const viewLlmChatHistory = (
@@ -5666,10 +5668,17 @@ const viewPreviewOverlay = (
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => viewHistoryPreviewOverlay(HistoryPreview.Text({ content }), language, h)
 
-const formatHistoryTimestamp = (timestampMs: number, language: Language): string =>
-  new Date(timestampMs).toLocaleString(language === "de" ? "de-DE" : "en-US", {
-    dateStyle: "medium",
-    timeStyle: "medium",
+const formatHistoryTimestamp = (
+  timestampMs: number,
+  language: Language,
+  dateFormat: DateFormat,
+  timeFormat: TimeFormat,
+): string =>
+  formatDateTime(timestampMs, {
+    language,
+    dateFormat,
+    timeFormat,
+    includeSeconds: true,
   })
 
 const formatHistorySize = (byteLength: number): string =>
@@ -5686,6 +5695,8 @@ const viewHistoryOverlay = (
   }>,
   isBinary: boolean,
   language: Language,
+  dateFormat: DateFormat,
+  timeFormat: TimeFormat,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
   if (historyState._tag === "Closed") {
@@ -5857,7 +5868,14 @@ const viewHistoryOverlay = (
                                     [
                                       h.span(
                                         [h.Class("editor-history-date")],
-                                        [formatHistoryTimestamp(entry.timestampMs, language)],
+                                        [
+                                          formatHistoryTimestamp(
+                                            entry.timestampMs,
+                                            language,
+                                            dateFormat,
+                                            timeFormat,
+                                          ),
+                                        ],
                                       ),
                                       h.span(
                                         [h.Class("editor-history-lines")],
@@ -6104,6 +6122,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                   : Option.none(),
                 isBinaryHistory,
                 language,
+                context.dateFormat ?? "auto",
+                context.timeFormat ?? "auto",
                 h,
               ),
               historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)
@@ -6174,6 +6194,8 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 : Option.none(),
               isBinaryHistory,
               language,
+              context.dateFormat ?? "auto",
+              context.timeFormat ?? "auto",
               h,
             ),
             historyState._tag === "Open" && Option.isSome(historyState.maybePreviewContent)

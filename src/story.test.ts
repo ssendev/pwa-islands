@@ -152,6 +152,8 @@ const readyModel: Model = {
   apiHistoryEnabled: true,
   appTheme: "system",
   language: "de",
+  dateFormat: "auto",
+  timeFormat: "auto",
   editorLineNumbers: true,
   editorFolding: true,
   editorWordWrap: true,

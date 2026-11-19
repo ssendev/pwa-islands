@@ -1,6 +1,13 @@
 import { Array, Data, Effect, Option, Schema, Stream } from "effect"
 import { invoke } from "@tauri-apps/api/core"
-import { type Language, isLanguage } from "./i18n"
+import {
+  type DateFormat,
+  type Language,
+  type TimeFormat,
+  isDateFormat,
+  isLanguage,
+  isTimeFormat,
+} from "./i18n"
 
 export class DirectoryIterationError extends Data.TaggedError("DirectoryIterationError")<{
   readonly message: string
@@ -542,6 +549,63 @@ export async function storeLanguage(language: Language): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
     const req = tx.objectStore(STORE_NAME).put(language, APP_LANGUAGE_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+const APP_DATE_FORMAT_KEY = "app_date_format"
+const APP_TIME_FORMAT_KEY = "app_time_format"
+
+export async function getStoredDateFormat(): Promise<DateFormat> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(APP_DATE_FORMAT_KEY)
+      req.onsuccess = () => {
+        resolve(isDateFormat(req.result) ? req.result : "auto")
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen des Datumsformats:", error)
+    return "auto"
+  }
+}
+
+export async function storeDateFormat(format: DateFormat): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put(format, APP_DATE_FORMAT_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+export async function getStoredTimeFormat(): Promise<TimeFormat> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(APP_TIME_FORMAT_KEY)
+      req.onsuccess = () => {
+        resolve(isTimeFormat(req.result) ? req.result : "auto")
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen des Zeitformats:", error)
+    return "auto"
+  }
+}
+
+export async function storeTimeFormat(format: TimeFormat): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put(format, APP_TIME_FORMAT_KEY)
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
   })

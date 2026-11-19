@@ -108,7 +108,20 @@ import {
   parseEditFormat,
 } from "./edit-format"
 import { formatApiDtsMessage } from "./hashline"
-import { type Language, LanguageSchema, applyLanguageToDocument, isLanguage, t } from "./i18n"
+import {
+  type DateFormat,
+  DateFormatSchema,
+  type Language,
+  LanguageSchema,
+  type TimeFormat,
+  TimeFormatSchema,
+  applyLanguageToDocument,
+  formatDateTime,
+  isDateFormat,
+  isLanguage,
+  isTimeFormat,
+  t,
+} from "./i18n"
 import * as Editor from "./editor"
 import * as LlmResponse from "./llm-response"
 import {
@@ -125,20 +138,24 @@ import {
   getFileExtension,
   getStoredApiHistoryEnabled,
   getStoredAppTheme,
+  getStoredDateFormat,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
   getStoredLanguage,
   getStoredLlmChatNames,
   getStoredLlmSettings,
   getStoredMonacoSettings,
+  getStoredTimeFormat,
   storeApiHistoryEnabled,
   storeAppTheme,
+  storeDateFormat,
   storeEditorPreferences,
   storeHistoryEnabled,
   storeLanguage,
   storeLlmChatNames,
   storeLlmSettings,
   storeMonacoSettings,
+  storeTimeFormat,
 } from "./storage"
 
 // FORMATTING
@@ -151,13 +168,6 @@ const formatSize = (bytes: number): string => {
     return `${(bytes / 1024).toFixed(1)} KB`
   }
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-const formatDate = (timestamp: number): string => {
-  return new Intl.DateTimeFormat("de-DE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(timestamp)
 }
 
 const formatSummaryText = (entries: ReadonlyArray<FileEntry>, language: Language): string => {
@@ -408,6 +418,8 @@ export const Model = Schema.Struct({
   apiHistoryEnabled: Schema.Boolean,
   appTheme: AppThemeSchema,
   language: LanguageSchema,
+  dateFormat: DateFormatSchema,
+  timeFormat: TimeFormatSchema,
   editorLineNumbers: Schema.Boolean,
   editorFolding: Schema.Boolean,
   editorWordWrap: Schema.Boolean,
@@ -599,6 +611,10 @@ export const Message = defineMessageUnion({
   SelectedSettingsLanguage: { language: LanguageSchema },
   CompletedSaveLanguage: {},
   CompletedApplyLanguage: {},
+  SelectedSettingsDateFormat: { dateFormat: DateFormatSchema },
+  CompletedSaveDateFormat: {},
+  SelectedSettingsTimeFormat: { timeFormat: TimeFormatSchema },
+  CompletedSaveTimeFormat: {},
   ClickedTestLlm: { mode: LlmTestMode },
   UpdatedTestLlmStream: {
     content: Schema.String,
@@ -664,6 +680,8 @@ export const Message = defineMessageUnion({
     monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
     appTheme: Schema.optionalKey(AppThemeSchema),
     language: Schema.optionalKey(LanguageSchema),
+    dateFormat: Schema.optionalKey(DateFormatSchema),
+    timeFormat: Schema.optionalKey(TimeFormatSchema),
     llmChatNames: Schema.optionalKey(
       Schema.Struct({ aiName: Schema.String, userName: Schema.String }),
     ),
@@ -1109,6 +1127,40 @@ export const SaveLanguage = Command.define("SaveLanguage", {
     ),
 })
 
+export const SaveDateFormat = Command.define("SaveDateFormat", {
+  args: {
+    dateFormat: DateFormatSchema,
+  },
+  messages: [Message.CompletedSaveDateFormat],
+  execute: ({ dateFormat }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await storeDateFormat(dateFormat)
+      },
+      catch: () => new Error("Failed to save date format"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveDateFormat()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveDateFormat())),
+    ),
+})
+
+export const SaveTimeFormat = Command.define("SaveTimeFormat", {
+  args: {
+    timeFormat: TimeFormatSchema,
+  },
+  messages: [Message.CompletedSaveTimeFormat],
+  execute: ({ timeFormat }) =>
+    Effect.tryPromise({
+      try: async () => {
+        await storeTimeFormat(timeFormat)
+      },
+      catch: () => new Error("Failed to save time format"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveTimeFormat()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveTimeFormat())),
+    ),
+})
+
 export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
   args: {
     lineNumbers: Schema.Boolean,
@@ -1151,6 +1203,8 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredMonacoSettings(),
       getStoredAppTheme(),
       getStoredLanguage(),
+      getStoredDateFormat(),
+      getStoredTimeFormat(),
       getStoredLlmChatNames(),
     ]),
   ).pipe(
@@ -1162,6 +1216,8 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         monacoSettings,
         appTheme,
         maybeLanguage,
+        dateFormat,
+        timeFormat,
         llmChatNames,
       ]) =>
         Message.CompletedLoadEditorPreferences({
@@ -1174,6 +1230,8 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
           monacoSettings,
           appTheme,
           ...(Option.isSome(maybeLanguage) ? { language: maybeLanguage.value } : {}),
+          dateFormat,
+          timeFormat,
           llmChatNames,
         }),
     ),
@@ -2188,6 +2246,8 @@ export const init = (
         apiHistoryEnabled: true,
         appTheme: "system",
         language: flags.language ?? "en",
+        dateFormat: "auto",
+        timeFormat: "auto",
         editorLineNumbers: defaultMonacoSettings.lineNumbers,
         editorFolding: defaultMonacoSettings.folding,
         editorWordWrap: defaultMonacoSettings.wordWrap,
@@ -2275,6 +2335,8 @@ export const init = (
       apiHistoryEnabled: true,
       appTheme: "system",
       language: flags.language ?? "en",
+      dateFormat: "auto",
+      timeFormat: "auto",
       editorLineNumbers: defaultMonacoSettings.lineNumbers,
       editorFolding: defaultMonacoSettings.folding,
       editorWordWrap: defaultMonacoSettings.wordWrap,
@@ -3580,6 +3642,28 @@ export const update = (
       model,
     }),
 
+    SelectedSettingsDateFormat: ({ dateFormat }) => ({
+      model: modifyFields(model, {
+        dateFormat: () => dateFormat,
+      }),
+      commands: [SaveDateFormat({ dateFormat })],
+    }),
+
+    CompletedSaveDateFormat: () => ({
+      model,
+    }),
+
+    SelectedSettingsTimeFormat: ({ timeFormat }) => ({
+      model: modifyFields(model, {
+        timeFormat: () => timeFormat,
+      }),
+      commands: [SaveTimeFormat({ timeFormat })],
+    }),
+
+    CompletedSaveTimeFormat: () => ({
+      model,
+    }),
+
     ClickedSaveSettingsDialog: () => {
       const activeId = Option.match(model.editingLlmProviderId, {
         onNone: () => {
@@ -4207,6 +4291,8 @@ export const update = (
       monacoSettings,
       appTheme,
       language,
+      dateFormat,
+      timeFormat,
       llmChatNames,
     }) => {
       const nextAppTheme = appTheme ?? model.appTheme
@@ -4223,6 +4309,8 @@ export const update = (
           apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
           appTheme: () => nextAppTheme,
           language: () => nextLanguage,
+          dateFormat: () => dateFormat ?? model.dateFormat,
+          timeFormat: () => timeFormat ?? model.timeFormat,
           llmChatAiName: () => llmChatNames?.aiName ?? model.llmChatAiName,
           llmChatUserName: () => llmChatNames?.userName ?? model.llmChatUserName,
           editorLineNumbers: () => monacoSettings?.lineNumbers ?? model.editorLineNumbers,
@@ -5932,6 +6020,79 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           ),
                         ],
                       ),
+                      h.div(
+                        [h.Class("form-row")],
+                        [
+                          h.div(
+                            [h.Class("form-group")],
+                            [
+                              h.label([h.For("settings-date-format")], [tr.settings.dateFormat]),
+                              h.select(
+                                [
+                                  h.Id("settings-date-format"),
+                                  h.Class("form-input"),
+                                  h.Value(model.dateFormat),
+                                  h.OnChange((value) =>
+                                    Message.SelectedSettingsDateFormat({
+                                      dateFormat: isDateFormat(value) ? value : "auto",
+                                    }),
+                                  ),
+                                ],
+                                [
+                                  h.option(
+                                    [h.Value("auto"), h.Selected(model.dateFormat === "auto")],
+                                    [tr.settings.dateFormatAuto],
+                                  ),
+                                  h.option(
+                                    [h.Value("iso"), h.Selected(model.dateFormat === "iso")],
+                                    [tr.settings.dateFormatIso],
+                                  ),
+                                  h.option(
+                                    [h.Value("dmy"), h.Selected(model.dateFormat === "dmy")],
+                                    [tr.settings.dateFormatDmy],
+                                  ),
+                                  h.option(
+                                    [h.Value("mdy"), h.Selected(model.dateFormat === "mdy")],
+                                    [tr.settings.dateFormatMdy],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          h.div(
+                            [h.Class("form-group")],
+                            [
+                              h.label([h.For("settings-time-format")], [tr.settings.timeFormat]),
+                              h.select(
+                                [
+                                  h.Id("settings-time-format"),
+                                  h.Class("form-input"),
+                                  h.Value(model.timeFormat),
+                                  h.OnChange((value) =>
+                                    Message.SelectedSettingsTimeFormat({
+                                      timeFormat: isTimeFormat(value) ? value : "auto",
+                                    }),
+                                  ),
+                                ],
+                                [
+                                  h.option(
+                                    [h.Value("auto"), h.Selected(model.timeFormat === "auto")],
+                                    [tr.settings.timeFormatAuto],
+                                  ),
+                                  h.option(
+                                    [h.Value("24h"), h.Selected(model.timeFormat === "24h")],
+                                    [tr.settings.timeFormat24h],
+                                  ),
+                                  h.option(
+                                    [h.Value("12h"), h.Selected(model.timeFormat === "12h")],
+                                    [tr.settings.timeFormat12h],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                   h.section(
@@ -7261,6 +7422,8 @@ const viewEntryRow = (
   entry: FileEntry,
   showFileInfo: boolean,
   language: Language,
+  dateFormat: DateFormat,
+  timeFormat: TimeFormat,
   h: HtmlBuilder,
 ): Html.Html => {
   const tr = t(language).files
@@ -7276,7 +7439,7 @@ const viewEntryRow = (
     ? "—"
     : Option.match(entry.maybeLastModified, {
         onNone: () => "—",
-        onSome: formatDate,
+        onSome: (timestampMs) => formatDateTime(timestampMs, { language, dateFormat, timeFormat }),
       })
 
   const isDeleted = entry.isDeleted === true
@@ -7369,6 +7532,8 @@ const viewFilesTable = (
   entries: ReadonlyArray<FileEntry>,
   showFileInfo: boolean,
   language: Language,
+  dateFormat: DateFormat,
+  timeFormat: TimeFormat,
   h: HtmlBuilder,
 ): Html.Html => {
   return Array.match(entries, {
@@ -7380,7 +7545,8 @@ const viewFilesTable = (
           h.h3([], [t(language).files.folderIsEmpty]),
         ],
       ),
-    onNonEmpty: (entries) => viewFilesTableContent(entries, showFileInfo, language, h),
+    onNonEmpty: (entries) =>
+      viewFilesTableContent(entries, showFileInfo, language, dateFormat, timeFormat, h),
   })
 }
 
@@ -7388,6 +7554,8 @@ const viewFilesTableContent = (
   entries: ReadonlyArray<FileEntry>,
   showFileInfo: boolean,
   language: Language,
+  dateFormat: DateFormat,
+  timeFormat: TimeFormat,
   h: HtmlBuilder,
 ): Html.Html => {
   const tr = t(language).files
@@ -7426,7 +7594,9 @@ const viewFilesTableContent = (
                 [],
                 pipe(
                   entries,
-                  Array.map((entry) => viewEntryRow(entry, showFileInfo, language, h)),
+                  Array.map((entry) =>
+                    viewEntryRow(entry, showFileInfo, language, dateFormat, timeFormat, h),
+                  ),
                 ),
               ),
             ],
@@ -7501,7 +7671,15 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html => {
                 [h.Class("loading-state")],
                 [h.div([h.Class("spinner"), h.AriaHidden(true)]), h.p([], [tr.files.loadingFiles])],
               ),
-            Loaded: ({ entries }) => viewFilesTable(entries, model.showFileInfo, model.language, h),
+            Loaded: ({ entries }) =>
+              viewFilesTable(
+                entries,
+                model.showFileInfo,
+                model.language,
+                model.dateFormat,
+                model.timeFormat,
+                h,
+              ),
             Error: ({ message }) =>
               h.div(
                 [h.Class("empty-state")],
@@ -7575,6 +7753,8 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
         },
         appTheme: model.appTheme,
         language: model.language,
+        dateFormat: model.dateFormat,
+        timeFormat: model.timeFormat,
       },
     },
     view: Modal.view,
