@@ -6229,33 +6229,48 @@ const detectDownloadPlatform = (): DownloadPlatform | null => {
   return null
 }
 
+type DownloadKind =
+  | "android-apk"
+  | "windows-exe"
+  | "windows-msi"
+  | "linux-appimage"
+  | "linux-deb"
+  | "linux-rpm"
+  | "macos-arm64-dmg"
+  | "macos-x64-dmg"
+
 const classifyDownloadAsset = (
   name: string,
   tr: ReturnType<typeof t>,
-): { readonly platform: DownloadPlatform; readonly label: string } | null => {
+): {
+  readonly platform: DownloadPlatform
+  readonly kind: DownloadKind
+  readonly label: string
+} | null => {
   const lower = name.toLowerCase()
   if (lower.endsWith(".apk")) {
-    return { platform: "Android", label: tr.downloads.androidApk }
+    return { platform: "Android", kind: "android-apk", label: tr.downloads.androidApk }
   }
   if (lower.endsWith(".exe")) {
-    return { platform: "Windows", label: tr.downloads.windowsSetup }
+    return { platform: "Windows", kind: "windows-exe", label: tr.downloads.windowsSetup }
   }
   if (lower.endsWith(".msi")) {
-    return { platform: "Windows", label: tr.downloads.windowsMsi }
+    return { platform: "Windows", kind: "windows-msi", label: tr.downloads.windowsMsi }
   }
   if (lower.endsWith(".appimage")) {
-    return { platform: "Linux", label: tr.downloads.linuxAppImage }
+    return { platform: "Linux", kind: "linux-appimage", label: tr.downloads.linuxAppImage }
   }
   if (lower.endsWith(".deb")) {
-    return { platform: "Linux", label: tr.downloads.linuxDeb }
+    return { platform: "Linux", kind: "linux-deb", label: tr.downloads.linuxDeb }
   }
   if (lower.endsWith(".rpm")) {
-    return { platform: "Linux", label: tr.downloads.linuxRpm }
+    return { platform: "Linux", kind: "linux-rpm", label: tr.downloads.linuxRpm }
   }
   if (lower.endsWith(".dmg")) {
     const isArm = lower.includes("arm64") || lower.includes("aarch64")
     return {
       platform: "macOS",
+      kind: isArm ? "macos-arm64-dmg" : "macos-x64-dmg",
       label: isArm ? tr.downloads.macosArm64 : tr.downloads.macosX64,
     }
   }
@@ -6268,16 +6283,10 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
   }
   const tr = t(model.language)
   const installedFile = typeof __INSTALL_PACKAGE__ === "string" ? __INSTALL_PACKAGE__ : null
-  const currentPlatform =
-    installedFile !== null
-      ? installedFile.endsWith(".apk")
-        ? "Android"
-        : installedFile.endsWith(".exe") || installedFile.endsWith(".msi")
-          ? "Windows"
-          : installedFile.endsWith(".dmg")
-            ? "macOS"
-            : "Linux"
-      : detectDownloadPlatform()
+  const installedClassified =
+    installedFile !== null ? classifyDownloadAsset(installedFile, tr) : null
+  const installedKind = installedClassified?.kind ?? null
+  const currentPlatform = installedClassified?.platform ?? detectDownloadPlatform()
 
   const platformOrder: ReadonlyArray<DownloadPlatform> = ["Android", "Windows", "Linux", "macOS"]
 
@@ -6305,13 +6314,23 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
     Loaded: ({ assets }) => {
       const byPlatform = new Map<
         DownloadPlatform,
-        Array<{ readonly label: string; readonly file: string; readonly url: string }>
+        Array<{
+          readonly kind: DownloadKind
+          readonly label: string
+          readonly file: string
+          readonly url: string
+        }>
       >()
       for (const asset of assets) {
         const classified = classifyDownloadAsset(asset.name, tr)
         if (classified === null) continue
         const list = byPlatform.get(classified.platform) ?? []
-        list.push({ label: classified.label, file: asset.name, url: asset.url })
+        list.push({
+          kind: classified.kind,
+          label: classified.label,
+          file: asset.name,
+          url: asset.url,
+        })
         byPlatform.set(classified.platform, list)
       }
 
@@ -6341,11 +6360,11 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
         groups.map((group) => {
           const isCurrentPlatform = currentPlatform === group.platform
           const orderedItems =
-            installedFile === null
+            installedKind === null
               ? group.items
               : [
-                  ...group.items.filter((i) => i.file === installedFile),
-                  ...group.items.filter((i) => i.file !== installedFile),
+                  ...group.items.filter((i) => i.kind === installedKind),
+                  ...group.items.filter((i) => i.kind !== installedKind),
                 ]
           return h.section(
             [h.Class(isCurrentPlatform ? "downloads-card is-current" : "downloads-card")],
@@ -6369,7 +6388,7 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               h.div(
                 [h.Class("downloads-card-links")],
                 orderedItems.map((item) => {
-                  const isCurrentFile = installedFile !== null && item.file === installedFile
+                  const isCurrentFile = installedKind !== null && item.kind === installedKind
                   return h.a(
                     [
                       h.Class(isCurrentFile ? "downloads-link is-current" : "downloads-link"),

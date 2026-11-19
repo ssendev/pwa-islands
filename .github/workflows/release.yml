@@ -120,7 +120,10 @@ jobs:
               VITE_INSTALL_PACKAGE="${pkg}" npm run tauri -- build --ci --bundles "${bundle}"
             fi
             found="$(find src-tauri/target -path "*/release/bundle/*" -type f -name "*.${ext}" | head -n 1)"
-            cp -v "$found" "release-files/${pkg}"
+            base="$(basename "$found")"
+            renamed="${base/PWA Islands/pwa-islands}"
+            renamed="${renamed/PWA.Islands/pwa-islands}"
+            cp -v "$found" "release-files/${renamed}"
           done
         shell: bash
 
@@ -196,7 +199,7 @@ jobs:
         run: |
           mkdir -p release-files
           APK="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk"
-          cp -v "$APK" "release-files/pwa-islands.universal.apk"
+          cp -v "$APK" "release-files/pwa-islands_${{ needs.prepare.outputs.version }}_universal.apk"
 
       - name: Upload Android artifact
         uses: actions/upload-artifact@v4
