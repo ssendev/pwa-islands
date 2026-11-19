@@ -2,6 +2,7 @@
 /// <reference types="vite-plugin-pwa/vanillajs" />
 
 declare const __APP_VERSION__: string
+declare const __INSTALL_PACKAGE__: string | null
 
 interface FileSystemHandlePermissionDescriptor {
   mode?: "read" | "readwrite"

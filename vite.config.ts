@@ -242,6 +242,7 @@ function islandsApiPlugin(): Plugin[] {
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
+    __INSTALL_PACKAGE__: JSON.stringify(process.env.VITE_INSTALL_PACKAGE?.trim() || null),
   },
   server: {
     host: "pwaislands.localhost",

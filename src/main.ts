@@ -6123,15 +6123,39 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
 
 const GITHUB_RELEASES_URL = "https://github.com/ssendev/pwa-islands/releases"
 const GITHUB_LATEST_DOWNLOAD_BASE = `${GITHUB_RELEASES_URL}/latest/download`
+const PWA_WEB_URL = "https://pwaislands.ssen.dev"
+
+const detectDownloadPlatform = (): "Android" | "Windows" | "Linux" | "macOS" | null => {
+  if (typeof navigator === "undefined") {
+    return null
+  }
+  const ua = navigator.userAgent
+  if (/android/i.test(ua)) return "Android"
+  if (/windows/i.test(ua)) return "Windows"
+  if (/macintosh|mac os x/i.test(ua)) return "macOS"
+  if (/linux/i.test(ua)) return "Linux"
+  return null
+}
 
 const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
   if (!model.isDownloadsDialogOpen) {
     return h.empty
   }
   const tr = t(model.language)
+  const installedFile = typeof __INSTALL_PACKAGE__ === "string" ? __INSTALL_PACKAGE__ : null
+  const currentPlatform =
+    installedFile !== null
+      ? installedFile.endsWith(".apk")
+        ? "Android"
+        : installedFile.endsWith(".exe") || installedFile.endsWith(".msi")
+          ? "Windows"
+          : installedFile.endsWith(".dmg")
+            ? "macOS"
+            : "Linux"
+      : detectDownloadPlatform()
 
-  const groups: ReadonlyArray<{
-    readonly platform: string
+  const baseGroups: ReadonlyArray<{
+    readonly platform: "Android" | "Windows" | "Linux" | "macOS"
     readonly items: ReadonlyArray<{ readonly label: string; readonly file: string }>
   }> = [
     {
@@ -6162,6 +6186,14 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
     },
   ]
 
+  const groups =
+    currentPlatform === null
+      ? baseGroups
+      : [
+          ...baseGroups.filter((g) => g.platform === currentPlatform),
+          ...baseGroups.filter((g) => g.platform !== currentPlatform),
+        ]
+
   return h.div(
     [h.Class("settings-dialog-host")],
     [
@@ -6182,7 +6214,13 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 [
                   h.h3(
                     [h.Id("downloads-dialog-title"), h.Class("modal-title")],
-                    [tr.downloads.title],
+                    [
+                      tr.downloads.title,
+                      " ",
+                      !model.hasTauri
+                        ? h.span([h.Class("help-version-badge")], [`v${__APP_VERSION__}`])
+                        : h.empty,
+                    ],
                   ),
                   h.button(
                     [
@@ -6199,20 +6237,71 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               h.div(
                 [h.Class("modal-body downloads-dialog-body")],
                 [
-                  h.p([h.Class("downloads-subtitle")], [tr.downloads.subtitle]),
+                  h.div(
+                    [h.Class("downloads-intro")],
+                    [
+                      h.p(
+                        [h.Class("downloads-subtitle")],
+                        [
+                          tr.downloads.pwaHintPrefix,
+                          h.a(
+                            [
+                              h.Class("downloads-releases-link"),
+                              h.Href(PWA_WEB_URL),
+                              h.Target("_blank"),
+                              h.Rel("noopener noreferrer"),
+                            ],
+                            [PWA_WEB_URL],
+                          ),
+                        ],
+                      ),
+                      h.p([h.Class("downloads-subtitle")], [tr.downloads.subtitle]),
+                    ],
+                  ),
                   h.div(
                     [h.Class("downloads-grid")],
-                    groups.map((group) =>
-                      h.section(
-                        [h.Class("downloads-card")],
+                    groups.map((group) => {
+                      const isCurrentPlatform = currentPlatform === group.platform
+                      const orderedItems =
+                        installedFile === null
+                          ? group.items
+                          : [
+                              ...group.items.filter((i) => i.file === installedFile),
+                              ...group.items.filter((i) => i.file !== installedFile),
+                            ]
+                      return h.section(
                         [
-                          h.h4([h.Class("downloads-card-title")], [group.platform]),
+                          h.Class(
+                            isCurrentPlatform ? "downloads-card is-current" : "downloads-card",
+                          ),
+                        ],
+                        [
+                          h.div(
+                            [h.Class("downloads-card-header")],
+                            [
+                              h.h4([h.Class("downloads-card-title")], [group.platform]),
+                              isCurrentPlatform
+                                ? h.span(
+                                    [h.Class("downloads-current-badge")],
+                                    [
+                                      model.hasTauri
+                                        ? `${tr.downloads.currentPlatform} · v${__APP_VERSION__}`
+                                        : tr.downloads.currentPlatform,
+                                    ],
+                                  )
+                                : h.empty,
+                            ],
+                          ),
                           h.div(
                             [h.Class("downloads-card-links")],
-                            group.items.map((item) =>
-                              h.a(
+                            orderedItems.map((item) => {
+                              const isCurrentFile =
+                                installedFile !== null && item.file === installedFile
+                              return h.a(
                                 [
-                                  h.Class("downloads-link"),
+                                  h.Class(
+                                    isCurrentFile ? "downloads-link is-current" : "downloads-link",
+                                  ),
                                   h.Href(`${GITHUB_LATEST_DOWNLOAD_BASE}/${item.file}`),
                                   h.Target("_blank"),
                                   h.Rel("noopener noreferrer"),
@@ -6221,12 +6310,12 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.span([h.Class("downloads-link-label")], [item.label]),
                                   h.span([h.Class("downloads-link-file")], [item.file]),
                                 ],
-                              ),
-                            ),
+                              )
+                            }),
                           ),
                         ],
-                      ),
-                    ),
+                      )
+                    }),
                   ),
                   h.div(
                     [h.Class("downloads-footer")],

@@ -82,6 +82,63 @@ if (args[0] === "android" || args[0] === "ios") {
   insertIdx = 1
 }
 
+const BUNDLE_TO_EXT = {
+  appimage: "AppImage",
+  deb: "deb",
+  rpm: "rpm",
+  nsis: "exe",
+  msi: "msi",
+  dmg: "dmg",
+}
+
+function getFlagValue(argv, flags) {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+    for (const flag of flags) {
+      if (arg === flag && i + 1 < argv.length) return argv[i + 1]
+      if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1)
+    }
+  }
+  return null
+}
+
+function inferArch(target) {
+  if (target) {
+    if (target.includes("aarch64") || target.includes("arm64")) return "arm64"
+    if (target.includes("x86_64") || target.includes("x64")) return "x64"
+  }
+  return process.arch === "arm64" ? "arm64" : "x64"
+}
+
+function defaultBundlesFor(target) {
+  if (target?.includes("windows") || (!target && process.platform === "win32")) {
+    return ["nsis", "msi"]
+  }
+  if (target?.includes("darwin") || (!target && process.platform === "darwin")) {
+    return ["dmg"]
+  }
+  return ["deb", "rpm", "appimage"]
+}
+
+function runTauri(cliArgs, installPackage) {
+  const env = {
+    ...process.env,
+    APP_VERSION: displayVersion,
+    ...(installPackage ? { VITE_INSTALL_PACKAGE: installPackage } : {}),
+  }
+  if (installPackage) {
+    console.log(`[tauri] VITE_INSTALL_PACKAGE=${installPackage}`)
+  }
+  const result = spawnSync(process.execPath, [tauriCli, ...cliArgs], {
+    stdio: "inherit",
+    env,
+  })
+  if (result.error) throw result.error
+  if ((result.status ?? 1) !== 0) {
+    process.exit(result.status ?? 1)
+  }
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   if (insertIdx !== -1) {
     args.splice(insertIdx, 0, "--config", JSON.stringify(configOverride))
@@ -90,14 +147,33 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     )
   }
 
-  const result = spawnSync(process.execPath, [tauriCli, ...args], {
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      APP_VERSION: displayVersion,
-    },
-  })
+  const isAndroidBuild = rawArgs[0] === "android" && rawArgs[1] === "build"
+  const isDesktopBuild = rawArgs[0] === "build"
 
-  if (result.error) throw result.error
-  process.exit(result.status ?? 1)
+  if (isAndroidBuild) {
+    const pkg = process.env.VITE_INSTALL_PACKAGE?.trim() || "pwa-islands.universal.apk"
+    runTauri(args, pkg)
+  } else if (isDesktopBuild) {
+    const target = getFlagValue(rawArgs, ["--target", "-t"])
+    const arch = inferArch(target)
+    const explicitBundles = getFlagValue(rawArgs, ["--bundles", "-b"])
+
+    if (explicitBundles) {
+      const ext = BUNDLE_TO_EXT[explicitBundles.toLowerCase()]
+      const pkg =
+        process.env.VITE_INSTALL_PACKAGE?.trim() || (ext ? `pwa-islands.${arch}.${ext}` : null)
+      runTauri(args, pkg)
+    } else if (process.env.VITE_INSTALL_PACKAGE?.trim()) {
+      runTauri(args, process.env.VITE_INSTALL_PACKAGE.trim())
+    } else {
+      for (const bundle of defaultBundlesFor(target)) {
+        const ext = BUNDLE_TO_EXT[bundle]
+        const pkg = `pwa-islands.${arch}.${ext}`
+        runTauri([...args, "--bundles", bundle], pkg)
+      }
+    }
+  } else {
+    runTauri(args, process.env.VITE_INSTALL_PACKAGE?.trim() || null)
+  }
+  process.exit(0)
 }

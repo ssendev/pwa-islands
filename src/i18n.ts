@@ -878,8 +878,9 @@ const de = {
     topicFs: "Speicher: App (Tauri), FS API und OPFS",
   },
   downloads: {
-    title: "App herunterladen",
-    subtitle: "Native Apps — keine PWA, sondern 100 % offline nutzbar.",
+    title: "PWA Islands herunterladen",
+    subtitle: "Oder als eigenständige App herunterladen — auch komplett offline installierbar.",
+    pwaHintPrefix: "Direkt im Browser als PWA nutzen (offline-fähig): ",
     olderVersions: "Ältere Versionen",
     androidApk: "Universal APK",
     windowsSetup: "Setup (x64)",
@@ -893,6 +894,7 @@ const de = {
     showDownloadsInMenu: "Downloads im Menü anzeigen",
     showInstallInMenu: "App installieren im Menü anzeigen",
     openDownloads: "Downloads öffnen",
+    currentPlatform: "Aktuelles System",
   },
   modals: {
     confirmTitle: "Bestätigung",
@@ -1677,8 +1679,9 @@ const en: Translations = {
     topicFs: "Storage: App (Tauri), FS API, and OPFS",
   },
   downloads: {
-    title: "Download App",
-    subtitle: "Native apps — not a PWA, 100% offline.",
+    title: "Download PWA Islands",
+    subtitle: "Or download as a standalone app — can also be installed completely offline.",
+    pwaHintPrefix: "Use directly in your browser as a PWA (works offline): ",
     olderVersions: "Older versions",
     androidApk: "Universal APK",
     windowsSetup: "Setup (x64)",
@@ -1692,6 +1695,7 @@ const en: Translations = {
     showDownloadsInMenu: "Show Downloads in menu",
     showInstallInMenu: "Show Install App in menu",
     openDownloads: "Open Downloads",
+    currentPlatform: "Current system",
   },
   modals: {
     confirmTitle: "Confirmation",

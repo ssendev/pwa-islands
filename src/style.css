@@ -3540,7 +3540,15 @@ code {
 .downloads-dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 20px;
+}
+
+.downloads-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .downloads-subtitle {
@@ -3553,13 +3561,33 @@ code {
 .downloads-grid {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 18px;
 }
 
 .downloads-card {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.downloads-link.is-current {
+  border-color: var(--accent, #2e69c9);
+  background: color-mix(in srgb, var(--accent, #2e69c9) 12%, var(--bg));
+}
+
+.downloads-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.downloads-current-badge {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent, #2e69c9);
+  color: #fff;
 }
 
 .downloads-card-title {

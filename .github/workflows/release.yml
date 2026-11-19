@@ -45,18 +45,22 @@ jobs:
             name: linux-x64
             arch: x64
             target: ""
+            bundles: "deb:deb rpm:rpm appimage:AppImage"
           - platform: windows-latest
             name: windows-x64
             arch: x64
             target: ""
+            bundles: "nsis:exe msi:msi"
           - platform: macos-latest
             name: macos-arm64
             arch: arm64
             target: aarch64-apple-darwin
+            bundles: "dmg:dmg"
           - platform: macos-latest
             name: macos-x64
             arch: x64
             target: x86_64-apple-darwin
+            bundles: "dmg:dmg"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -104,22 +108,21 @@ jobs:
         env:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
-          if [ -n "${{ matrix.target }}" ]; then
-            npm run tauri -- build --ci --target ${{ matrix.target }}
-          else
-            npm run tauri -- build --ci
-          fi
-        shell: bash
-
-      - name: Collect bundle artifacts
-        shell: bash
-        run: |
           mkdir -p release-files
-          while IFS= read -r -d '' f; do
-            ext="${f##*.}"
-            cp -v "$f" "release-files/pwa-islands.${{ matrix.arch }}.${ext}"
-          done < <(find src-tauri/target -path "*/release/bundle/*" -type f \
-            \( -name "*.deb" -o -name "*.rpm" -o -name "*.AppImage" -o -name "*.exe" -o -name "*.msi" -o -name "*.dmg" \) -print0)
+          for entry in ${{ matrix.bundles }}; do
+            bundle="${entry%%:*}"
+            ext="${entry##*:}"
+            pkg="pwa-islands.${{ matrix.arch }}.${ext}"
+            echo "==> Building ${pkg} (bundle=${bundle})"
+            if [ -n "${{ matrix.target }}" ]; then
+              VITE_INSTALL_PACKAGE="${pkg}" npm run tauri -- build --ci --target "${{ matrix.target }}" --bundles "${bundle}"
+            else
+              VITE_INSTALL_PACKAGE="${pkg}" npm run tauri -- build --ci --bundles "${bundle}"
+            fi
+            found="$(find src-tauri/target -path "*/release/bundle/*" -type f -name "*.${ext}" | head -n 1)"
+            cp -v "$found" "release-files/${pkg}"
+          done
+        shell: bash
 
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
@@ -184,6 +187,7 @@ jobs:
       - name: Build Android APK
         env:
           APP_VERSION: ${{ needs.prepare.outputs.version }}
+          VITE_INSTALL_PACKAGE: pwa-islands.universal.apk
         run: |
           export NDK_HOME="${ANDROID_NDK_LATEST_HOME:-${NDK_HOME:-}}"
           npm run build:android
