@@ -4,7 +4,7 @@ Dies ist eine PWA welche mit der eine reihe von mini APPs (.html single file pag
 
 # UI
 
-aller UI text MUSS in Deutsch geschrieben werden
+Die UI unterstützt mehrere Sprachen (`de` und `en`) über `src/i18n.ts`. Neue UI-Texte sollen dort für beide Sprachen gepflegt werden.
 
 # Befehle
 

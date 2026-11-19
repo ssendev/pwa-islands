@@ -13,6 +13,7 @@ import {
   toggleFullscreenWindow,
 } from "./files"
 import { Flags, Message, Model, init, subscriptions, update, view } from "./main"
+import { detectBrowserLanguage, getDocumentLanguage, t } from "./i18n"
 import { initMarkdown } from "./markdown"
 import { registerMonacoEditorElement } from "./monaco-element"
 import type { AlertBanner } from "./toast"
@@ -87,6 +88,7 @@ void initMarkdown()
         isWindowsOrLinux: isWindowsOrLinux(),
         isWindows: isWindows(),
         origin: window.location.origin,
+        language: detectBrowserLanguage(),
       })),
     })
 
@@ -98,7 +100,7 @@ void initMarkdown()
             return
           }
           dispatchServiceWorkerToast({
-            message: "Update bereit – bitte Seite neu laden.",
+            message: t(getDocumentLanguage()).sw.updateReady,
             variant: "info",
           })
         },
@@ -107,7 +109,7 @@ void initMarkdown()
             return
           }
           dispatchServiceWorkerToast({
-            message: "App ist bereit für die Offline-Nutzung.",
+            message: t(getDocumentLanguage()).sw.offlineReady,
             variant: "info",
           })
         },
@@ -118,10 +120,9 @@ void initMarkdown()
           )
           const detail =
             error instanceof Error ? error.message : typeof error === "string" ? error : ""
+          const swTr = t(getDocumentLanguage()).sw
           dispatchServiceWorkerToast({
-            message: detail
-              ? `Fehler bei der Service-Worker-Registrierung: ${detail}`
-              : "Fehler bei der Service-Worker-Registrierung.",
+            message: detail ? swTr.registerErrorWithDetail(detail) : swTr.registerError,
             variant: "danger",
           })
         },

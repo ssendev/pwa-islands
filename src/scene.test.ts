@@ -138,6 +138,7 @@ const readyModel: Model = {
   historyEnabled: true,
   apiHistoryEnabled: true,
   appTheme: "system",
+  language: "de",
   editorLineNumbers: true,
   editorFolding: true,
   editorWordWrap: true,

@@ -1,6 +1,7 @@
 import { Array, Schema } from "effect"
 import type * as Html from "foldkit/html"
 
+import { type Language, t } from "./i18n"
 import { viewIcon } from "./icons"
 
 export const AlertVariant = Schema.Literals(["info", "warning", "danger"])
@@ -24,13 +25,15 @@ export const view = <Message>(
   toasts: ReadonlyArray<Toast>,
   onDismiss: (id: number) => Message,
   onCopy: (message: string) => Message,
+  language: Language,
   h: Html.HtmlBuilder<Message>,
 ): Html.Html => {
+  const tr = t(language).toast
   const containerAttrs = [
     h.Id("toast-container"),
     h.Class("toast-container"),
     h.AriaLive("polite"),
-    h.AriaLabel("Meldungen"),
+    h.AriaLabel(tr.notificationsLabel),
   ]
 
   return Array.match(toasts, {
@@ -55,7 +58,7 @@ export const view = <Message>(
                     [
                       h.Type("button"),
                       h.Class("alert-close-btn"),
-                      h.AriaLabel("Hinweis schließen"),
+                      h.AriaLabel(tr.dismissNotice),
                       h.OnClick(onDismiss(toast.id)),
                     ],
                     [viewIcon("close", h)],
@@ -64,8 +67,8 @@ export const view = <Message>(
                     [
                       h.Type("button"),
                       h.Class("alert-close-btn toast-copy-btn"),
-                      h.AriaLabel("Meldung kopieren"),
-                      h.Title("Meldung kopieren"),
+                      h.AriaLabel(tr.copyMessage),
+                      h.Title(tr.copyMessage),
                       h.OnClick(onCopy(toast.message)),
                     ],
                     [viewIcon("clipboard", h)],

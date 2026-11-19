@@ -108,6 +108,7 @@ import {
   parseEditFormat,
 } from "./edit-format"
 import { formatApiDtsMessage } from "./hashline"
+import { type Language, LanguageSchema, applyLanguageToDocument, isLanguage, t } from "./i18n"
 import * as Editor from "./editor"
 import * as LlmResponse from "./llm-response"
 import {
@@ -126,6 +127,7 @@ import {
   getStoredAppTheme,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
+  getStoredLanguage,
   getStoredLlmChatNames,
   getStoredLlmSettings,
   getStoredMonacoSettings,
@@ -133,6 +135,7 @@ import {
   storeAppTheme,
   storeEditorPreferences,
   storeHistoryEnabled,
+  storeLanguage,
   storeLlmChatNames,
   storeLlmSettings,
   storeMonacoSettings,
@@ -337,6 +340,7 @@ export const Flags = Schema.Struct({
   hasOPFS: Schema.Boolean,
   hasTauri: Schema.Boolean,
   origin: Schema.String,
+  language: Schema.optionalKey(LanguageSchema),
   isWindowsOrLinux: Schema.optionalKey(Schema.Boolean),
   isWindows: Schema.optionalKey(Schema.Boolean),
   isWindowMaximized: Schema.optionalKey(Schema.Boolean),
@@ -402,6 +406,7 @@ export const Model = Schema.Struct({
   historyEnabled: Schema.Boolean,
   apiHistoryEnabled: Schema.Boolean,
   appTheme: AppThemeSchema,
+  language: LanguageSchema,
   editorLineNumbers: Schema.Boolean,
   editorFolding: Schema.Boolean,
   editorWordWrap: Schema.Boolean,
@@ -590,6 +595,9 @@ export const Message = defineMessageUnion({
   SelectedSettingsAppTheme: { theme: AppThemeSchema },
   CompletedSaveAppTheme: {},
   CompletedApplyAppTheme: {},
+  SelectedSettingsLanguage: { language: LanguageSchema },
+  CompletedSaveLanguage: {},
+  CompletedApplyLanguage: {},
   ClickedTestLlm: { mode: LlmTestMode },
   UpdatedTestLlmStream: {
     content: Schema.String,
@@ -654,6 +662,7 @@ export const Message = defineMessageUnion({
     apiHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
     appTheme: Schema.optionalKey(AppThemeSchema),
+    language: Schema.optionalKey(LanguageSchema),
     llmChatNames: Schema.optionalKey(
       Schema.Struct({ aiName: Schema.String, userName: Schema.String }),
     ),
@@ -1069,6 +1078,36 @@ export const SaveAppTheme = Command.define("SaveAppTheme", {
     ),
 })
 
+export const ApplyLanguage = Command.define("ApplyLanguage", {
+  args: {
+    language: LanguageSchema,
+  },
+  messages: [Message.CompletedApplyLanguage],
+  execute: ({ language }) =>
+    Effect.sync(() => {
+      applyLanguageToDocument(language)
+      return Message.CompletedApplyLanguage()
+    }),
+})
+
+export const SaveLanguage = Command.define("SaveLanguage", {
+  args: {
+    language: LanguageSchema,
+  },
+  messages: [Message.CompletedSaveLanguage],
+  execute: ({ language }) =>
+    Effect.tryPromise({
+      try: async () => {
+        applyLanguageToDocument(language)
+        await storeLanguage(language)
+      },
+      catch: () => new Error("Failed to save language"),
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveLanguage()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveLanguage())),
+    ),
+})
+
 export const SaveMonacoSettings = Command.define("SaveMonacoSettings", {
   args: {
     lineNumbers: Schema.Boolean,
@@ -1110,11 +1149,20 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredApiHistoryEnabled(),
       getStoredMonacoSettings(),
       getStoredAppTheme(),
+      getStoredLanguage(),
       getStoredLlmChatNames(),
     ]),
   ).pipe(
     Effect.map(
-      ([prefs, historyEnabled, apiHistoryEnabled, monacoSettings, appTheme, llmChatNames]) =>
+      ([
+        prefs,
+        historyEnabled,
+        apiHistoryEnabled,
+        monacoSettings,
+        appTheme,
+        maybeLanguage,
+        llmChatNames,
+      ]) =>
         Message.CompletedLoadEditorPreferences({
           llmBarMode: prefs.llmBarMode,
           llmModel: prefs.llmModel,
@@ -1124,6 +1172,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
           apiHistoryEnabled,
           monacoSettings,
           appTheme,
+          ...(Option.isSome(maybeLanguage) ? { language: maybeLanguage.value } : {}),
           llmChatNames,
         }),
     ),
@@ -2137,6 +2186,7 @@ export const init = (
         historyEnabled: true,
         apiHistoryEnabled: true,
         appTheme: "system",
+        language: flags.language ?? "en",
         editorLineNumbers: defaultMonacoSettings.lineNumbers,
         editorFolding: defaultMonacoSettings.folding,
         editorWordWrap: defaultMonacoSettings.wordWrap,
@@ -2223,6 +2273,7 @@ export const init = (
       historyEnabled: true,
       apiHistoryEnabled: true,
       appTheme: "system",
+      language: flags.language ?? "en",
       editorLineNumbers: defaultMonacoSettings.lineNumbers,
       editorFolding: defaultMonacoSettings.folding,
       editorWordWrap: defaultMonacoSettings.wordWrap,
@@ -3513,6 +3564,21 @@ export const update = (
       model,
     }),
 
+    SelectedSettingsLanguage: ({ language }) => ({
+      model: modifyFields(model, {
+        language: () => language,
+      }),
+      commands: [SaveLanguage({ language })],
+    }),
+
+    CompletedSaveLanguage: () => ({
+      model,
+    }),
+
+    CompletedApplyLanguage: () => ({
+      model,
+    }),
+
     ClickedSaveSettingsDialog: () => {
       const activeId = Option.match(model.editingLlmProviderId, {
         onNone: () => {
@@ -4139,9 +4205,15 @@ export const update = (
       apiHistoryEnabled,
       monacoSettings,
       appTheme,
+      language,
       llmChatNames,
     }) => {
       const nextAppTheme = appTheme ?? model.appTheme
+      const nextLanguage = language ?? model.language
+      const applyCommands = [
+        ...(appTheme === undefined ? [] : [ApplyAppTheme({ theme: nextAppTheme })]),
+        ...(language === undefined ? [] : [ApplyLanguage({ language: nextLanguage })]),
+      ]
       return {
         model: modifyFields(model, {
           editorLlmBarMode: () => llmBarMode,
@@ -4149,6 +4221,7 @@ export const update = (
           historyEnabled: () => historyEnabled ?? model.historyEnabled,
           apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
           appTheme: () => nextAppTheme,
+          language: () => nextLanguage,
           llmChatAiName: () => llmChatNames?.aiName ?? model.llmChatAiName,
           llmChatUserName: () => llmChatNames?.userName ?? model.llmChatUserName,
           editorLineNumbers: () => monacoSettings?.lineNumbers ?? model.editorLineNumbers,
@@ -4172,7 +4245,7 @@ export const update = (
               editorSplitPercent,
             }),
         }),
-        ...(appTheme === undefined ? {} : { commands: [ApplyAppTheme({ theme: nextAppTheme })] }),
+        ...(Array.isArrayNonEmpty(applyCommands) ? { commands: applyCommands } : {}),
       }
     },
 
@@ -5683,6 +5756,7 @@ const getStorageCapabilities = (model: Model) => {
 const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
   const { isReady } = getStorageCapabilities(model)
   const isInstallAvailable = InstallPrompt.match(model.installPrompt, INSTALL_AVAILABLE)
+  const tr = t(model.language)
 
   return h.div(
     [h.Class("settings-menu"), h.Id("settings-menu")],
@@ -5692,8 +5766,8 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
           h.Type("button"),
           h.Id("btn-settings"),
           h.Class("btn btn-secondary btn-icon"),
-          h.Title("Einstellungen"),
-          h.AriaLabel("Einstellungen"),
+          h.Title(tr.settings.title),
+          h.AriaLabel(tr.settings.title),
           h.AriaHasPopup("true"),
           h.AriaExpanded(model.isSettingsOpen),
           h.OnClick(Message.ClickedToggleSettings(), {
@@ -5718,7 +5792,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
               h.Role("menuitem"),
               h.OnClick(Message.ClickedOpenHelp()),
             ],
-            [viewIcon("help", h), " Hilfe"],
+            [viewIcon("help", h), ` ${tr.common.help}`],
           ),
           isReady
             ? h.button(
@@ -5731,7 +5805,9 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                 ],
                 [
                   viewIcon("file-info", h),
-                  model.showFileInfo ? " Datei-Infos ausblenden" : " Datei-Infos einblenden",
+                  model.showFileInfo
+                    ? ` ${tr.settings.fileInfoHide}`
+                    : ` ${tr.settings.fileInfoShow}`,
                 ],
               )
             : h.empty,
@@ -5743,7 +5819,7 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
               h.Role("menuitem"),
               h.OnClick(Message.ClickedOpenSettingsDialog()),
             ],
-            [viewIcon("settings", h), " Einstellungen"],
+            [viewIcon("settings", h), ` ${tr.settings.title}`],
           ),
           isInstallAvailable
             ? h.button(
@@ -5752,10 +5828,10 @@ const viewSettingsMenu = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Id("btn-install-app"),
                   h.Class("settings-menu-item"),
                   h.Role("menuitem"),
-                  h.Title("PWA Islands als App installieren"),
+                  h.Title(tr.settings.installAppTitle),
                   h.OnClick(Message.ClickedInstallApp()),
                 ],
-                [viewIcon("install", h), " App installieren"],
+                [viewIcon("install", h), ` ${tr.settings.installApp}`],
               )
             : h.empty,
         ],
@@ -5768,16 +5844,17 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
   if (!model.isSettingsDialogOpen) {
     return h.empty
   }
+  const tr = t(model.language)
   const { isFsaReady, isFsaNoFolder, isFsaPermissionRequired, canSwitchToOpfs, canSwitchToFsa } =
     getStorageCapabilities(model)
   const currentStorageLabel = Option.map(
     currentStorageTypeFromStorageState(model.storageState),
     (storageType) =>
       storageType === "opfs"
-        ? "App-Speicher"
+        ? tr.settings.storageOpfs
         : storageType === "tauri"
-          ? "Lokaler Ordner (App)"
-          : "Lokaler Ordner",
+          ? tr.settings.storageTauri
+          : tr.settings.storageFsa,
   )
 
   return h.div(
@@ -5798,13 +5875,16 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               h.header(
                 [h.Class("modal-header")],
                 [
-                  h.h3([h.Id("settings-dialog-title"), h.Class("modal-title")], ["Einstellungen"]),
+                  h.h3(
+                    [h.Id("settings-dialog-title"), h.Class("modal-title")],
+                    [tr.settings.title],
+                  ),
                   h.button(
                     [
                       h.Type("button"),
                       h.Id("btn-close-settings"),
                       h.Class("modal-close-btn"),
-                      h.AriaLabel("Schließen"),
+                      h.AriaLabel(tr.common.close),
                       h.OnClick(Message.ClickedCloseSettingsDialog()),
                     ],
                     [viewIcon("close", h)],
@@ -5815,15 +5895,49 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 [h.Class("modal-body settings-groups")],
                 [
                   h.section(
+                    [h.Class("settings-group"), h.Id("settings-group-language")],
+                    [
+                      h.h4([h.Class("settings-group-title")], [tr.settings.language]),
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.select(
+                            [
+                              h.Id("settings-language"),
+                              h.Class("form-input"),
+                              h.AriaLabel(tr.settings.language),
+                              h.Value(model.language),
+                              h.OnChange((value) =>
+                                Message.SelectedSettingsLanguage({
+                                  language: isLanguage(value) ? value : "en",
+                                }),
+                              ),
+                            ],
+                            [
+                              h.option(
+                                [h.Value("en"), h.Selected(model.language === "en")],
+                                [tr.languageName.en],
+                              ),
+                              h.option(
+                                [h.Value("de"), h.Selected(model.language === "de")],
+                                [tr.languageName.de],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  h.section(
                     [h.Class("settings-group"), h.Id("settings-group-fs")],
                     [
                       h.h4(
                         [h.Id("current-storage"), h.Class("settings-group-title")],
                         [
                           Option.match(currentStorageLabel, {
-                            onNone: () => "Dateisystem",
+                            onNone: () => tr.settings.fsTitle,
                             onSome: (label) =>
-                              model.hasTauri ? "Dateisystem" : `Dateisystem: ${label}`,
+                              model.hasTauri ? tr.settings.fsTitle : tr.settings.fsWithLabel(label),
                           }),
                         ],
                       ),
@@ -5837,10 +5951,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Id("btn-use-opfs"),
                                   h.Class("btn btn-secondary"),
                                   h.Role("menuitem"),
-                                  h.Title("Internen Browser-Speicher (OPFS) verwenden"),
+                                  h.Title(tr.settings.switchToOpfsTitle),
                                   h.OnClick(Message.ClickedUseOpfs()),
                                 ],
-                                [viewIcon("package", h), " Zu App-Speicher wechseln"],
+                                [viewIcon("package", h), ` ${tr.settings.switchToOpfs}`],
                               )
                             : h.empty,
                           canSwitchToFsa
@@ -5852,7 +5966,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Role("menuitem"),
                                   h.OnClick(Message.ClickedUseFsa()),
                                 ],
-                                [viewIcon("folder", h), " Zu lokalem Ordner wechseln"],
+                                [viewIcon("folder", h), ` ${tr.settings.switchToFsa}`],
                               )
                             : h.empty,
                           isFsaNoFolder
@@ -5862,10 +5976,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Id("btn-change-folder"),
                                   h.Class("btn btn-secondary"),
                                   h.Role("menuitem"),
-                                  h.Title("Ordner wählen"),
+                                  h.Title(tr.settings.selectFolder),
                                   h.OnClick(Message.ClickedSelectFolder()),
                                 ],
-                                [viewIcon("folder-open", h), " Ordner wählen"],
+                                [viewIcon("folder-open", h), ` ${tr.settings.selectFolder}`],
                               )
                             : h.empty,
                           isFsaReady || isFsaPermissionRequired
@@ -5875,10 +5989,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Id("btn-change-folder"),
                                   h.Class("btn btn-secondary"),
                                   h.Role("menuitem"),
-                                  h.Title("Anderen Ordner wählen"),
+                                  h.Title(tr.settings.changeFolderTitle),
                                   h.OnClick(Message.ClickedChangeFolder()),
                                 ],
-                                [viewIcon("folder-open", h), " Ordner wechseln"],
+                                [viewIcon("folder-open", h), ` ${tr.settings.changeFolder}`],
                               )
                             : h.empty,
                           isFsaReady
@@ -5888,10 +6002,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Id("btn-disconnect-folder"),
                                   h.Class("btn btn-secondary is-danger"),
                                   h.Role("menuitem"),
-                                  h.Title("Ordner trennen"),
+                                  h.Title(tr.settings.disconnectFolderTitle),
                                   h.OnClick(Message.ClickedDisconnectFolder()),
                                 ],
-                                [viewIcon("plug", h), " Trennen"],
+                                [viewIcon("plug", h), ` ${tr.settings.disconnectFolder}`],
                               )
                             : h.empty,
                         ],
@@ -5901,7 +6015,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.section(
                     [h.Class("settings-group"), h.Id("settings-group-history")],
                     [
-                      h.h4([h.Class("settings-group-title")], ["Versionsverlauf"]),
+                      h.h4([h.Class("settings-group-title")], [tr.settings.historyTitle]),
                       h.div(
                         [h.Class("form-group")],
                         [
@@ -5918,15 +6032,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["Versionen automatisch speichern"]),
+                              h.span([], [tr.settings.historyAutoSave]),
                             ],
                           ),
-                          h.p(
-                            [h.Class("form-hint")],
-                            [
-                              "Sichert vor jedem Speichern, Überschreiben oder Löschen im Editor bzw. Dateimanager eine Kopie der vorherigen Datei.",
-                            ],
-                          ),
+                          h.p([h.Class("form-hint")], [tr.settings.historyAutoSaveHint]),
                         ],
                       ),
                       h.div(
@@ -5945,15 +6054,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["api.js Versionen speichern"]),
+                              h.span([], [tr.settings.apiHistorySave]),
                             ],
                           ),
-                          h.p(
-                            [h.Class("form-hint")],
-                            [
-                              "Sichert vor jedem Überschreiben, Umbenennen, Kopieren oder Löschen über api.js eine Kopie der bisherigen Daten (auch Binärdateien).",
-                            ],
-                          ),
+                          h.p([h.Class("form-hint")], [tr.settings.apiHistorySaveHint]),
                         ],
                       ),
                       ClearAllHistoryState.match(model.clearAllHistoryState, {
@@ -5968,7 +6072,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Class("btn btn-danger"),
                                   h.OnClick(Message.ClickedRequestClearAllHistory()),
                                 ],
-                                [viewIcon("trash", h), " Alle Versionen löschen"],
+                                [viewIcon("trash", h), ` ${tr.settings.clearAllHistory}`],
                               ),
                             ],
                           ),
@@ -5983,7 +6087,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Class("btn btn-danger"),
                                   h.OnClick(Message.ClickedRequestClearAllHistory()),
                                 ],
-                                [viewIcon("trash", h), " Alle Versionen löschen"],
+                                [viewIcon("trash", h), ` ${tr.settings.clearAllHistory}`],
                               ),
                             ],
                           ),
@@ -5998,7 +6102,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Class("btn btn-danger"),
                                   h.Disabled(true),
                                 ],
-                                ["Lösche…"],
+                                [tr.settings.clearingHistory],
                               ),
                             ],
                           ),
@@ -6008,7 +6112,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                             [
                               h.span(
                                 [h.Id("clear-all-history-done"), h.Class("form-hint")],
-                                ["Alle Versionen wurden gelöscht."],
+                                [tr.settings.clearedAllHistory],
                               ),
                             ],
                           ),
@@ -6018,7 +6122,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.section(
                     [h.Class("settings-group"), h.Id("settings-group-editor")],
                     [
-                      h.h4([h.Class("settings-group-title")], ["Editor"]),
+                      h.h4([h.Class("settings-group-title")], [tr.settings.editorTitle]),
                       h.div(
                         [h.Class("form-group")],
                         [
@@ -6035,7 +6139,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["Zeilennummern anzeigen"]),
+                              h.span([], [tr.settings.editorLineNumbers]),
                             ],
                           ),
                         ],
@@ -6056,7 +6160,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["Folds anzeigen"]),
+                              h.span([], [tr.settings.editorFoldingShort]),
                             ],
                           ),
                         ],
@@ -6077,7 +6181,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["Zeilen umbrechen"]),
+                              h.span([], [tr.settings.editorWordWrapShort]),
                             ],
                           ),
                         ],
@@ -6098,7 +6202,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["Über letzte Zeile hinaus scrollen"]),
+                              h.span([], [tr.settings.editorScrollBeyondLastLine]),
                             ],
                           ),
                         ],
@@ -6119,7 +6223,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   }),
                                 ),
                               ]),
-                              h.span([], ["Rückgängig in Titelbar"]),
+                              h.span([], [tr.settings.editorUndoInTitlebarShort]),
                             ],
                           ),
                         ],
@@ -6129,7 +6233,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         [
                           h.label(
                             [h.For("settings-editor-line-decorations-width")],
-                            ["Dekorationsbreite"],
+                            [tr.settings.editorLineDecorationsWidthShort],
                           ),
                           h.div(
                             [h.Class("form-range-row")],
@@ -6157,7 +6261,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Type("button"),
                                   h.Id("settings-editor-line-decorations-width-value"),
                                   h.Class("form-range-value"),
-                                  h.Title("Standardwert wiederherstellen"),
+                                  h.Title(tr.common.restoreDefault),
                                   h.OnClick(
                                     Message.UpdatedSettingsEditorLineDecorationsWidth({
                                       value: defaultMonacoSettings.lineDecorationsWidth,
@@ -6175,7 +6279,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         [
                           h.label(
                             [h.For("settings-editor-line-numbers-min-chars")],
-                            ["Mindestbreite Zeilennummern"],
+                            [tr.settings.editorLineNumbersMinCharsShort],
                           ),
                           h.div(
                             [h.Class("form-range-row")],
@@ -6203,14 +6307,14 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                   h.Type("button"),
                                   h.Id("settings-editor-line-numbers-min-chars-value"),
                                   h.Class("form-range-value"),
-                                  h.Title("Standardwert wiederherstellen"),
+                                  h.Title(tr.common.restoreDefault),
                                   h.OnClick(
                                     Message.UpdatedSettingsEditorLineNumbersMinChars({
                                       value: defaultMonacoSettings.lineNumbersMinChars,
                                     }),
                                   ),
                                 ],
-                                [`${model.editorLineNumbersMinChars} Zeichen`],
+                                [tr.common.characters(model.editorLineNumbersMinChars)],
                               ),
                             ],
                           ),
@@ -6219,7 +6323,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("settings-app-theme")], ["App-Theme"]),
+                          h.label([h.For("settings-app-theme")], [tr.settings.appTheme]),
                           h.select(
                             [
                               h.Id("settings-app-theme"),
@@ -6234,9 +6338,18 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               ),
                             ],
                             [
-                              h.option([h.Value("system")], ["System (Automatisch)"]),
-                              h.option([h.Value("light")], ["Hell"]),
-                              h.option([h.Value("dark")], ["Dunkel"]),
+                              h.option(
+                                [h.Value("system")],
+                                [t(model.language).settings.appThemeSystem],
+                              ),
+                              h.option(
+                                [h.Value("light")],
+                                [t(model.language).settings.appThemeLight],
+                              ),
+                              h.option(
+                                [h.Value("dark")],
+                                [t(model.language).settings.appThemeDark],
+                              ),
                             ],
                           ),
                         ],
@@ -6244,7 +6357,10 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.div(
                         [h.Class("form-group")],
                         [
-                          h.label([h.For("settings-editor-theme")], ["Editor-Theme"]),
+                          h.label(
+                            [h.For("settings-editor-theme")],
+                            [t(model.language).settings.editorTheme],
+                          ),
                           h.select(
                             [
                               h.Id("settings-editor-theme"),
@@ -6259,11 +6375,26 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                               ),
                             ],
                             [
-                              h.option([h.Value("system")], ["App-Theme (Automatisch)"]),
-                              h.option([h.Value("vs")], ["Hell"]),
-                              h.option([h.Value("vs-dark")], ["Dunkel"]),
-                              h.option([h.Value("hc-black")], ["Hoher Kontrast (Dunkel)"]),
-                              h.option([h.Value("hc-light")], ["Hoher Kontrast (Hell)"]),
+                              h.option(
+                                [h.Value("system")],
+                                [t(model.language).settings.editorThemeSystem],
+                              ),
+                              h.option(
+                                [h.Value("vs")],
+                                [t(model.language).settings.editorThemeLight],
+                              ),
+                              h.option(
+                                [h.Value("vs-dark")],
+                                [t(model.language).settings.editorThemeDark],
+                              ),
+                              h.option(
+                                [h.Value("hc-black")],
+                                [t(model.language).settings.editorThemeHcDark],
+                              ),
+                              h.option(
+                                [h.Value("hc-light")],
+                                [t(model.language).settings.editorThemeHcLight],
+                              ),
                             ],
                           ),
                         ],
@@ -7025,6 +7156,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
 }
 
 const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
+  const tr = t(model.language).toolbar
   const isReady = StorageState.match(model.storageState, {
     Initializing: () => false,
     Unsupported: () => false,
@@ -7049,8 +7181,8 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Type("button"),
                   h.Id("btn-new-file"),
                   h.Class("btn btn-primary"),
-                  h.Title("Neue Datei erstellen"),
-                  h.AriaLabel("Neue Datei erstellen"),
+                  h.Title(tr.newFileTitle),
+                  h.AriaLabel(tr.newFileTitle),
                   h.OnClick(Message.ClickedNewFile()),
                 ],
                 [
@@ -7061,7 +7193,7 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.span([h.Class("btn-icon-main")], [viewIcon("plus", h)]),
                     ],
                   ),
-                  h.span([h.Class("btn-label")], ["Datei"]),
+                  h.span([h.Class("btn-label")], [tr.newFileLabel]),
                 ],
               )
             : h.empty,
@@ -7071,8 +7203,8 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Type("button"),
                   h.Id("btn-new-folder"),
                   h.Class("btn btn-primary"),
-                  h.Title("Neuen Ordner erstellen"),
-                  h.AriaLabel("Neuen Ordner erstellen"),
+                  h.Title(tr.newFolderTitle),
+                  h.AriaLabel(tr.newFolderTitle),
                   h.OnClick(Message.ClickedNewFolder()),
                 ],
                 [
@@ -7083,7 +7215,7 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                       h.span([h.Class("btn-icon-main")], [viewIcon("plus", h)]),
                     ],
                   ),
-                  h.span([h.Class("btn-label")], ["Ordner"]),
+                  h.span([h.Class("btn-label")], [tr.newFolderLabel]),
                 ],
               )
             : h.empty,
@@ -7093,13 +7225,13 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
                   h.Type("button"),
                   h.Id("btn-import-file"),
                   h.Class("btn btn-secondary"),
-                  h.Title("Externe Dateien hochladen"),
-                  h.AriaLabel("Externe Dateien hochladen"),
+                  h.Title(tr.uploadTitle),
+                  h.AriaLabel(tr.uploadTitle),
                   h.OnClick(Message.ClickedImportFiles()),
                 ],
                 [
                   h.span([h.Class("btn-icon-only"), h.AriaHidden(true)], [viewIcon("upload", h)]),
-                  h.span([h.Class("btn-label")], ["Hochladen"]),
+                  h.span([h.Class("btn-label")], [tr.uploadLabel]),
                 ],
               )
             : h.empty,
@@ -7113,7 +7245,13 @@ const viewToolbar = (model: Model, h: HtmlBuilder): Html.Html => {
 
 // VIEW CONTENT
 
-const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): Html.Html => {
+const viewEntryRow = (
+  entry: FileEntry,
+  showFileInfo: boolean,
+  language: Language,
+  h: HtmlBuilder,
+): Html.Html => {
+  const tr = t(language).files
   const isDir = entry.kind === "directory"
   const icon = fileIconFor(entry.name, isDir)
   const sizeDisplay = isDir
@@ -7138,13 +7276,7 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
       h.Class(`file-row ${isDir ? "is-directory" : "is-file"}${isDeleted ? " is-deleted" : ""}`),
       h.DataAttribute("entry", entry.name),
       h.DataAttribute("kind", entry.kind),
-      h.Title(
-        isDir
-          ? "Ordner öffnen"
-          : isDeleted
-            ? "Datei gelöscht – Versionen anzeigen"
-            : "Datei öffnen",
-      ),
+      h.Title(isDir ? tr.openFolder : isDeleted ? tr.deletedShowVersions : tr.openFile),
       h.OnClick(Message.ClickedEntryRow({ entry })),
     ],
     [
@@ -7161,14 +7293,14 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
         ],
       ),
       showFileInfo
-        ? h.td([h.Class("file-size-cell"), h.DataAttribute("label", "Größe")], [sizeDisplay])
+        ? h.td([h.Class("file-size-cell"), h.DataAttribute("label", tr.size)], [sizeDisplay])
         : h.empty,
       showFileInfo
         ? h.td(
             [
               h.Class("file-date-cell"),
-              h.DataAttribute("label", "Zuletzt geändert"),
-              h.DataAttribute("label-short", "Geändert"),
+              h.DataAttribute("label", tr.lastModified),
+              h.DataAttribute("label-short", tr.modifiedShort),
             ],
             [dateDisplay],
           )
@@ -7185,13 +7317,13 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
                       h.Type("button"),
                       h.Class("btn btn-secondary btn-sm btn-entry-history"),
                       h.DataAttribute("entry", entry.name),
-                      h.Title("Versionsverlauf"),
-                      h.AriaLabel(`Versionsverlauf für ${entry.name}`),
+                      h.Title(tr.versionHistory),
+                      h.AriaLabel(tr.versionHistoryFor(entry.name)),
                       h.OnClick(Message.ClickedEntryHistory({ entry }), {
                         propagation: "Stop",
                       }),
                     ],
-                    [viewIcon("history", h), h.span([h.Class("btn-label")], ["Versionen"])],
+                    [viewIcon("history", h), h.span([h.Class("btn-label")], [tr.versions])],
                   )
                 : h.empty,
               h.button(
@@ -7202,19 +7334,15 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
                   ),
                   h.DataAttribute("entry", entry.name),
                   h.Disabled(isDeleted),
-                  h.Title(
-                    isDeleted ? "Datei gelöscht" : isDir ? "Ordner bearbeiten" : "Datei bearbeiten",
-                  ),
-                  h.AriaLabel(
-                    isDeleted ? "Datei gelöscht" : isDir ? "Ordner bearbeiten" : "Datei bearbeiten",
-                  ),
+                  h.Title(isDeleted ? tr.fileDeleted : isDir ? tr.editFolder : tr.editFile),
+                  h.AriaLabel(isDeleted ? tr.fileDeleted : isDir ? tr.editFolder : tr.editFile),
                   h.OnClick(Message.ClickedEditEntry({ entry }), {
                     propagation: "Stop",
                   }),
                 ],
                 [
                   viewIcon("edit", h),
-                  h.span([h.Class("btn-label")], [isDeleted ? "Gelöscht" : "Bearbeiten"]),
+                  h.span([h.Class("btn-label")], [isDeleted ? tr.deleted : tr.edit]),
                 ],
               ),
             ],
@@ -7228,6 +7356,7 @@ const viewEntryRow = (entry: FileEntry, showFileInfo: boolean, h: HtmlBuilder): 
 const viewFilesTable = (
   entries: ReadonlyArray<FileEntry>,
   showFileInfo: boolean,
+  language: Language,
   h: HtmlBuilder,
 ): Html.Html => {
   return Array.match(entries, {
@@ -7236,19 +7365,21 @@ const viewFilesTable = (
         [h.Class("empty-state")],
         [
           h.div([h.Class("empty-icon"), h.AriaHidden(true)], [viewIcon("folder", h)]),
-          h.h3([], ["Ordner ist leer"]),
+          h.h3([], [t(language).files.folderIsEmpty]),
         ],
       ),
-    onNonEmpty: (entries) => viewFilesTableContent(entries, showFileInfo, h),
+    onNonEmpty: (entries) => viewFilesTableContent(entries, showFileInfo, language, h),
   })
 }
 
 const viewFilesTableContent = (
   entries: ReadonlyArray<FileEntry>,
   showFileInfo: boolean,
+  language: Language,
   h: HtmlBuilder,
-): Html.Html =>
-  h.div(
+): Html.Html => {
+  const tr = t(language).files
+  return h.div(
     [],
     [
       h.div([h.Class("files-summary")], [h.span([], [formatSummaryText(entries)])]),
@@ -7264,16 +7395,16 @@ const viewFilesTableContent = (
                   h.tr(
                     [],
                     [
-                      h.th([h.Scope("col"), h.Class("th-name")], ["Name"]),
+                      h.th([h.Scope("col"), h.Class("th-name")], [tr.name]),
                       showFileInfo
-                        ? h.th([h.Scope("col"), h.Class("th-size")], ["Größe"])
+                        ? h.th([h.Scope("col"), h.Class("th-size")], [tr.size])
                         : h.empty,
                       showFileInfo
-                        ? h.th([h.Scope("col"), h.Class("th-date")], ["Zuletzt geändert"])
+                        ? h.th([h.Scope("col"), h.Class("th-date")], [tr.lastModified])
                         : h.empty,
                       h.th(
                         [h.Scope("col"), h.Class("th-actions")],
-                        [h.span([h.Class("visually-hidden")], ["Aktion"])],
+                        [h.span([h.Class("visually-hidden")], [tr.action])],
                       ),
                     ],
                   ),
@@ -7283,7 +7414,7 @@ const viewFilesTableContent = (
                 [],
                 pipe(
                   entries,
-                  Array.map((entry) => viewEntryRow(entry, showFileInfo, h)),
+                  Array.map((entry) => viewEntryRow(entry, showFileInfo, language, h)),
                 ),
               ),
             ],
@@ -7292,6 +7423,7 @@ const viewFilesTableContent = (
       ),
     ],
   )
+}
 
 const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
   h.div(
@@ -7378,7 +7510,7 @@ const viewContentSection = (model: Model, h: HtmlBuilder): Html.Html =>
                   h.p([], ["Dateien werden geladen..."]),
                 ],
               ),
-            Loaded: ({ entries }) => viewFilesTable(entries, model.showFileInfo, h),
+            Loaded: ({ entries }) => viewFilesTable(entries, model.showFileInfo, model.language, h),
             Error: ({ message }) =>
               h.div(
                 [h.Class("empty-state")],
@@ -7670,6 +7802,7 @@ export const view = (model: Model, h: HtmlBuilder): Html.Document => {
           model.toasts,
           (id) => Message.ClickedDismissToast({ id }),
           (message) => Message.ClickedCopyToast({ message }),
+          model.language,
           h,
         ),
       ],

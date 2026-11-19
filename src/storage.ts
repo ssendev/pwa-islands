@@ -1,5 +1,6 @@
 import { Array, Data, Effect, Option, Schema, Stream } from "effect"
 import { invoke } from "@tauri-apps/api/core"
+import { type Language, isLanguage } from "./i18n"
 
 export class DirectoryIterationError extends Data.TaggedError("DirectoryIterationError")<{
   readonly message: string
@@ -512,6 +513,35 @@ export async function storeAppTheme(theme: AppTheme): Promise<void> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_NAME, "readwrite")
     const req = tx.objectStore(STORE_NAME).put(theme, APP_THEME_KEY)
+    req.onsuccess = () => resolve()
+    req.onerror = () => reject(req.error)
+  })
+}
+
+const APP_LANGUAGE_KEY = "app_language"
+
+export async function getStoredLanguage(): Promise<Option.Option<Language>> {
+  try {
+    const db = await openDB()
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readonly")
+      const req = tx.objectStore(STORE_NAME).get(APP_LANGUAGE_KEY)
+      req.onsuccess = () => {
+        resolve(isLanguage(req.result) ? Option.some(req.result) : Option.none())
+      }
+      req.onerror = () => reject(req.error)
+    })
+  } catch (error) {
+    console.error("Fehler beim Abrufen der Sprache:", error)
+    return Option.none()
+  }
+}
+
+export async function storeLanguage(language: Language): Promise<void> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, "readwrite")
+    const req = tx.objectStore(STORE_NAME).put(language, APP_LANGUAGE_KEY)
     req.onsuccess = () => resolve()
     req.onerror = () => reject(req.error)
   })
