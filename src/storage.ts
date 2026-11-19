@@ -1338,6 +1338,6 @@ export async function deleteUserTemplate(
     await dir.removeEntry(fileName)
   } catch (error) {
     if (error instanceof DOMException && error.name === "NotFoundError") return
-    console.error("Fehler beim Löschen der Benutzervorlage:", error)
+    console.error("Failed to delete user template:", error)
   }
 }
