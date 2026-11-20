@@ -48,3 +48,11 @@ npm run tauri:build # Build the Tauri app
 npm run test       # Run tests (Vitest)
 npm run fix        # Format, lint, and typecheck
 ```
+
+## AI Usage
+
+This project was written with the help of AI and tested by a human.
+
+## License
+
+[MIT](LICENSE)
