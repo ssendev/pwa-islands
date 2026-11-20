@@ -1,8 +1,110 @@
-import { Option } from "effect"
+import { Array, Option } from "effect"
 import type * as Html from "foldkit/html"
 import { CopyDtsState, Message, type Model, type ViewInputs } from "./help"
 import { viewIcon } from "./icons"
+import {
+  NPM_DIRECT_DEV_LICENSES,
+  NPM_DIRECT_RUNTIME_LICENSES,
+  NPM_TRANSITIVE_DEV_LICENSES,
+  NPM_TRANSITIVE_RUNTIME_LICENSES,
+  TAURI_DIRECT_LICENSES,
+  TAURI_TRANSITIVE_LICENSES,
+  type SoftwareLicense,
+} from "./licenses"
 import { OPFS_APP_FOLDER } from "./storage"
+
+const viewDirectLicenseTable = (
+  entries: ReadonlyArray<SoftwareLicense>,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
+  h.div(
+    [h.Class("help-table-wrap")],
+    [
+      h.table(
+        [h.Class("help-table")],
+        [
+          h.thead(
+            [],
+            [
+              h.tr(
+                [],
+                [
+                  h.th([], ["Paket"]),
+                  h.th([], ["Zweck"]),
+                  h.th([], ["Version"]),
+                  h.th([], ["Lizenz"]),
+                ],
+              ),
+            ],
+          ),
+          h.tbody(
+            [],
+            Array.map(entries, (entry) =>
+              h.keyed("tr")(
+                entry.name,
+                [],
+                [
+                  h.td(
+                    [],
+                    [
+                      h.a(
+                        [h.Href(entry.url), h.Target("_blank"), h.Rel("noopener noreferrer")],
+                        [entry.name],
+                      ),
+                    ],
+                  ),
+                  h.td([], [entry.description?.de ?? ""]),
+                  h.td([], [h.code([], [entry.version])]),
+                  h.td([], [entry.license]),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ],
+  )
+
+const viewTransitiveLicenseTable = (
+  entries: ReadonlyArray<SoftwareLicense>,
+  h: Html.HtmlBuilder<Message>,
+): Html.Html =>
+  h.div(
+    [h.Class("help-table-wrap")],
+    [
+      h.table(
+        [h.Class("help-table")],
+        [
+          h.thead(
+            [],
+            [h.tr([], [h.th([], ["Paket"]), h.th([], ["Version"]), h.th([], ["Lizenz"])])],
+          ),
+          h.tbody(
+            [],
+            Array.map(entries, (entry) =>
+              h.keyed("tr")(
+                `${entry.name}@${entry.version}`,
+                [],
+                [
+                  h.td(
+                    [],
+                    [
+                      h.a(
+                        [h.Href(entry.url), h.Target("_blank"), h.Rel("noopener noreferrer")],
+                        [entry.name],
+                      ),
+                    ],
+                  ),
+                  h.td([], [h.code([], [entry.version])]),
+                  h.td([], [entry.license]),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    ],
+  )
 
 const API_DTS_HREF = "/api.d.ts"
 
@@ -33,6 +135,7 @@ export const viewHelpDe = (
   const isAiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "ai")
   const isApiOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "api")
   const isFsOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "fs")
+  const isLicensesOpen = Option.exists(model.maybeOpenTopic, (topic) => topic === "licenses")
   const isFsaSupported = !context.hasTauri && context.hasDirectoryPicker
   const isOpfsSupported = !context.hasTauri && context.hasOPFS
 
@@ -811,6 +914,134 @@ export const viewHelpDe = (
                                   viewIcon("settings", h),
                                   " wechseln. In der Desktop-App (Tauri) wird direkt das native Dateisystem verwendet.",
                                 ],
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  h.details(
+                    [
+                      h.Class("help-topic"),
+                      h.Name("help-topic"),
+                      h.DataAttribute("topic", "licenses"),
+                      h.Open(isLicensesOpen),
+                      h.OnToggle((isOpen) => Message.ToggledTopic({ topic: "licenses", isOpen })),
+                    ],
+                    [
+                      h.summary(
+                        [h.Class("help-topic-summary")],
+                        [
+                          h.span(
+                            [h.Class("help-topic-marker"), h.AriaHidden(true)],
+                            [viewIcon("file-code", h)],
+                          ),
+                          h.span([h.Class("help-topic-title")], ["Lizenzen & Open Source"]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("help-topic-body")],
+                        [
+                          h.p(
+                            [],
+                            [
+                              h.strong([], ["PWA Islands"]),
+                              " steht unter der ",
+                              h.strong([], ["MIT-Lizenz"]),
+                              ". Zum ",
+                              h.a(
+                                [
+                                  h.Href("https://github.com/ssendev/pwa-islands"),
+                                  h.Target("_blank"),
+                                  h.Rel("noopener noreferrer"),
+                                ],
+                                ["Quellcode"],
+                              ),
+                              ".",
+                            ],
+                          ),
+                          h.h4([], ["Web- / JavaScript-Abhängigkeiten"]),
+                          viewDirectLicenseTable(NPM_DIRECT_RUNTIME_LICENSES, h),
+                          h.details(
+                            [h.Class("help-topic")],
+                            [
+                              h.summary(
+                                [h.Class("help-topic-summary")],
+                                [
+                                  h.span(
+                                    [h.Class("help-topic-title")],
+                                    [
+                                      `Transitive JavaScript-Abhängigkeiten (${NPM_TRANSITIVE_RUNTIME_LICENSES.length})`,
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              h.div(
+                                [h.Class("help-topic-body")],
+                                [viewTransitiveLicenseTable(NPM_TRANSITIVE_RUNTIME_LICENSES, h)],
+                              ),
+                            ],
+                          ),
+                          h.h4([], ["Desktop- / Native Abhängigkeiten (Tauri / Rust)"]),
+                          viewDirectLicenseTable(TAURI_DIRECT_LICENSES, h),
+                          h.details(
+                            [h.Class("help-topic")],
+                            [
+                              h.summary(
+                                [h.Class("help-topic-summary")],
+                                [
+                                  h.span(
+                                    [h.Class("help-topic-title")],
+                                    [
+                                      `Transitive Rust-Crates (${TAURI_TRANSITIVE_LICENSES.length})`,
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              h.div(
+                                [h.Class("help-topic-body")],
+                                [viewTransitiveLicenseTable(TAURI_TRANSITIVE_LICENSES, h)],
+                              ),
+                            ],
+                          ),
+                          h.details(
+                            [h.Class("help-topic")],
+                            [
+                              h.summary(
+                                [h.Class("help-topic-summary")],
+                                [
+                                  h.span(
+                                    [h.Class("help-topic-title")],
+                                    [
+                                      `Entwicklungsabhängigkeiten (${NPM_DIRECT_DEV_LICENSES.length})`,
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              h.div(
+                                [h.Class("help-topic-body")],
+                                [viewTransitiveLicenseTable(NPM_DIRECT_DEV_LICENSES, h)],
+                              ),
+                            ],
+                          ),
+                          h.details(
+                            [h.Class("help-topic")],
+                            [
+                              h.summary(
+                                [h.Class("help-topic-summary")],
+                                [
+                                  h.span(
+                                    [h.Class("help-topic-title")],
+                                    [
+                                      `Transitive Entwicklungsabhängigkeiten (${NPM_TRANSITIVE_DEV_LICENSES.length})`,
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              h.div(
+                                [h.Class("help-topic-body")],
+                                [viewTransitiveLicenseTable(NPM_TRANSITIVE_DEV_LICENSES, h)],
                               ),
                             ],
                           ),

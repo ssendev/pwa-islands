@@ -1,8 +1,8 @@
 {
   "name": "pwa-islands",
   "version": "0.0.0",
-  "license": "MIT",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "tauri": "node scripts/tauri.mjs",

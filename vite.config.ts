@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
+import { licensesPlugin } from "./tools/licenses.ts"
 import { maskableIcon } from "./tools/maskable-icon.ts"
 import { notoEmoji } from "./tools/noto-emoji.ts"
 
@@ -263,6 +264,7 @@ export default defineConfig({
   plugins: [
     foldkit(),
     ...islandsApiPlugin(),
+    licensesPlugin(),
     maskableIcon(),
     notoEmoji(),
     VitePWA({
