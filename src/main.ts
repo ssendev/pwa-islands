@@ -2965,11 +2965,27 @@ export const update = (
     CompletedInitializeStoragePermissionRequired: (payload) =>
       handlePermissionRequired(model, payload),
     CompletedInitializeStorageNoFolderSelected: (payload) => handleNoFolderSelected(model, payload),
-    FailedInitializeStorage: ({ message: errorMessage }) =>
-      enqueueToast(model, {
+    FailedInitializeStorage: ({ message: errorMessage }) => {
+      const nextModel =
+        model.storageState._tag === "Initializing"
+          ? modifyFields(model, {
+              storageState: () =>
+                model.hasTauri || model.hasDirectoryPicker || model.hasOPFS
+                  ? StorageState.NoFolderSelected({
+                      storageType: model.hasTauri ? "tauri" : "fsa",
+                      otherBackend: model.hasOPFS
+                        ? SavedBackend.Granted({ rootName: OPFS_APP_FOLDER })
+                        : SavedBackend.Unsupported(),
+                      pendingRoute: AppRoute.Folder({ subPath: [] }),
+                    })
+                  : StorageState.Unsupported(),
+            })
+          : model
+      return enqueueToast(nextModel, {
         message: errorMessage,
         variant: "danger",
-      }),
+      })
+    },
     CompletedLoadFileInfoPreference: ({ visible }) => ({
       model: modifyFields(model, {
         showFileInfo: () => visible,
