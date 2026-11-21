@@ -154,11 +154,23 @@ const formatUnifiedDiffInstructions = (wrapper: {
   ]
 }
 
-const formatTextToolFewShotPrompt = (format: EditFormat): string => {
+export type FewShotChatMessage =
+  | { readonly _tag: "User"; readonly content: string }
+  | { readonly _tag: "Assistant"; readonly content: string }
+
+export const getTextToolFewShotMessages = (
+  format: EditFormat,
+): ReadonlyArray<FewShotChatMessage> => {
   const tr = t(getDocumentLanguage())
   const ef = tr.editFormat
+  const sampleFile = `<main>\n${ef.exampleOldText}\n</main>`
+  const formattedSampleFile = formatFileMessageForFormat(format, "example.html", sampleFile)
   const editBody = Match.value(format).pipe(
-    Match.when("hashline", () => ["REPLACE 12:a3f", tr.hashline.exampleNewText, "END"]),
+    Match.when("hashline", () => [
+      `REPLACE 2:${hashLine(ef.exampleOldText)}`,
+      tr.hashline.exampleNewText,
+      "END",
+    ]),
     Match.when("search-replace", () => [
       "<<<<<<< SEARCH",
       ef.exampleOldText,
@@ -176,25 +188,38 @@ const formatTextToolFewShotPrompt = (format: EditFormat): string => {
     Match.exhaustive,
   )
   return [
-    ef.textToolIntro,
-    "",
-    ef.textToolEditExampleHeading,
-    ef.textToolEditExampleUser,
-    ef.textToolEditExampleAssistant,
-    "<edit>",
-    ...editBody,
-    "</edit>",
-    "",
-    ef.textToolOtherExamplesHeading,
-    ...ef.textToolOtherExamples,
-  ].join("\n")
+    {
+      _tag: "User",
+      content: `${formattedSampleFile.trimEnd()}\n\n${ef.textToolFewShotEditPrompt}`,
+    },
+    {
+      _tag: "Assistant",
+      content: ["<edit>", ...editBody, "</edit>"].join("\n"),
+    },
+    {
+      _tag: "User",
+      content: ef.textToolFewShotSearchUser,
+    },
+    {
+      _tag: "Assistant",
+      content: ef.textToolFewShotSearchAssistant,
+    },
+    {
+      _tag: "User",
+      content: ef.textToolFewShotWriteUser,
+    },
+    {
+      _tag: "Assistant",
+      content: ef.textToolFewShotWriteAssistant,
+    },
+  ]
 }
 
 export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = true): string => {
-  if (!useToolCalls) {
-    return formatTextToolFewShotPrompt(format)
-  }
   const ef = t(getDocumentLanguage()).editFormat
+  if (!useToolCalls) {
+    return ef.textToolIntro
+  }
   const basePrompt = Match.value(format).pipe(
     Match.when("hashline", () => formatHashlineSystemPrompt(true)),
     Match.when("search-replace", () =>

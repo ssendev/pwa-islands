@@ -15,6 +15,7 @@ import {
   formatLlmContextForFormat,
   formatSystemPromptForFormat,
   getEditorToolsForFormat,
+  getTextToolFewShotMessages,
   stripTextToolCalls,
 } from "./edit-format"
 import { hashLine } from "./hashline"
@@ -501,14 +502,27 @@ describe("edit-format", () => {
     )
   })
 
-  it("includes fake text tool instructions in system prompt when useToolCalls is false", () => {
+  it("provides short system prompt and multi-turn few-shot messages when useToolCalls is false", () => {
     for (const format of ["hashline", "search-replace", "unified-diff"] as const) {
       const textPrompt = formatSystemPromptForFormat(format, false)
       expect(textPrompt).toContain("<edit>")
-      expect(textPrompt).toContain("</edit>")
       expect(textPrompt).toContain("<search>")
-      expect(textPrompt).toContain("<read>1-100</read>")
+      expect(textPrompt).toContain("<read>")
       expect(textPrompt).toContain("<write>")
+
+      const fewShot = getTextToolFewShotMessages(format)
+      expect(fewShot.map((m) => m._tag)).toEqual([
+        "User",
+        "Assistant",
+        "User",
+        "Assistant",
+        "User",
+        "Assistant",
+      ])
+      expect(fewShot[1]?.content).toContain("<edit>")
+      expect(fewShot[1]?.content).toContain("</edit>")
+      expect(fewShot[3]?.content).toBe("<search>button</search>")
+      expect(fewShot[5]?.content).toContain("<write>")
 
       const nativePrompt = formatSystemPromptForFormat(format, true)
       expect(nativePrompt).not.toContain("<search>")

@@ -107,6 +107,7 @@ import {
   EditFormat,
   formatFileMessageForFormat,
   formatSystemPromptForFormat,
+  getTextToolFewShotMessages,
   parseEditFormat,
 } from "./edit-format"
 import { formatApiDtsMessage } from "./hashline"
@@ -5995,11 +5996,23 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                               ]
                             })()
                           : []
+                        const fewShotMessages: ReadonlyArray<EditorChatMessage> = useToolCalls
+                          ? []
+                          : getTextToolFewShotMessages(deps.editFormat).map((msg) =>
+                              msg._tag === "Assistant"
+                                ? {
+                                    _tag: "Assistant" as const,
+                                    content: msg.content,
+                                    toolCalls: [],
+                                  }
+                                : { _tag: "User" as const, content: msg.content },
+                            )
                         return [
                           {
                             _tag: "System" as const,
                             content: formatSystemPromptForFormat(deps.editFormat, useToolCalls),
                           },
+                          ...fewShotMessages,
                           ...apiDtsMessages,
                           {
                             _tag: "User" as const,

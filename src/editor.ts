@@ -4559,19 +4559,34 @@ const viewLlmChatHistory = (
 ): Html.Html => {
   const tr = t(language)
   const systemMessages = Array.filter(llmChatMessages, (msg) => msg._tag === "System")
-  const autoUserMessages =
-    llmChatMessages.length >= 4 &&
-    llmChatMessages[0]?._tag === "System" &&
-    llmChatMessages[1]?._tag === "User" &&
-    llmChatMessages[2]?._tag === "User"
-      ? [llmChatMessages[1], llmChatMessages[2]]
-      : []
+  const firstQuestion = llmChatDisplay.find((entry) => entry._tag === "Question")?.content
+  const firstQuestionIndex =
+    llmChatMessages[0]?._tag === "System" && firstQuestion !== undefined
+      ? llmChatMessages.findIndex(
+          (msg, idx) =>
+            idx >= 2 &&
+            msg._tag === "User" &&
+            msg.content === firstQuestion &&
+            llmChatMessages[idx - 1]?._tag === "User",
+        )
+      : -1
+  const preambleMessages =
+    firstQuestionIndex > 1
+      ? llmChatMessages.slice(1, firstQuestionIndex)
+      : llmChatMessages.length >= 4 &&
+          llmChatMessages[0]?._tag === "System" &&
+          llmChatMessages[1]?._tag === "User" &&
+          llmChatMessages[2]?._tag === "User"
+        ? [llmChatMessages[1], llmChatMessages[2]]
+        : []
 
   const onCopyCode = (code: string) => Message.ClickedCopyLlmCode({ code })
   const toolsMarkdown = `\`\`\`json tools\n${JSON.stringify(getEditorToolsForFormat(editFormat), null, 2)}\n\`\`\``
+  const systemToggleKey = "system-context"
+  const isSystemMarkdown = !llmToolRawKeys.includes(systemToggleKey)
 
   const systemNodes =
-    Array.isReadonlyArrayNonEmpty(systemMessages) || Array.isReadonlyArrayNonEmpty(autoUserMessages)
+    Array.isReadonlyArrayNonEmpty(systemMessages) || Array.isReadonlyArrayNonEmpty(preambleMessages)
       ? [
           h.details(
             [h.Class("modal-llm-chat-details is-system")],
@@ -4579,7 +4594,7 @@ const viewLlmChatHistory = (
               h.summary(
                 [h.Class("modal-llm-chat-details-summary")],
                 [
-                  Array.isReadonlyArrayNonEmpty(autoUserMessages)
+                  Array.isReadonlyArrayNonEmpty(preambleMessages)
                     ? tr.editor.systemMessageAndContext
                     : tr.editor.systemMessage,
                 ],
@@ -4587,12 +4602,40 @@ const viewLlmChatHistory = (
               h.div(
                 [h.Class("modal-llm-chat-details-body")],
                 [
-                  ...Array.map(systemMessages, (msg) =>
+                  ...Array.map(systemMessages, (msg, idx) =>
                     h.div(
                       [h.Class("modal-llm-chat-context-block")],
                       [
-                        h.span([h.Class("llm-response-label")], [tr.editor.systemLabel]),
-                        viewMarkdown(msg.content, { onCopyCode, language }, h),
+                        h.div(
+                          [h.Class("llm-response-section-header")],
+                          [
+                            h.span([h.Class("llm-response-label")], [tr.editor.systemLabel]),
+                            idx === 0
+                              ? h.div(
+                                  [h.Class("llm-response-section-actions")],
+                                  [
+                                    h.button(
+                                      [
+                                        h.Type("button"),
+                                        h.Class("llm-markdown-toggle-btn"),
+                                        h.AriaPressed(isSystemMarkdown ? "true" : "false"),
+                                        h.AriaLabel(tr.llmResponse.toggleAnswerMarkdown),
+                                        h.OnClick(
+                                          Message.ToggledLlmToolMarkdown({
+                                            toolKey: systemToggleKey,
+                                          }),
+                                        ),
+                                      ],
+                                      [isSystemMarkdown ? "md" : "txt"],
+                                    ),
+                                  ],
+                                )
+                              : h.empty,
+                          ],
+                        ),
+                        isSystemMarkdown
+                          ? viewMarkdown(msg.content, { onCopyCode, language }, h)
+                          : h.p([h.Class("llm-response-text")], [msg.content]),
                       ],
                     ),
                   ),
@@ -4602,25 +4645,34 @@ const viewLlmChatHistory = (
                           [h.Class("modal-llm-chat-context-block")],
                           [
                             h.span([h.Class("llm-response-label")], [tr.editor.toolsLabel]),
-                            viewMarkdown(
-                              toolsMarkdown,
-                              { onCopyCode, codeblocksOpen: false, language },
-                              h,
-                            ),
+                            isSystemMarkdown
+                              ? viewMarkdown(
+                                  toolsMarkdown,
+                                  { onCopyCode, codeblocksOpen: false, language },
+                                  h,
+                                )
+                              : h.p([h.Class("llm-response-text")], [toolsMarkdown]),
                           ],
                         ),
                       ]
                     : []),
-                  ...Array.map(autoUserMessages, (msg) =>
+                  ...Array.map(preambleMessages, (msg) =>
                     h.div(
                       [h.Class("modal-llm-chat-context-block")],
                       [
-                        h.span([h.Class("llm-response-label")], [tr.editor.contextLabel]),
-                        viewUserMarkdown(
-                          msg.content,
-                          { onCopyCode, codeblocksOpen: false, language },
-                          h,
+                        h.span(
+                          [h.Class("llm-response-label")],
+                          [msg._tag === "Assistant" ? aiName : tr.editor.contextLabel],
                         ),
+                        isSystemMarkdown
+                          ? msg._tag === "Assistant"
+                            ? viewMarkdown(msg.content, { onCopyCode, language }, h)
+                            : viewUserMarkdown(
+                                msg.content,
+                                { onCopyCode, codeblocksOpen: false, language },
+                                h,
+                              )
+                          : h.p([h.Class("llm-response-text")], [msg.content]),
                       ],
                     ),
                   ),
