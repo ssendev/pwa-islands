@@ -3013,6 +3013,31 @@ const mapLoadedEntries = (
     Match.orElse(() => storageState),
   )
 
+const syncClosedEditorDraftStatus = (
+  storageState: StorageState,
+  previousModalState: Modal.ModalState,
+  draftsEnabled: boolean,
+): StorageState => {
+  if (
+    previousModalState._tag !== "Editor" ||
+    previousModalState.editor._tag !== "EditFile" ||
+    previousModalState.editor.fileMode._tag !== "Text"
+  ) {
+    return storageState
+  }
+  const { originalName, fileMode, savedContent, externalConflict } = previousModalState.editor
+  const hasUnsavedChanges = fileMode.content !== savedContent || externalConflict !== undefined
+  return mapLoadedEntries(storageState, (entries) =>
+    Array.map(entries, (entry) => {
+      if (entry.kind !== "file" || entry.name !== originalName) {
+        return entry
+      }
+      const nextHasDraft = hasUnsavedChanges ? (draftsEnabled ? true : entry.hasDraft) : false
+      return nextHasDraft === undefined ? entry : { ...entry, hasDraft: nextHasDraft }
+    }),
+  )
+}
+
 export const update = (
   model: Model,
   message: Message,
@@ -3411,6 +3436,12 @@ export const update = (
                   model: modifyFields(modelWithRoute, {
                     isSettingsOpen: () => false,
                     modalState: () => nextModalState,
+                    storageState: (storageState) =>
+                      syncClosedEditorDraftStatus(
+                        storageState,
+                        model.modalState,
+                        model.draftsEnabled,
+                      ),
                   }),
                   ...(wasIslandOpen ? { commands: [RefreshEntries({ subPath })] } : {}),
                 }
@@ -5161,6 +5192,8 @@ export const update = (
         model: modifyFields(model, {
           isSettingsOpen: () => false,
           modalState: Modal.close,
+          storageState: (storageState) =>
+            syncClosedEditorDraftStatus(storageState, model.modalState, model.draftsEnabled),
         }),
         commands: [
           ReplaceUrl({ url: buildFolderUrl(subPath) }),
@@ -5247,6 +5280,16 @@ export const update = (
           const nextModel = modifyFields(model, {
             modalState: () => modalResult.model,
             historyEnabled: () => nextHistoryEnabled,
+            ...(modalResult.model._tag === "Closed"
+              ? {
+                  storageState: (storageState: StorageState) =>
+                    syncClosedEditorDraftStatus(
+                      storageState,
+                      model.modalState,
+                      model.draftsEnabled,
+                    ),
+                }
+              : {}),
           })
           return syncOpenEditor(nextModel, mappedCommands)
         },
@@ -5268,6 +5311,16 @@ export const update = (
         ReplaceUrl: ({ url }) => ({
           model: modifyFields(model, {
             modalState: () => modalResult.model,
+            ...(modalResult.model._tag === "Closed"
+              ? {
+                  storageState: (storageState: StorageState) =>
+                    syncClosedEditorDraftStatus(
+                      storageState,
+                      model.modalState,
+                      model.draftsEnabled,
+                    ),
+                }
+              : {}),
           }),
           commands: [...mappedCommands, ReplaceUrl({ url })],
         }),
