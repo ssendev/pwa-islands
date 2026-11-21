@@ -8361,13 +8361,18 @@ const viewEntryRow = (
             [h.Class("file-name-inner")],
             [
               h.span([h.Class("file-icon"), h.AriaHidden(true)], [viewIcon(icon, h)]),
-              h.span([h.Class("file-name"), h.Title(entry.name)], [entry.name]),
-              !isDir && entry.hasDraft === true
-                ? h.span(
-                    [h.Class("file-draft-badge"), h.Title(tr.hasUnsavedDraft)],
-                    [tr.draftBadge],
-                  )
-                : h.empty,
+              h.span(
+                [h.Class("file-name"), h.Title(entry.name)],
+                [
+                  entry.name,
+                  !isDir && entry.hasDraft === true
+                    ? h.span(
+                        [h.Class("file-draft-badge"), h.Title(tr.hasUnsavedDraft)],
+                        [tr.draftBadge],
+                      )
+                    : h.empty,
+                ],
+              ),
             ],
           ),
         ],
