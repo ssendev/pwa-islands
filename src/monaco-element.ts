@@ -32,6 +32,7 @@ export const monacoEditorElement = CustomElement.define({
     "history-changed": Schema.Struct({ canUndo: Schema.Boolean, canRedo: Schema.Boolean }),
     "save-requested": Schema.Struct({}),
     "settings-requested": Schema.Struct({}),
+    "help-requested": Schema.Struct({}),
   },
 })
 
@@ -642,6 +643,21 @@ export const registerMonacoEditorElement = (): void => {
         run: () => {
           this.dispatchEvent(
             new CustomEvent("settings-requested", {
+              detail: {},
+              bubbles: true,
+            }),
+          )
+        },
+      })
+
+      editor.addAction({
+        id: "pwa-islands-open-help",
+        label: t(getDocumentLanguage()).common.help,
+        contextMenuGroupId: "navigation",
+        contextMenuOrder: 1.6,
+        run: () => {
+          this.dispatchEvent(
+            new CustomEvent("help-requested", {
               detail: {},
               bubbles: true,
             }),

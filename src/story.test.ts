@@ -111,6 +111,7 @@ const readyModel: Model = {
   showDownloadsInMenu: true,
   showInstallInMenu: true,
   isSettingsDialogOpen: false,
+  maybeOverlayHelp: Option.none(),
   isDownloadsDialogOpen: false,
   downloadsReleaseState: { _tag: "Idle" },
   isEditingLlmSettings: false,

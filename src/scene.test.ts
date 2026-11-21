@@ -97,6 +97,7 @@ const readyModel: Model = {
   showDownloadsInMenu: true,
   showInstallInMenu: true,
   isSettingsDialogOpen: false,
+  maybeOverlayHelp: Option.none(),
   isDownloadsDialogOpen: false,
   downloadsReleaseState: { _tag: "Idle" },
   isEditingLlmSettings: false,
@@ -2551,6 +2552,30 @@ describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
       Command.resolve(SaveMonacoSettings, Message.CompletedSaveMonacoSettings()),
       click(selector("#btn-close-settings")),
       sceneExpect(selector("#settings-dialog")).toBeAbsent(),
+      sceneExpect(selector("#modal-file-content")).toExist(),
+    )
+  })
+
+  it("öffnet die Hilfe aus dem Monaco-Editor-Kontextmenü und behält den offenen Editor bei", () => {
+    scene(
+      { update, view },
+      given(readyModel),
+      click(selector("#btn-new-file")),
+      Command.resolveAll(
+        [PushUrl, Message.CompletedPushUrl()],
+        [Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()],
+        [Editor.LoadUserTemplates, Editor.Message.CompletedLoadUserTemplates({ templates: [] })],
+      ),
+      sceneExpect(selector("#modal-file-content")).toExist(),
+      CustomElement.emit(
+        monacoEditorElement,
+        selector("#modal-file-content"),
+        "help-requested",
+        {},
+      ),
+      sceneExpect(selector("#help-btn-close")).toExist(),
+      click(selector("#help-btn-close")),
+      sceneExpect(selector("#help-btn-close")).toBeAbsent(),
       sceneExpect(selector("#modal-file-content")).toExist(),
     )
   })

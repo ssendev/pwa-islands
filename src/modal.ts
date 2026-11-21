@@ -835,6 +835,7 @@ export const OutMessage = defineTaggedUnion({
     editorSplitPercent: Schema.Number,
   },
   RequestedSettings: {},
+  RequestedHelp: {},
 })
 export type OutMessage = typeof OutMessage.Type
 
@@ -1130,6 +1131,11 @@ export const update = (
               model: ModalState.Editor({ editor: editorResult.model }),
               commands: mappedCommands,
               outMessage: OutMessage.RequestedSettings(),
+            }),
+            RequestedHelp: () => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.RequestedHelp(),
             }),
           })
         }),

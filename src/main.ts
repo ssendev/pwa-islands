@@ -12,6 +12,7 @@ import * as Subscription from "foldkit/subscription"
 import { Url, toString as urlToString } from "foldkit/url"
 import rootIconUrl from "./assets/pwa-islands.svg"
 import { clearAllFileDrafts } from "./drafts"
+import * as Help from "./help"
 import { clearAllFileHistory, recordPreviousTauriApiFileVersion } from "./history"
 import { type IconId, viewIcon } from "./icons"
 import {
@@ -410,6 +411,7 @@ export const Model = Schema.Struct({
   showInstallInMenu: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
+  maybeOverlayHelp: Schema.Option(Help.Model),
   isDownloadsDialogOpen: Schema.Boolean,
   downloadsReleaseState: DownloadsReleaseState,
   isEditingLlmSettings: Schema.Boolean,
@@ -829,6 +831,9 @@ export const Message = defineMessageUnion({
   // Submodel Wrapper
   GotModalMessage: {
     message: Modal.Message,
+  },
+  GotOverlayHelpMessage: {
+    message: Help.Message,
   },
 })
 export type Message = typeof Message.Type
@@ -2376,6 +2381,7 @@ export const init = (
         showDownloadsInMenu: true,
         showInstallInMenu: true,
         isSettingsDialogOpen: isInitialSettingsOpen,
+        maybeOverlayHelp: Option.none(),
         isDownloadsDialogOpen: isInitialDownloadsOpen,
         downloadsReleaseState: isInitialDownloadsOpen
           ? DownloadsReleaseState.Loading()
@@ -2472,6 +2478,7 @@ export const init = (
       showDownloadsInMenu: true,
       showInstallInMenu: true,
       isSettingsDialogOpen: isInitialSettingsOpen,
+      maybeOverlayHelp: Option.none(),
       isDownloadsDialogOpen: isInitialDownloadsOpen,
       downloadsReleaseState: isInitialDownloadsOpen
         ? DownloadsReleaseState.Loading()
@@ -5090,6 +5097,13 @@ export const update = (
             : { commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })] }),
         }
       }
+      if (Option.isSome(model.maybeOverlayHelp)) {
+        return {
+          model: modifyFields(model, {
+            maybeOverlayHelp: () => Option.none(),
+          }),
+        }
+      }
       if (model.isSettingsDialogOpen) {
         if (model.clearAllHistoryState._tag === "Confirming") {
           return {
@@ -5499,8 +5513,63 @@ export const update = (
           ),
           commands: mappedCommands,
         }),
+
+        RequestedHelp: () => ({
+          model: modifyFields(model, {
+            isSettingsOpen: () => false,
+            modalState: () => modalResult.model,
+            maybeOverlayHelp: () => Option.some(Help.init(Option.some("about"))),
+          }),
+          commands: mappedCommands,
+        }),
       })
     },
+
+    GotOverlayHelpMessage: ({ message: helpMessage }) =>
+      Option.match(model.maybeOverlayHelp, {
+        onNone: () => ({ model }),
+        onSome: (help) => {
+          const subPath = currentSubPathFromStorageState(model.storageState)
+          const helpResult = Help.update(help, helpMessage, subPath)
+          const mappedCommands = helpResult.commands
+            ? Command.mapMessages(helpResult.commands, (msg) =>
+                Message.GotOverlayHelpMessage({ message: msg }),
+              )
+            : []
+          return Help.OutMessage.match(helpResult.outMessage, {
+            None: () => ({
+              model: modifyFields(model, {
+                maybeOverlayHelp: () => Option.some(helpResult.model),
+              }),
+              commands: mappedCommands,
+            }),
+            ReplaceUrl: () => ({
+              model: modifyFields(model, {
+                maybeOverlayHelp: () => Option.some(helpResult.model),
+              }),
+              commands: mappedCommands,
+            }),
+            ShowAlert: ({ banner }) => {
+              const toastResult = enqueueToast(
+                modifyFields(model, {
+                  maybeOverlayHelp: () => Option.some(helpResult.model),
+                }),
+                banner,
+              )
+              return {
+                model: toastResult.model,
+                commands: [...mappedCommands, ...(toastResult.commands ?? [])],
+              }
+            },
+            CloseModal: () => ({
+              model: modifyFields(model, {
+                maybeOverlayHelp: () => Option.none(),
+              }),
+              commands: mappedCommands,
+            }),
+          })
+        },
+      }),
   })
 
 // SUBSCRIPTION
@@ -5587,6 +5656,7 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
           model.isWindowFullscreen ||
           model.isSettingsOpen ||
           model.isSettingsDialogOpen ||
+          Option.isSome(model.maybeOverlayHelp) ||
           model.isDownloadsDialogOpen ||
           Modal.isOpen(model.modalState) ||
           Option.isSome(model.maybeActiveIslandUrl),
@@ -8690,6 +8760,25 @@ const viewModalContainer = (model: Model, h: HtmlBuilder): Html.Html => {
   })
 }
 
+const viewOverlayHelpDialog = (model: Model, h: HtmlBuilder): Html.Html =>
+  Option.match(model.maybeOverlayHelp, {
+    onNone: () => h.empty,
+    onSome: (help) =>
+      h.submodel({
+        slotId: "overlay-help",
+        model: help,
+        viewInputs: {
+          origin: model.origin,
+          hasDirectoryPicker: model.hasDirectoryPicker,
+          hasOPFS: model.hasOPFS,
+          hasTauri: model.hasTauri,
+          language: model.language,
+        },
+        view: Help.view,
+        toParentMessage: (msg) => Message.GotOverlayHelpMessage({ message: msg }),
+      }),
+  })
+
 // VIEW DOCUMENT
 
 const ISLAND_IFRAME_SANDBOX =
@@ -8887,6 +8976,7 @@ const viewManagerMain = (model: Model, title: string, h: HtmlBuilder): Html.Html
           viewContentSection(model, h),
           viewModalContainer(model, h),
           viewSettingsDialog(model, h),
+          viewOverlayHelpDialog(model, h),
           viewDownloadsDialog(model, h),
         ],
       ),

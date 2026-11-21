@@ -927,6 +927,7 @@ export const Message = defineMessageUnion({
   },
   CompletedCopyLlmCode: {},
   RequestedSettings: {},
+  RequestedHelp: {},
   ClickedSave: {},
   ClickedOpenPreview: {},
   ClickedClosePreview: {},
@@ -1064,6 +1065,7 @@ export const OutMessage = defineTaggedUnion({
   ChangedLlmBarMode: { llmBarMode: LlmBarMode },
   ChangedEditorSplitPercent: { editorSplitPercent: Schema.Number },
   RequestedSettings: {},
+  RequestedHelp: {},
 })
 export type OutMessage = typeof OutMessage.Type
 
@@ -3258,6 +3260,11 @@ export const update = (
       outMessage: OutMessage.RequestedSettings(),
     }),
 
+    RequestedHelp: () => ({
+      model,
+      outMessage: OutMessage.RequestedHelp(),
+    }),
+
     ClickedSave: () => handleSaveAction(model, context),
 
     ClickedOpenPreview: () =>
@@ -4342,6 +4349,7 @@ const viewEditorFileBody = (
               monacoEditor.OnHistoryChanged((detail) => Message.ChangedEditorHistoryState(detail)),
               monacoEditor.OnSaveRequested(() => Message.ClickedSave()),
               monacoEditor.OnSettingsRequested(() => Message.RequestedSettings()),
+              monacoEditor.OnHelpRequested(() => Message.RequestedHelp()),
               h.Id("modal-file-content"),
               h.Class("monaco-editor-host"),
               h.AriaLabel(t(getDocumentLanguage()).editor.contentAria),
