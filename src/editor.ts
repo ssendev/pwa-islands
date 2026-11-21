@@ -31,7 +31,7 @@ import {
   formatLlmContextForFormat,
   getEditorToolsForFormat,
 } from "./edit-format"
-import { formatUpdatedHashlines } from "./hashline"
+import { formatApiDtsMessage, formatUpdatedHashlines } from "./hashline"
 import { clearFileDraft, hasDiskChangedSinceBase, saveFileDraft } from "./drafts"
 import {
   appendFileHistory,
@@ -127,6 +127,7 @@ export type LlmChatTurnBlock = typeof LlmChatTurnBlock.Type
 
 export const LlmChatDisplayEntry = defineTaggedUnion({
   Question: { content: Schema.String },
+  Context: { summary: Schema.String, content: Schema.String },
   Answer: {
     content: Schema.String,
     reasoning: Schema.String,
@@ -894,6 +895,12 @@ export const Message = defineMessageUnion({
   FailedCopyApiDtsToClipboard: {
     message: Schema.String,
   },
+  SucceededLoadApiDtsForChat: {
+    content: Schema.String,
+  },
+  FailedLoadApiDtsForChat: {
+    message: Schema.String,
+  },
   ClickedCopyLlmContext: {},
   SucceededCopyLlmContext: {},
   FailedCopyLlmContext: {
@@ -1483,6 +1490,29 @@ export const DeleteEntry = Command.define("DeleteEntry", {
         ),
       ),
     ),
+})
+
+export const LoadApiDtsForChat = Command.define("LoadApiDtsForChat", {
+  messages: [Message.SucceededLoadApiDtsForChat, Message.FailedLoadApiDtsForChat],
+  execute: Effect.tryPromise({
+    try: async () => {
+      const res = await fetch("/api.d.ts", { cache: "no-cache" })
+      if (!res.ok) {
+        throw new Error(t(getDocumentLanguage()).errors.httpLoadingApiDts(res.status))
+      }
+      const dtsText = await res.text()
+      return Message.SucceededLoadApiDtsForChat({ content: formatApiDtsMessage(dtsText) })
+    },
+    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(
+        Message.FailedLoadApiDtsForChat({
+          message: error.message,
+        }),
+      ),
+    ),
+  ),
 })
 
 export const CopyApiDtsToClipboard = Command.define("CopyApiDtsToClipboard", {
@@ -2661,14 +2691,51 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
-    AcceptedLlmSlashCommand: () => ({
-      model: acceptSelectedLlmSlashCommand(model),
-      outMessage: OutMessage.None(),
-    }),
+    AcceptedLlmSlashCommand: () => acceptSelectedLlmSlashCommandResult(model),
 
-    ClickedLlmSlashCommand: ({ command }) => ({
-      model: executeChatSlashCommand(command, model),
-      outMessage: OutMessage.None(),
+    ClickedLlmSlashCommand: ({ command }) => executeChatSlashCommandResult(command, model),
+
+    SucceededLoadApiDtsForChat: ({ content }) => {
+      const appendApiDts = (current: ReadonlyArray<LlmChatMessage>) => [
+        ...current,
+        LlmChatMessage.User({ content }),
+      ]
+      const appendDisplay = (current: ReadonlyArray<LlmChatDisplayEntry>) => [
+        ...current,
+        LlmChatDisplayEntry.Context({ summary: "/api.d.ts", content }),
+      ]
+      const nextModel = Model.match(model, {
+        CreateFile: (state) =>
+          modifyFields(state, {
+            llmChatMessages: appendApiDts,
+            llmChatDisplay: appendDisplay,
+          }),
+        EditFile: (state) =>
+          modifyFields(state, {
+            llmChatMessages: appendApiDts,
+            llmChatDisplay: appendDisplay,
+          }),
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmOverwrite: () => model,
+      })
+      return {
+        model: nextModel,
+        commands: [ScrollLlmChatToBottomIfAtBottom()],
+        outMessage: OutMessage.None(),
+      }
+    },
+
+    FailedLoadApiDtsForChat: ({ message }) => ({
+      model,
+      outMessage: OutMessage.ShowAlert({
+        banner: {
+          message,
+          variant: "danger",
+        },
+        closeModal: false,
+        replaceUrl: false,
+      }),
     }),
 
     SubmittedLlmChat: () =>
@@ -2680,6 +2747,9 @@ export const update = (
           }
           if (prompt.toLowerCase() === "/clear") {
             return { model: clearLlmChat(model), outMessage: OutMessage.None() }
+          }
+          if (prompt.toLowerCase() === "/api") {
+            return executeChatSlashCommandResult("/api", model)
           }
           return {
             model: modifyFields(state, {
@@ -2712,6 +2782,9 @@ export const update = (
           }
           if (prompt.toLowerCase() === "/clear") {
             return { model: clearLlmChat(model), outMessage: OutMessage.None() }
+          }
+          if (prompt.toLowerCase() === "/api") {
+            return executeChatSlashCommandResult("/api", model)
           }
           return EditorFileMode.match(state.fileMode, {
             Text: ({ content }) => ({
@@ -4600,47 +4673,45 @@ const viewLlmChatHistory = (
             [h.Class("modal-llm-chat-details is-system")],
             [
               h.summary(
-                [h.Class("modal-llm-chat-details-summary")],
+                [h.Class("modal-llm-chat-details-summary llm-response-section-header")],
                 [
-                  Array.isReadonlyArrayNonEmpty(preambleMessages)
-                    ? tr.editor.systemMessageAndContext
-                    : tr.editor.systemMessage,
+                  h.span(
+                    [],
+                    [
+                      Array.isReadonlyArrayNonEmpty(preambleMessages)
+                        ? tr.editor.systemMessageAndContext
+                        : tr.editor.systemMessage,
+                    ],
+                  ),
+                  h.div(
+                    [h.Class("llm-response-section-actions")],
+                    [
+                      h.button(
+                        [
+                          h.Type("button"),
+                          h.Class("llm-markdown-toggle-btn"),
+                          h.AriaPressed(isSystemMarkdown ? "true" : "false"),
+                          h.AriaLabel(tr.llmResponse.toggleAnswerMarkdown),
+                          h.OnClick(
+                            Message.ToggledLlmToolMarkdown({
+                              toolKey: systemToggleKey,
+                            }),
+                          ),
+                        ],
+                        [isSystemMarkdown ? "md" : "txt"],
+                      ),
+                    ],
+                  ),
                 ],
               ),
               h.div(
                 [h.Class("modal-llm-chat-details-body")],
                 [
-                  ...Array.map(systemMessages, (msg, idx) =>
+                  ...Array.map(systemMessages, (msg) =>
                     h.div(
                       [h.Class("modal-llm-chat-context-block")],
                       [
-                        h.div(
-                          [h.Class("llm-response-section-header")],
-                          [
-                            h.span([h.Class("llm-response-label")], [tr.editor.systemLabel]),
-                            idx === 0
-                              ? h.div(
-                                  [h.Class("llm-response-section-actions")],
-                                  [
-                                    h.button(
-                                      [
-                                        h.Type("button"),
-                                        h.Class("llm-markdown-toggle-btn"),
-                                        h.AriaPressed(isSystemMarkdown ? "true" : "false"),
-                                        h.AriaLabel(tr.llmResponse.toggleAnswerMarkdown),
-                                        h.OnClick(
-                                          Message.ToggledLlmToolMarkdown({
-                                            toolKey: systemToggleKey,
-                                          }),
-                                        ),
-                                      ],
-                                      [isSystemMarkdown ? "md" : "txt"],
-                                    ),
-                                  ],
-                                )
-                              : h.empty,
-                          ],
-                        ),
+                        h.span([h.Class("llm-response-label")], [tr.editor.systemLabel]),
                         isSystemMarkdown
                           ? viewMarkdown(msg.content, { onCopyCode, language }, h)
                           : h.p([h.Class("llm-response-text")], [msg.content]),
@@ -4670,7 +4741,7 @@ const viewLlmChatHistory = (
                       [
                         h.span(
                           [h.Class("llm-response-label")],
-                          [msg._tag === "Assistant" ? aiName : tr.editor.contextLabel],
+                          [msg._tag === "Assistant" ? aiName : userName],
                         ),
                         isSystemMarkdown
                           ? msg._tag === "Assistant"
@@ -4795,6 +4866,51 @@ const viewLlmChatHistory = (
             ),
           ],
         ),
+      Context: ({ summary, content }) => {
+        const contextToggleKey = `context-${entryIndex}`
+        const isContextMarkdown = !llmToolRawKeys.includes(contextToggleKey)
+        const markdownContent = content.startsWith(`## ${summary}`)
+          ? content.slice(`## ${summary}`.length).replace(/^\n+/, "")
+          : content
+        return h.details(
+          [h.Class("modal-llm-chat-details is-system")],
+          [
+            h.summary(
+              [h.Class("modal-llm-chat-details-summary llm-response-section-header")],
+              [
+                h.span([], [summary]),
+                h.div(
+                  [h.Class("llm-response-section-actions")],
+                  [
+                    h.button(
+                      [
+                        h.Type("button"),
+                        h.Class("llm-markdown-toggle-btn"),
+                        h.AriaPressed(isContextMarkdown ? "true" : "false"),
+                        h.AriaLabel(tr.llmResponse.toggleAnswerMarkdown),
+                        h.OnClick(
+                          Message.ToggledLlmToolMarkdown({
+                            toolKey: contextToggleKey,
+                          }),
+                        ),
+                      ],
+                      [isContextMarkdown ? "md" : "txt"],
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            h.div(
+              [h.Class("modal-llm-chat-details-body")],
+              [
+                isContextMarkdown
+                  ? viewUserMarkdown(markdownContent, { onCopyCode, language }, h)
+                  : h.p([h.Class("llm-response-text")], [content]),
+              ],
+            ),
+          ],
+        )
+      },
       Answer: ({ content, reasoning, isError, assistantContent, toolDetails }) =>
         renderAnswerNode(
           {
@@ -4976,6 +5092,10 @@ const getChatSlashCommands = (
     name: "/clear",
     description: t(language).editor.slashClearDescription,
   },
+  {
+    name: "/api",
+    description: t(language).editor.slashApiDescription,
+  },
 ]
 
 const matchingChatSlashCommands = (input: string): ReadonlyArray<ChatSlashCommand> => {
@@ -5113,7 +5233,26 @@ const autocompleteChatSlashCommand = (command: string, model: Model): Model =>
     ConfirmOverwrite: () => model,
   })
 
-const executeChatSlashCommand = (command: string, model: Model): Model => {
+const clearChatInput = (model: Model): Model =>
+  Model.match(model, {
+    CreateFile: (state) =>
+      modifyFields(state, {
+        llmChatInput: () => "",
+        isLlmSlashMenuDismissed: () => false,
+        llmSlashMenuSelectedIndex: () => 0,
+      }),
+    EditFile: (state) =>
+      modifyFields(state, {
+        llmChatInput: () => "",
+        isLlmSlashMenuDismissed: () => false,
+        llmSlashMenuSelectedIndex: () => 0,
+      }),
+    CreateFolder: () => model,
+    EditFolder: () => model,
+    ConfirmOverwrite: () => model,
+  })
+
+const executeChatSlashCommandResult = (command: string, model: Model) => {
   const isSending = Model.match(model, {
     CreateFile: (state) => state.llmChatState._tag === "Sending",
     EditFile: (state) => state.llmChatState._tag === "Sending",
@@ -5122,12 +5261,23 @@ const executeChatSlashCommand = (command: string, model: Model): Model => {
     ConfirmOverwrite: () => false,
   })
   if (isSending) {
-    return autocompleteChatSlashCommand(command, model)
+    return { model: autocompleteChatSlashCommand(command, model), outMessage: OutMessage.None() }
   }
-  return command.trim().toLowerCase() === "/clear" ? clearLlmChat(model) : model
+  const normalized = command.trim().toLowerCase()
+  if (normalized === "/clear") {
+    return { model: clearLlmChat(model), outMessage: OutMessage.None() }
+  }
+  if (normalized === "/api") {
+    return {
+      model: clearChatInput(model),
+      commands: [LoadApiDtsForChat()],
+      outMessage: OutMessage.None(),
+    }
+  }
+  return { model, outMessage: OutMessage.None() }
 }
 
-const acceptSelectedLlmSlashCommand = (model: Model): Model => {
+const acceptSelectedLlmSlashCommandResult = (model: Model) => {
   const getSelected = (
     llmChatInput: string,
     llmChatState: LlmChatState,
@@ -5159,7 +5309,9 @@ const acceptSelectedLlmSlashCommand = (model: Model): Model => {
     EditFolder: () => undefined,
     ConfirmOverwrite: () => undefined,
   })
-  return selected ? executeChatSlashCommand(selected.name, model) : model
+  return selected
+    ? executeChatSlashCommandResult(selected.name, model)
+    : { model, outMessage: OutMessage.None() }
 }
 
 const viewLlmSlashCommandMenu = (

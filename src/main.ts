@@ -6045,11 +6045,16 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
             Effect.sync(() => {
               const controller = new AbortController()
               const runTurn = async () => {
-                const initialMessages: ReadonlyArray<EditorChatMessage> =
-                  Array.isReadonlyArrayEmpty(deps.messages)
-                    ? await (async () => {
-                        const useToolCalls = deps.toolCalls && !isLanguageModelSelection(deps.model)
-                        const apiDtsMessages: ReadonlyArray<EditorChatMessage> = useToolCalls
+                const hasSystemMessage = deps.messages.some((msg) => msg._tag === "System")
+                const initialMessages: ReadonlyArray<EditorChatMessage> = !hasSystemMessage
+                  ? await (async () => {
+                      const useToolCalls = deps.toolCalls && !isLanguageModelSelection(deps.model)
+                      const preloadedMessages = toAgentEditorMessages(deps.messages)
+                      const hasPreloadedApiDts = preloadedMessages.some(
+                        (msg) => msg._tag === "User" && msg.content.includes("## /api.d.ts"),
+                      )
+                      const apiDtsMessages: ReadonlyArray<EditorChatMessage> =
+                        useToolCalls && !hasPreloadedApiDts
                           ? await (async () => {
                               const res = await fetch("/api.d.ts", {
                                 cache: "no-cache",
@@ -6066,41 +6071,42 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                               ]
                             })()
                           : []
-                        const fewShotMessages: ReadonlyArray<EditorChatMessage> = useToolCalls
-                          ? []
-                          : getTextToolFewShotMessages(deps.editFormat).map((msg) =>
-                              msg._tag === "Assistant"
-                                ? {
-                                    _tag: "Assistant" as const,
-                                    content: msg.content,
-                                    toolCalls: [],
-                                  }
-                                : { _tag: "User" as const, content: msg.content },
-                            )
-                        return [
-                          {
-                            _tag: "System" as const,
-                            content: formatSystemPromptForFormat(deps.editFormat, useToolCalls),
-                          },
-                          ...fewShotMessages,
-                          ...apiDtsMessages,
-                          {
-                            _tag: "User" as const,
-                            content: formatFileMessageForFormat(
-                              deps.editFormat,
-                              deps.fileName,
-                              deps.content,
-                            ),
-                          },
-                          { _tag: "User" as const, content: deps.prompt },
-                        ]
-                      })()
-                    : [
-                        ...toAgentEditorMessages(deps.messages),
+                      const fewShotMessages: ReadonlyArray<EditorChatMessage> = useToolCalls
+                        ? []
+                        : getTextToolFewShotMessages(deps.editFormat).map((msg) =>
+                            msg._tag === "Assistant"
+                              ? {
+                                  _tag: "Assistant" as const,
+                                  content: msg.content,
+                                  toolCalls: [],
+                                }
+                              : { _tag: "User" as const, content: msg.content },
+                          )
+                      return [
+                        {
+                          _tag: "System" as const,
+                          content: formatSystemPromptForFormat(deps.editFormat, useToolCalls),
+                        },
+                        ...fewShotMessages,
+                        ...apiDtsMessages,
+                        ...preloadedMessages,
+                        {
+                          _tag: "User" as const,
+                          content: formatFileMessageForFormat(
+                            deps.editFormat,
+                            deps.fileName,
+                            deps.content,
+                          ),
+                        },
                         { _tag: "User" as const, content: deps.prompt },
                       ]
+                    })()
+                  : [
+                      ...toAgentEditorMessages(deps.messages),
+                      { _tag: "User" as const, content: deps.prompt },
+                    ]
 
-                if (Array.isReadonlyArrayEmpty(deps.messages) && !controller.signal.aborted) {
+                if (!hasSystemMessage && !controller.signal.aborted) {
                   Queue.offerUnsafe(
                     queue,
                     Message.UpdatedEditorLlmChatStream({

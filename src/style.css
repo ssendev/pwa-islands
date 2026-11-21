@@ -3222,6 +3222,12 @@ code {
   user-select: none;
 }
 
+.modal-llm-chat-details:not([open])
+  > .modal-llm-chat-details-summary
+  .llm-response-section-actions {
+  display: none;
+}
+
 .modal-llm-chat-details[open] > .modal-llm-chat-details-summary,
 .llm-tool-details[open] > .llm-tool-summary {
   border-bottom: 1px solid var(--border);
