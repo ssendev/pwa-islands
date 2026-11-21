@@ -320,7 +320,9 @@ export const viewHelpDe = (
                               viewIcon("ai", h),
                               " ",
                               h.strong([], ["Chat"]),
-                              " und schreibe deine Änderungswünsche direkt in das Chat-Feld – die KI bearbeitet die Datei automatisch.",
+                              " und schreibe deine Änderungswünsche direkt in das Chat-Feld – die KI bearbeitet die Datei automatisch. Mit ",
+                              h.code([], ["/clear"]),
+                              " kannst du den Chat-Verlauf jederzeit zurücksetzen.",
                             ],
                           ),
                           h.p(

@@ -320,7 +320,9 @@ export const viewHelpEn = (
                               h.strong([], ["Chat"]),
                               " in the mode menu at the bottom of the editor (",
                               viewIcon("edit", h),
-                              " ▾) and type your requested changes directly into the chat box — the AI edits the file automatically.",
+                              " ▾) and type your requested changes directly into the chat box — the AI edits the file automatically. You can reset the chat history anytime with ",
+                              h.code([], ["/clear"]),
+                              ".",
                             ],
                           ),
                           h.p(
