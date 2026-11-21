@@ -4314,6 +4314,7 @@ const viewEditorFileBody = (
   filename: string,
   monacoSettings: MonacoSettings,
   appTheme: AppTheme,
+  maybeInitialValue: Option.Option<string>,
   h: Html.HtmlBuilder<Message>,
 ): ReadonlyArray<Html.Html> =>
   EditorFileMode.match(fileMode, {
@@ -4325,6 +4326,7 @@ const viewEditorFileBody = (
           [
             monacoEditor([
               monacoEditor.Value(content),
+              monacoEditor.InitialValue(maybeInitialValue),
               monacoEditor.Filename(filename),
               monacoEditor.LineNumbers(monacoSettings.lineNumbers),
               monacoEditor.Folding(monacoSettings.folding),
@@ -6315,6 +6317,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                     state.name,
                     context.monacoSettings,
                     context.appTheme,
+                    Option.none(),
                     h,
                   ),
                 ],
@@ -6423,6 +6426,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         name,
         fileMode,
         savedContent,
+        draftRestored,
         externalConflict,
         maybeValidationError,
         maybePasteError,
@@ -6515,6 +6519,9 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                   name,
                   context.monacoSettings,
                   context.appTheme,
+                  (draftRestored || externalConflict !== undefined) && savedContent !== undefined
+                    ? Option.some(savedContent)
+                    : Option.none(),
                   h,
                 ),
                 historyControls:

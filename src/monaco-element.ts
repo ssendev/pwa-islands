@@ -16,6 +16,7 @@ export const monacoEditorElement = CustomElement.define({
   tag: MONACO_EDITOR_TAG,
   properties: {
     value: Schema.String,
+    initialValue: Schema.Option(Schema.String),
     filename: Schema.String,
     lineNumbers: Schema.Boolean,
     folding: Schema.Boolean,
@@ -139,6 +140,15 @@ export const computeChangedSpan = (
   }
 }
 
+export const resolveMountValue = (
+  maybeInitialValue: Option.Option<string>,
+  currentValue: string,
+): string =>
+  Option.match(maybeInitialValue, {
+    onNone: () => currentValue,
+    onSome: (initialValue) => initialValue,
+  })
+
 export const applyExternalValueToEditor = (
   editor: Monaco.editor.IStandaloneCodeEditor,
   maybeMonaco: Option.Option<typeof Monaco>,
@@ -207,6 +217,7 @@ export const registerMonacoEditorElement = (): void => {
 
   class MonacoEditorHost extends HTMLElement {
     private currentValue = ""
+    private maybeInitialValue: Option.Option<string> = Option.none()
     private currentFilename = ""
     private currentLineNumbers = defaultMonacoSettings.lineNumbers
     private currentFolding = defaultMonacoSettings.folding
@@ -247,6 +258,14 @@ export const registerMonacoEditorElement = (): void => {
 
     get value(): string {
       return this.currentValue
+    }
+
+    get initialValue(): Option.Option<string> {
+      return this.maybeInitialValue
+    }
+
+    set initialValue(nextInitialValue: Option.Option<string>) {
+      this.maybeInitialValue = nextInitialValue
     }
 
     set value(nextValue: string) {
@@ -559,8 +578,9 @@ export const registerMonacoEditorElement = (): void => {
       }
 
       this.maybeMonaco = Option.some(monacoApi)
+      const mountValue = resolveMountValue(this.maybeInitialValue, this.currentValue)
       const editor = monacoApi.editor.create(container, {
-        value: this.currentValue,
+        value: mountValue,
         language: languageFromFilename(this.currentFilename),
         theme: resolveMonacoTheme(this.currentTheme, this.currentAppTheme, this.isSystemDark()),
         automaticLayout: true,
@@ -578,6 +598,16 @@ export const registerMonacoEditorElement = (): void => {
         padding: { top: 8, bottom: 8 },
       })
       this.maybeEditor = Option.some(editor)
+
+      if (mountValue !== this.currentValue) {
+        this.isApplyingExternalValue = true
+        try {
+          applyExternalValueToEditor(editor, this.maybeMonaco, mountValue, this.currentValue)
+        } finally {
+          this.isApplyingExternalValue = false
+        }
+        this.syncHistoryState(editor)
+      }
 
       const disposable = editor.onDidChangeModelContent(() => {
         if (this.isApplyingExternalValue) {

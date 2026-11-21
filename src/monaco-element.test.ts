@@ -8,6 +8,7 @@ import {
   computeGutterOptions,
   languageFromFilename,
   resolveMonacoTheme,
+  resolveMountValue,
 } from "./monaco-element"
 
 describe("monaco-element", () => {
@@ -125,6 +126,12 @@ describe("monaco-element", () => {
     expect(resolveMonacoTheme("vs-dark", "light", false)).toBe("vs-dark")
     expect(resolveMonacoTheme("hc-black", "light", false)).toBe("hc-black")
     expect(resolveMonacoTheme("hc-light", "dark", true)).toBe("hc-light")
+  })
+
+  it("verwendet initialValue als Mount-Wert für Undo-Historie bei wiederhergestellten Entwürfen", () => {
+    expect(resolveMountValue(Option.none(), "entwurf")).toBe("entwurf")
+    expect(resolveMountValue(Option.some("original"), "entwurf")).toBe("original")
+    expect(resolveMountValue(Option.some(""), "entwurf")).toBe("")
   })
 
   it("berechnet Gutter-Optionen anhand von Zeilennummern, Folds, Dekorationsbreite und Mindestbreite", () => {
