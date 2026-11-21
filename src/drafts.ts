@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core"
 import { Effect, Option, Stream } from "effect"
 import { supportsTauri } from "./files"
 import { hashAndMeasureHistoryContent } from "./history"
+import { getStoredDraftsEnabled } from "./storage"
 
 export const OPFS_DRAFTS_FOLDER = "pwa-islands-drafts"
 
@@ -80,6 +81,9 @@ export const saveFileDraft = async (
   fileName: string,
   draft: FileDraft,
 ): Promise<void> => {
+  if (!(await getStoredDraftsEnabled())) {
+    return
+  }
   const serialized = encodeDraft(draft)
   if (supportsTauri()) {
     await invoke("tauri_draft_write", {

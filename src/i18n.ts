@@ -501,6 +501,8 @@ const de = {
       `Kopieren hat nicht geklappt: ${detail} Öffnen Sie /api.d.ts direkt im Browser und kopieren Sie den Text von Hand.`,
     clearAllHistoryFailed: (detail: string) =>
       `Alle Versionen konnten nicht gelöscht werden: ${detail}`,
+    clearAllDraftsFailed: (detail: string) =>
+      `Alle Entwürfe konnten nicht gelöscht werden: ${detail}`,
     initStorageUnknown: "Unbekannter Fehler beim Initialisieren des Speichers",
     openFolderFailed: (detail: string) => `Ordner konnte nicht geöffnet werden: ${detail}`,
     folderAccessDenied:
@@ -621,9 +623,15 @@ const de = {
     apiHistorySave: "api.js Versionen speichern",
     apiHistorySaveHint:
       "Sichert vor jedem Überschreiben, Umbenennen, Kopieren oder Löschen über api.js eine Kopie der bisherigen Daten (auch Binärdateien).",
+    draftsSave: "Entwürfe speichern",
+    draftsSaveHint:
+      "Sichert ungespeicherte Änderungen im Editor automatisch als Entwurf, damit sie beim Neuladen erhalten bleiben.",
     clearAllHistory: "Alle Versionen löschen",
     clearingHistory: "Lösche…",
     clearedAllHistory: "Alle Versionen wurden gelöscht.",
+    clearAllDrafts: "Entwürfe löschen",
+    clearingDrafts: "Lösche…",
+    clearedAllDrafts: "Alle Entwürfe wurden gelöscht.",
     editorTitle: "Editor",
     editorFoldingShort: "Folds anzeigen",
     editorWordWrapShort: "Zeilen umbrechen",
@@ -642,6 +650,7 @@ const de = {
     llmDeleteProviderTitle: "Provider löschen",
     llmDeleteProviderPrompt: (name: string) => `Provider „${name}“ wirklich löschen?`,
     clearAllHistoryPrompt: "Alle gespeicherten Versionen aller Dateien löschen?",
+    clearAllDraftsPrompt: "Alle gespeicherten Entwürfe aller Dateien löschen?",
     deletePermanently: "Endgültig löschen",
     unsupportedFsBreadcrumb: "Dateisystem-APIs nicht unterstützt",
     providerEditTitle: "Provider bearbeiten",
@@ -1321,6 +1330,7 @@ const en: Translations = {
     copyDtsManualHint: (detail: string) =>
       `Copy failed: ${detail} Open /api.d.ts directly in your browser and copy the text manually.`,
     clearAllHistoryFailed: (detail: string) => `Could not delete all versions: ${detail}`,
+    clearAllDraftsFailed: (detail: string) => `Could not delete all drafts: ${detail}`,
     initStorageUnknown: "Unknown error while initializing storage",
     openFolderFailed: (detail: string) => `Could not open folder: ${detail}`,
     folderAccessDenied: "Access to the folder was denied. Please select the folder again.",
@@ -1433,9 +1443,15 @@ const en: Translations = {
     apiHistorySave: "Save api.js versions",
     apiHistorySaveHint:
       "Saves a copy of existing data (including binary files) before overwriting, renaming, copying, or deleting via api.js.",
+    draftsSave: "Save drafts",
+    draftsSaveHint:
+      "Automatically saves unsaved editor changes as a draft so they persist across reloads.",
     clearAllHistory: "Delete all versions",
     clearingHistory: "Deleting…",
     clearedAllHistory: "All versions have been deleted.",
+    clearAllDrafts: "Delete drafts",
+    clearingDrafts: "Deleting…",
+    clearedAllDrafts: "All drafts have been deleted.",
     editorTitle: "Editor",
     editorFoldingShort: "Show folds",
     editorWordWrapShort: "Word wrap",
@@ -1454,6 +1470,7 @@ const en: Translations = {
     llmDeleteProviderTitle: "Delete provider",
     llmDeleteProviderPrompt: (name: string) => `Really delete provider "${name}"?`,
     clearAllHistoryPrompt: "Delete all saved versions of all files?",
+    clearAllDraftsPrompt: "Delete all saved drafts of all files?",
     deletePermanently: "Delete permanently",
     unsupportedFsBreadcrumb: "File System APIs not supported",
     providerEditTitle: "Edit provider",

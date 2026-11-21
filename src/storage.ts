@@ -25,6 +25,7 @@ export const STORAGE_TYPE_KEY = "selected_storage_type"
 export const FILE_INFO_VISIBLE_KEY = "file_info_visible"
 export const HISTORY_ENABLED_KEY = "history_enabled"
 export const API_HISTORY_ENABLED_KEY = "api_history_enabled"
+export const DRAFTS_ENABLED_KEY = "drafts_enabled"
 export const SHOW_DOWNLOADS_IN_MENU_KEY = "show_downloads_in_menu"
 export const SHOW_INSTALL_IN_MENU_KEY = "show_install_in_menu"
 export const ISLAND_PARAM = "pwaislands"
@@ -221,6 +222,13 @@ export const getStoredApiHistoryEnabled = (): Promise<boolean> =>
 
 export const storeApiHistoryEnabled = (enabled: boolean): Promise<void> =>
   storeBooleanFlag(API_HISTORY_ENABLED_KEY, enabled)
+
+// NOTE: Defaults to true so editor drafts are saved unless explicitly disabled
+export const getStoredDraftsEnabled = (): Promise<boolean> =>
+  getStoredBooleanFlag(DRAFTS_ENABLED_KEY, true)
+
+export const storeDraftsEnabled = (enabled: boolean): Promise<void> =>
+  storeBooleanFlag(DRAFTS_ENABLED_KEY, enabled)
 
 export const getStoredShowDownloadsInMenu = (): Promise<boolean> =>
   getStoredBooleanFlag(SHOW_DOWNLOADS_IN_MENU_KEY, true)

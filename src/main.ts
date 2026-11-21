@@ -11,6 +11,7 @@ import { modifyFields } from "foldkit/struct"
 import * as Subscription from "foldkit/subscription"
 import { Url, toString as urlToString } from "foldkit/url"
 import rootIconUrl from "./assets/pwa-islands.svg"
+import { clearAllFileDrafts } from "./drafts"
 import { clearAllFileHistory, recordPreviousTauriApiFileVersion } from "./history"
 import { type IconId, viewIcon } from "./icons"
 import {
@@ -141,6 +142,7 @@ import {
   getStoredApiHistoryEnabled,
   getStoredAppTheme,
   getStoredDateFormat,
+  getStoredDraftsEnabled,
   getStoredEditorPreferences,
   getStoredHistoryEnabled,
   getStoredShowDownloadsInMenu,
@@ -153,6 +155,7 @@ import {
   storeApiHistoryEnabled,
   storeAppTheme,
   storeDateFormat,
+  storeDraftsEnabled,
   storeEditorPreferences,
   storeHistoryEnabled,
   storeShowDownloadsInMenu,
@@ -352,6 +355,14 @@ export const ClearAllHistoryState = defineTaggedUnion({
 })
 export type ClearAllHistoryState = typeof ClearAllHistoryState.Type
 
+export const ClearAllDraftsState = defineTaggedUnion({
+  Idle: {},
+  Confirming: {},
+  Clearing: {},
+  Done: {},
+})
+export type ClearAllDraftsState = typeof ClearAllDraftsState.Type
+
 export const Flags = Schema.Struct({
   hasDirectoryPicker: Schema.Boolean,
   hasOPFS: Schema.Boolean,
@@ -442,6 +453,7 @@ export const Model = Schema.Struct({
   llmTestState: LlmTestState,
   historyEnabled: Schema.Boolean,
   apiHistoryEnabled: Schema.Boolean,
+  draftsEnabled: Schema.Boolean,
   appTheme: AppThemeSchema,
   language: LanguageSchema,
   dateFormat: DateFormatSchema,
@@ -455,6 +467,7 @@ export const Model = Schema.Struct({
   editorLineNumbersMinChars: Schema.Number,
   editorUndoInTitlebar: Schema.Boolean,
   clearAllHistoryState: ClearAllHistoryState,
+  clearAllDraftsState: ClearAllDraftsState,
   installPrompt: InstallPrompt,
   modalState: Modal.ModalState,
   toasts: Schema.Array(Toast),
@@ -625,10 +638,17 @@ export const Message = defineMessageUnion({
   ClickedConfirmClearAllHistory: {},
   SucceededClearAllHistory: {},
   FailedClearAllHistory: { message: Schema.String },
+  ClickedRequestClearAllDrafts: {},
+  ClickedCancelClearAllDrafts: {},
+  ClickedConfirmClearAllDrafts: {},
+  SucceededClearAllDrafts: {},
+  FailedClearAllDrafts: { message: Schema.String },
   ToggledSettingsHistoryEnabled: { isEnabled: Schema.Boolean },
   CompletedSaveHistoryEnabledPreference: {},
   ToggledSettingsApiHistoryEnabled: { isEnabled: Schema.Boolean },
   CompletedSaveApiHistoryEnabledPreference: {},
+  ToggledSettingsDraftsEnabled: { isEnabled: Schema.Boolean },
+  CompletedSaveDraftsEnabledPreference: {},
   ToggledShowDownloadsInMenu: { isEnabled: Schema.Boolean },
   CompletedSaveShowDownloadsInMenu: {},
   ToggledShowInstallInMenu: { isEnabled: Schema.Boolean },
@@ -714,6 +734,7 @@ export const Message = defineMessageUnion({
     editorSplitPercent: Schema.Number,
     historyEnabled: Schema.optionalKey(Schema.Boolean),
     apiHistoryEnabled: Schema.optionalKey(Schema.Boolean),
+    draftsEnabled: Schema.optionalKey(Schema.Boolean),
     showDownloadsInMenu: Schema.optionalKey(Schema.Boolean),
     showInstallInMenu: Schema.optionalKey(Schema.Boolean),
     monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
@@ -961,6 +982,19 @@ export const SaveApiHistoryEnabledPreference = Command.define("SaveApiHistoryEna
     ),
 })
 
+export const SaveDraftsEnabledPreference = Command.define("SaveDraftsEnabledPreference", {
+  args: { isEnabled: Schema.Boolean },
+  messages: [Message.CompletedSaveDraftsEnabledPreference],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () => storeDraftsEnabled(args.isEnabled),
+      catch: () => undefined,
+    }).pipe(
+      Effect.map(() => Message.CompletedSaveDraftsEnabledPreference()),
+      Effect.catch(() => Effect.succeed(Message.CompletedSaveDraftsEnabledPreference())),
+    ),
+})
+
 export const SaveShowDownloadsInMenuPreference = Command.define(
   "SaveShowDownloadsInMenuPreference",
   {
@@ -1003,6 +1037,25 @@ export const ClearAllHistory = Command.define("ClearAllHistory", {
       Effect.succeed(
         Message.FailedClearAllHistory({
           message: t(getDocumentLanguage()).errors.clearAllHistoryFailed(error.message),
+        }),
+      ),
+    ),
+  ),
+})
+
+export const ClearAllDrafts = Command.define("ClearAllDrafts", {
+  messages: [Message.SucceededClearAllDrafts, Message.FailedClearAllDrafts],
+  execute: Effect.tryPromise({
+    try: async () => {
+      await clearAllFileDrafts()
+      return Message.SucceededClearAllDrafts()
+    },
+    catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.succeed(
+        Message.FailedClearAllDrafts({
+          message: t(getDocumentLanguage()).errors.clearAllDraftsFailed(error.message),
         }),
       ),
     ),
@@ -1304,6 +1357,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredEditorPreferences(),
       getStoredHistoryEnabled(),
       getStoredApiHistoryEnabled(),
+      getStoredDraftsEnabled(),
       getStoredShowDownloadsInMenu(),
       getStoredShowInstallInMenu(),
       getStoredMonacoSettings(),
@@ -1319,6 +1373,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         prefs,
         historyEnabled,
         apiHistoryEnabled,
+        draftsEnabled,
         showDownloadsInMenu,
         showInstallInMenu,
         monacoSettings,
@@ -1335,6 +1390,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
           editorSplitPercent: prefs.editorSplitPercent,
           historyEnabled,
           apiHistoryEnabled,
+          draftsEnabled,
           showDownloadsInMenu,
           showInstallInMenu,
           monacoSettings,
@@ -2365,6 +2421,7 @@ export const init = (
         llmTestState: LlmTestState.Idle(),
         historyEnabled: true,
         apiHistoryEnabled: true,
+        draftsEnabled: true,
         appTheme: "system",
         language: flags.language ?? "en",
         dateFormat: "auto",
@@ -2378,6 +2435,7 @@ export const init = (
         editorLineNumbersMinChars: defaultMonacoSettings.lineNumbersMinChars,
         editorUndoInTitlebar: defaultMonacoSettings.undoInTitlebar,
         clearAllHistoryState: ClearAllHistoryState.Idle(),
+        clearAllDraftsState: ClearAllDraftsState.Idle(),
         installPrompt: InstallPrompt.Unavailable(),
         modalState: Option.getOrElse(maybeInitialModal, Modal.close),
         toasts: [
@@ -2459,6 +2517,7 @@ export const init = (
       llmTestState: LlmTestState.Idle(),
       historyEnabled: true,
       apiHistoryEnabled: true,
+      draftsEnabled: true,
       appTheme: "system",
       language: flags.language ?? "en",
       dateFormat: "auto",
@@ -2472,6 +2531,7 @@ export const init = (
       editorLineNumbersMinChars: defaultMonacoSettings.lineNumbersMinChars,
       editorUndoInTitlebar: defaultMonacoSettings.undoInTitlebar,
       clearAllHistoryState: ClearAllHistoryState.Idle(),
+      clearAllDraftsState: ClearAllDraftsState.Idle(),
       installPrompt: InstallPrompt.Unavailable(),
       modalState: Option.getOrElse(maybeInitialModal, Modal.close),
       toasts: [],
@@ -2623,6 +2683,7 @@ const openSettingsDialogModel = (model: Model): Model =>
     llmDraftThinkingLevel: () => model.llmThinkingLevel,
     llmTestState: () => LlmTestState.Idle(),
     clearAllHistoryState: () => ClearAllHistoryState.Idle(),
+    clearAllDraftsState: () => ClearAllDraftsState.Idle(),
   })
 
 const handleStorageActivated = (
@@ -3644,6 +3705,7 @@ export const update = (
           isEditingLlmSettings: () => false,
           llmTestState: () => LlmTestState.Idle(),
           clearAllHistoryState: () => ClearAllHistoryState.Idle(),
+          clearAllDraftsState: () => ClearAllDraftsState.Idle(),
         }),
         ...(isModalOpen ? {} : { commands: [ReplaceUrl({ url: buildFolderUrl(subPath) })] }),
       }
@@ -3752,6 +3814,46 @@ export const update = (
         },
       ),
 
+    ClickedRequestClearAllDrafts: () => ({
+      model: modifyFields(model, {
+        clearAllDraftsState: () => ClearAllDraftsState.Confirming(),
+      }),
+    }),
+
+    ClickedCancelClearAllDrafts: () => ({
+      model: modifyFields(model, {
+        clearAllDraftsState: () => ClearAllDraftsState.Idle(),
+      }),
+    }),
+
+    ClickedConfirmClearAllDrafts: () => ({
+      model: modifyFields(model, {
+        clearAllDraftsState: () => ClearAllDraftsState.Clearing(),
+      }),
+      commands: [ClearAllDrafts()],
+    }),
+
+    SucceededClearAllDrafts: () => ({
+      model: modifyFields(model, {
+        clearAllDraftsState: () => ClearAllDraftsState.Done(),
+        storageState: (storageState) =>
+          mapLoadedEntries(storageState, (entries) =>
+            Array.map(entries, (entry) => ({ ...entry, hasDraft: false })),
+          ),
+      }),
+    }),
+
+    FailedClearAllDrafts: ({ message: errorMessage }) =>
+      enqueueToast(
+        modifyFields(model, {
+          clearAllDraftsState: () => ClearAllDraftsState.Idle(),
+        }),
+        {
+          message: errorMessage,
+          variant: "danger",
+        },
+      ),
+
     ToggledSettingsHistoryEnabled: ({ isEnabled }) => ({
       model: modifyFields(model, {
         historyEnabled: () => isEnabled,
@@ -3771,6 +3873,17 @@ export const update = (
     }),
 
     CompletedSaveApiHistoryEnabledPreference: () => ({
+      model,
+    }),
+
+    ToggledSettingsDraftsEnabled: ({ isEnabled }) => ({
+      model: modifyFields(model, {
+        draftsEnabled: () => isEnabled,
+      }),
+      commands: [SaveDraftsEnabledPreference({ isEnabled })],
+    }),
+
+    CompletedSaveDraftsEnabledPreference: () => ({
       model,
     }),
 
@@ -4534,6 +4647,7 @@ export const update = (
       editorSplitPercent,
       historyEnabled,
       apiHistoryEnabled,
+      draftsEnabled,
       showDownloadsInMenu,
       showInstallInMenu,
       monacoSettings,
@@ -4555,6 +4669,7 @@ export const update = (
           editorSplitPercent: () => editorSplitPercent,
           historyEnabled: () => historyEnabled ?? model.historyEnabled,
           apiHistoryEnabled: () => apiHistoryEnabled ?? model.apiHistoryEnabled,
+          draftsEnabled: () => draftsEnabled ?? model.draftsEnabled,
           showDownloadsInMenu: () => showDownloadsInMenu ?? model.showDownloadsInMenu,
           showInstallInMenu: () => showInstallInMenu ?? model.showInstallInMenu,
           appTheme: () => nextAppTheme,
@@ -4951,6 +5066,13 @@ export const update = (
             }),
           }
         }
+        if (model.clearAllDraftsState._tag === "Confirming") {
+          return {
+            model: modifyFields(model, {
+              clearAllDraftsState: () => ClearAllDraftsState.Idle(),
+            }),
+          }
+        }
         if (model.isConfirmingDeleteLlmProvider) {
           return {
             model: modifyFields(model, {
@@ -4973,6 +5095,7 @@ export const update = (
             isSettingsDialogOpen: () => false,
             llmTestState: () => LlmTestState.Idle(),
             clearAllHistoryState: () => ClearAllHistoryState.Idle(),
+            clearAllDraftsState: () => ClearAllDraftsState.Idle(),
           }),
           ...(Modal.isOpen(model.modalState)
             ? {}
@@ -6813,11 +6936,33 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           h.p([h.Class("form-hint")], [tr.settings.apiHistorySaveHint]),
                         ],
                       ),
-                      ClearAllHistoryState.match(model.clearAllHistoryState, {
-                        Idle: () =>
-                          h.div(
-                            [h.Class("settings-group-actions")],
+                      h.div(
+                        [h.Class("form-group")],
+                        [
+                          h.label(
+                            [h.Class("form-check")],
                             [
+                              h.input([
+                                h.Type("checkbox"),
+                                h.Id("settings-drafts-enabled"),
+                                h.Checked(model.draftsEnabled),
+                                h.OnChange(() =>
+                                  Message.ToggledSettingsDraftsEnabled({
+                                    isEnabled: !model.draftsEnabled,
+                                  }),
+                                ),
+                              ]),
+                              h.span([], [tr.settings.draftsSave]),
+                            ],
+                          ),
+                          h.p([h.Class("form-hint")], [tr.settings.draftsSaveHint]),
+                        ],
+                      ),
+                      h.div(
+                        [h.Class("settings-group-actions")],
+                        [
+                          ClearAllHistoryState.match(model.clearAllHistoryState, {
+                            Idle: () =>
                               h.button(
                                 [
                                   h.Type("button"),
@@ -6827,12 +6972,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 ],
                                 [viewIcon("trash", h), ` ${tr.settings.clearAllHistory}`],
                               ),
-                            ],
-                          ),
-                        Confirming: () =>
-                          h.div(
-                            [h.Class("settings-group-actions")],
-                            [
+                            Confirming: () =>
                               h.button(
                                 [
                                   h.Type("button"),
@@ -6842,12 +6982,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 ],
                                 [viewIcon("trash", h), ` ${tr.settings.clearAllHistory}`],
                               ),
-                            ],
-                          ),
-                        Clearing: () =>
-                          h.div(
-                            [h.Class("settings-group-actions")],
-                            [
+                            Clearing: () =>
                               h.button(
                                 [
                                   h.Type("button"),
@@ -6857,19 +6992,51 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                                 ],
                                 [tr.settings.clearingHistory],
                               ),
-                            ],
-                          ),
-                        Done: () =>
-                          h.div(
-                            [h.Class("settings-group-actions")],
-                            [
+                            Done: () =>
                               h.span(
                                 [h.Id("clear-all-history-done"), h.Class("form-hint")],
                                 [tr.settings.clearedAllHistory],
                               ),
-                            ],
-                          ),
-                      }),
+                          }),
+                          ClearAllDraftsState.match(model.clearAllDraftsState, {
+                            Idle: () =>
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-clear-all-drafts"),
+                                  h.Class("btn btn-danger"),
+                                  h.OnClick(Message.ClickedRequestClearAllDrafts()),
+                                ],
+                                [viewIcon("trash", h), ` ${tr.settings.clearAllDrafts}`],
+                              ),
+                            Confirming: () =>
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-clear-all-drafts"),
+                                  h.Class("btn btn-danger"),
+                                  h.OnClick(Message.ClickedRequestClearAllDrafts()),
+                                ],
+                                [viewIcon("trash", h), ` ${tr.settings.clearAllDrafts}`],
+                              ),
+                            Clearing: () =>
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Id("btn-clear-all-drafts"),
+                                  h.Class("btn btn-danger"),
+                                  h.Disabled(true),
+                                ],
+                                [tr.settings.clearingDrafts],
+                              ),
+                            Done: () =>
+                              h.span(
+                                [h.Id("clear-all-drafts-done"), h.Class("form-hint")],
+                                [tr.settings.clearedAllDrafts],
+                              ),
+                          }),
+                        ],
+                      ),
                     ],
                   ),
                   h.section(
@@ -7981,6 +8148,23 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               confirmButtonId: "btn-clear-all-history-confirm",
               confirmLabel: tr.settings.deletePermanently,
               onConfirm: Message.ClickedConfirmClearAllHistory(),
+              language: model.language,
+            },
+            h,
+          )
+        : h.empty,
+      model.clearAllDraftsState._tag === "Confirming"
+        ? Editor.viewConfirmDeleteDialog(
+            {
+              overlayId: "clear-all-drafts-confirm",
+              titleId: "clear-all-drafts-confirm-title",
+              title: tr.settings.clearAllDrafts,
+              prompt: tr.settings.clearAllDraftsPrompt,
+              cancelButtonId: "btn-clear-all-drafts-cancel",
+              onCancel: Message.ClickedCancelClearAllDrafts(),
+              confirmButtonId: "btn-clear-all-drafts-confirm",
+              confirmLabel: tr.settings.deletePermanently,
+              onConfirm: Message.ClickedConfirmClearAllDrafts(),
               language: model.language,
             },
             h,

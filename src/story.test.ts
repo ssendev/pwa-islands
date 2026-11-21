@@ -15,6 +15,7 @@ import {
 import {
   ActivateFsaBackend,
   ActivateOpfsBackend,
+  ClearAllDraftsState,
   ClearAllHistoryState,
   CloseWindow,
   DisconnectStorage,
@@ -154,6 +155,7 @@ const readyModel: Model = {
   llmTestState: LlmTestState.Idle(),
   historyEnabled: true,
   apiHistoryEnabled: true,
+  draftsEnabled: true,
   appTheme: "system",
   language: "de",
   dateFormat: "auto",
@@ -167,6 +169,7 @@ const readyModel: Model = {
   editorLineNumbersMinChars: 5,
   editorUndoInTitlebar: false,
   clearAllHistoryState: ClearAllHistoryState.Idle(),
+  clearAllDraftsState: ClearAllDraftsState.Idle(),
   installPrompt: InstallPrompt.Unavailable(),
   modalState: ModalState.Closed(),
   toasts: [],
