@@ -2631,4 +2631,69 @@ describe("Editor-Einstellungen und Monaco-Kontextmenü", () => {
       sceneExpect(selector("#modal-llm-thinking-select")).toExist(),
     )
   })
+
+  it("does not leak llmDiscoveredModels into the first provider optgroup in the editor model select", () => {
+    scene(
+      { update, view },
+      given({
+        ...readyModel,
+        llmEnabled: true,
+        llmDiscoveredModels: ["qwen3", "llama3"],
+        llmProviders: [
+          {
+            id: "p1",
+            name: "OpenAI",
+            enabled: true,
+            baseUrl: "https://api.openai.com/v1",
+            apiKey: "sk-1",
+            models: "gpt-4o",
+            discoveredModels: [],
+            editFormat: "hashline",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          },
+          {
+            id: "p2",
+            name: "Ollama",
+            enabled: true,
+            baseUrl: "http://localhost:11434/v1",
+            apiKey: "",
+            models: "",
+            discoveredModels: ["qwen3", "llama3"],
+            editFormat: "hashline",
+            streaming: true,
+            toolCalls: true,
+            thinkingParam: "",
+            thinkingLevels: "",
+            extraArgs: "",
+          },
+        ],
+        llmModel: "p2::qwen3",
+      }),
+      click(selector("#btn-new-file")),
+      Command.resolveAll(
+        [PushUrl, Message.CompletedPushUrl()],
+        [Modal.FocusModalNameInput, Modal.Message.CompletedFocusModalNameInput()],
+        [Editor.LoadUserTemplates, Editor.Message.CompletedLoadUserTemplates({ templates: [] })],
+      ),
+      click(selector("#modal-llm-mode-select")),
+      click(selector("#modal-llm-mode-option-Chat")),
+      Command.resolveAll(
+        [SaveEditorPreferences, Message.CompletedSaveEditorPreferences()],
+        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
+      ),
+      sceneExpect(
+        selector('#modal-llm-model-select optgroup[label="OpenAI"] option[value="p1::gpt-4o"]'),
+      ).toExist(),
+      sceneExpect(
+        selector('#modal-llm-model-select optgroup[label="OpenAI"] option[value="p1::qwen3"]'),
+      ).toBeAbsent(),
+      sceneExpect(
+        selector('#modal-llm-model-select optgroup[label="Ollama"] option[value="p2::qwen3"]'),
+      ).toExist(),
+    )
+  })
 })

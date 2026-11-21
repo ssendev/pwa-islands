@@ -2819,13 +2819,9 @@ const isChatAvailable = (model: Model): boolean => model.llmEnabled || model.has
 
 const resolveModelOptionsForModel = (model: Model, activeModel: string) => {
   if (model.llmEnabled && model.llmProviders.length > 0) {
-    const discoveredByProvider: Record<string, ReadonlyArray<string>> = model.llmDiscoveredModels
-      .length > 0 && model.llmProviders[0] !== undefined
-      ? { [model.llmProviders[0].id]: model.llmDiscoveredModels }
-      : {}
     return resolveAllProviderModelOptions(
       model.llmProviders,
-      discoveredByProvider,
+      {},
       activeModel,
       model.hasLanguageModel,
     )
