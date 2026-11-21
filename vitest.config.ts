@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     include: ["src/**/*.{test,spec}.ts"],
     environment: "happy-dom",
+    isolate: false,
     setupFiles: ["./src/vitest-setup.ts"],
     server: {
       deps: {
