@@ -4586,12 +4586,20 @@ export const update = (
             )
           : model.llmProviders
       const shouldPersist = providerId !== undefined && providerId !== "" && models.length > 0
+      const matchesEditingProvider =
+        !model.isEditingLlmSettings ||
+        Option.match(model.editingLlmProviderId, {
+          onNone: () => false,
+          onSome: (editingId) => editingId === providerId,
+        })
       return {
         model: modifyFields(model, {
-          llmDiscoveredModels: (current) => (models.length > 0 ? models : current),
+          llmDiscoveredModels: (current) =>
+            matchesEditingProvider && models.length > 0 ? models : current,
           llmProviders: () => nextProviders,
           llmModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
-          llmDraftModel: (current) => (current.trim() === "" && models[0] ? models[0] : current),
+          llmDraftModel: (current) =>
+            matchesEditingProvider && current.trim() === "" && models[0] ? models[0] : current,
         }),
         ...(shouldPersist
           ? {
@@ -7688,7 +7696,7 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           model.llmDraftModels,
                           model.llmDiscoveredModels,
                           model.llmDraftModel,
-                          model.hasLanguageModel,
+                          false,
                           model.llmDraftModelFilter,
                         )
                         const availableLevels = parseThinkingLevels(model.llmDraftThinkingLevels)

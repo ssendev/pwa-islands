@@ -1503,7 +1503,7 @@ describe("PWA Islands Scene Tests", () => {
     )
   })
 
-  it("zeigt bei aktivierter API in den Einstellungen sowohl API-Modelle als auch das native Modell zur Auswahl", () => {
+  it("zeigt im Provider-Formular nur die Modelle des jeweiligen Providers und nicht das native Modell", () => {
     scene(
       { update, view },
       given({
@@ -1517,10 +1517,8 @@ describe("PWA Islands Scene Tests", () => {
       }),
       sceneExpect(selector("#llm-native-detected-hint")).toExist(),
       sceneExpect(selector("#llm-active-model option[value='gpt-4o-mini']")).toExist(),
-      sceneExpect(selector("#llm-active-model option[value='__language_model__']")).toExist(),
+      sceneExpect(selector("#llm-active-model option[value='__language_model__']")).toBeAbsent(),
       sceneExpect(selector("#btn-test-llm-chat")).toBeDisabled(),
-      change(selector("#llm-active-model"), "__language_model__"),
-      sceneExpect(selector("#btn-test-llm-chat")).toBeEnabled(),
       sceneExpect(selector("#btn-test-llm-models")).toBeDisabled(),
       sceneExpect(selector("#btn-test-llm-tools")).toBeDisabled(),
     )
