@@ -24,7 +24,6 @@ import {
   ClearAllHistoryState,
   EntriesState,
   InstallPrompt,
-  LoadEditorLlmModels,
   Message,
   type Model,
   NavigateHistoryBack,
@@ -474,9 +473,9 @@ describe("PWA Islands Scene Tests", () => {
       expectIgnored(),
       sceneExpect(selector("#modal-llm-chat-input")).toHaveValue("Füge Titel hinzu"),
       keydown(selector("#modal-llm-chat-input"), "Enter"),
-      Command.resolveAll(
-        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
-        [LoadEditorLlmModels, Message.SucceededLoadEditorLlmModels({ models: ["gpt-4o"] })],
+      Command.resolve(
+        Editor.ScrollLlmChatToBottomIfAtBottom,
+        Editor.Message.CompletedScrollLlmChatToBottom(),
       ),
       sceneExpect(selector(".modal-overlay")).toExist(),
       sceneExpect(selector("#modal-llm-chat-input")).toHaveValue(""),
@@ -652,9 +651,9 @@ describe("PWA Islands Scene Tests", () => {
       ),
       type(selector("#modal-llm-chat-input"), "Erkläre kurz"),
       click(selector("#modal-btn-send-llm")),
-      Command.resolveAll(
-        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
-        [LoadEditorLlmModels, Message.SucceededLoadEditorLlmModels({ models: ["gpt-4o"] })],
+      Command.resolve(
+        Editor.ScrollLlmChatToBottomIfAtBottom,
+        Editor.Message.CompletedScrollLlmChatToBottom(),
       ),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       Subscription.emit(
@@ -725,9 +724,9 @@ describe("PWA Islands Scene Tests", () => {
       ),
       type(selector("#modal-llm-chat-input"), "Erkläre Fehler"),
       click(selector("#modal-btn-send-llm")),
-      Command.resolveAll(
-        [Editor.ScrollLlmChatToBottomIfAtBottom, Editor.Message.CompletedScrollLlmChatToBottom()],
-        [LoadEditorLlmModels, Message.SucceededLoadEditorLlmModels({ models: ["gpt-4o"] })],
+      Command.resolve(
+        Editor.ScrollLlmChatToBottomIfAtBottom,
+        Editor.Message.CompletedScrollLlmChatToBottom(),
       ),
       sceneExpect(selector("#modal-btn-send-llm")).toHaveAttr("aria-label", "Stopp"),
       Subscription.emit(

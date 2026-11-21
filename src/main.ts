@@ -5109,23 +5109,10 @@ export const update = (
 
       return Modal.OutMessage.match(modalResult.outMessage, {
         None: () => {
-          const isModalChatSending = (state: Model["modalState"]): boolean =>
-            state._tag === "Editor" &&
-            (state.editor._tag === "CreateFile" || state.editor._tag === "EditFile") &&
-            state.editor.llmChatState._tag === "Sending"
           const nextModel = modifyFields(model, {
             modalState: () => modalResult.model,
             historyEnabled: () => nextHistoryEnabled,
           })
-          const startedChat =
-            !isModalChatSending(model.modalState) && isModalChatSending(modalResult.model)
-          if (startedChat) {
-            const editorModelsLoad = maybeLoadEditorLlmModels(nextModel)
-            const commands = [...mappedCommands, ...(editorModelsLoad.commands ?? [])]
-            return Array.isReadonlyArrayNonEmpty(commands)
-              ? { model: editorModelsLoad.model, commands }
-              : { model: editorModelsLoad.model }
-          }
           return syncOpenEditor(nextModel, mappedCommands)
         },
 
@@ -5231,6 +5218,17 @@ export const update = (
             model: toastResult.model,
             commands,
           }
+        },
+
+        OpenedLlmModelSelect: () => {
+          const nextModel = modifyFields(model, {
+            modalState: () => modalResult.model,
+          })
+          const editorModelsLoad = maybeLoadEditorLlmModels(nextModel)
+          const commands = [...mappedCommands, ...(editorModelsLoad.commands ?? [])]
+          return Array.isReadonlyArrayNonEmpty(commands)
+            ? { model: editorModelsLoad.model, commands }
+            : { model: editorModelsLoad.model }
         },
 
         SelectedLlmModel: ({ value }) => {

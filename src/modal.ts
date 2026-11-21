@@ -726,6 +726,7 @@ export const OutMessage = defineTaggedUnion({
     banner: AlertBanner,
     replaceUrl: Schema.Boolean,
   },
+  OpenedLlmModelSelect: {},
   SelectedLlmModel: {
     value: Schema.String,
   },
@@ -982,6 +983,11 @@ export const update = (
                 banner,
                 replaceUrl,
               }),
+            }),
+            OpenedLlmModelSelect: () => ({
+              model: ModalState.Editor({ editor: editorResult.model }),
+              commands: mappedCommands,
+              outMessage: OutMessage.OpenedLlmModelSelect(),
             }),
             SelectedLlmModel: ({ value }) => ({
               model: ModalState.Editor({ editor: editorResult.model }),

@@ -2582,19 +2582,11 @@ describe("PWA Islands Story Tests", () => {
         message(
           Message.GotModalMessage({
             message: Modal.Message.GotEditorMessage({
-              message: Editor.Message.UpdatedLlmChatInput({ value: "Hallo" }),
-            }),
-          }),
-        ),
-        message(
-          Message.GotModalMessage({
-            message: Modal.Message.GotEditorMessage({
-              message: Editor.Message.SubmittedLlmChat(),
+              message: Editor.Message.OpenedLlmModelSelect(),
             }),
           }),
         ),
         Command.expectExact(
-          Editor.ScrollLlmChatToBottomIfAtBottom,
           LoadEditorLlmModels({
             enabled: true,
             editFormat: "hashline",
@@ -2609,10 +2601,6 @@ describe("PWA Islands Story Tests", () => {
           }),
         ),
         Command.resolve(
-          Editor.ScrollLlmChatToBottomIfAtBottom,
-          Editor.Message.CompletedScrollLlmChatToBottom(),
-        ),
-        Command.resolve(
           LoadEditorLlmModels,
           Message.SucceededLoadEditorLlmModels({ models: ["qwen3", "gpt-4o"] }),
         ),
@@ -2624,7 +2612,7 @@ describe("PWA Islands Story Tests", () => {
       )
     })
 
-    it("aktualisiert die Modellliste beim ersten Chat-Request auch bei gespeicherten Modellen nur für den Provider des gewählten Modells", () => {
+    it("aktualisiert die Modellliste beim ersten Öffnen des Model-Selects auch bei gespeicherten Modellen nur für den Provider des gewählten Modells", () => {
       const multiProviderEditorModel: Model = {
         ...readyModel,
         llmEnabled: true,
@@ -2672,19 +2660,11 @@ describe("PWA Islands Story Tests", () => {
         message(
           Message.GotModalMessage({
             message: Modal.Message.GotEditorMessage({
-              message: Editor.Message.UpdatedLlmChatInput({ value: "Hallo" }),
-            }),
-          }),
-        ),
-        message(
-          Message.GotModalMessage({
-            message: Modal.Message.GotEditorMessage({
-              message: Editor.Message.SubmittedLlmChat(),
+              message: Editor.Message.OpenedLlmModelSelect(),
             }),
           }),
         ),
         Command.expectExact(
-          Editor.ScrollLlmChatToBottomIfAtBottom,
           LoadEditorLlmModels({
             providerId: "provider-2",
             enabled: true,
@@ -2698,10 +2678,6 @@ describe("PWA Islands Story Tests", () => {
             thinkingLevels: "",
             extraArgs: "",
           }),
-        ),
-        Command.resolve(
-          Editor.ScrollLlmChatToBottomIfAtBottom,
-          Editor.Message.CompletedScrollLlmChatToBottom(),
         ),
         Command.resolve(
           LoadEditorLlmModels,

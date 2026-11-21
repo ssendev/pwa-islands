@@ -869,6 +869,7 @@ export const Message = defineMessageUnion({
     message: Schema.String,
   },
   CompletedScrollLlmChatToBottom: {},
+  OpenedLlmModelSelect: {},
   SelectedLlmModel: {
     value: Schema.String,
   },
@@ -1035,6 +1036,7 @@ export const OutMessage = defineTaggedUnion({
     closeModal: Schema.Boolean,
     replaceUrl: Schema.Boolean,
   },
+  OpenedLlmModelSelect: {},
   SelectedLlmModel: { value: Schema.String },
   SelectedLlmThinkingLevel: { value: Schema.String },
   ChangedLlmBarMode: { llmBarMode: LlmBarMode },
@@ -2663,6 +2665,11 @@ export const update = (
       model: applyLlmChatFailure(model, message),
       commands: [ScrollLlmChatToBottomIfAtBottom()],
       outMessage: OutMessage.None(),
+    }),
+
+    OpenedLlmModelSelect: () => ({
+      model,
+      outMessage: OutMessage.OpenedLlmModelSelect(),
     }),
 
     SelectedLlmModel: ({ value }) => ({
@@ -4628,6 +4635,8 @@ const viewLlmChatModelControls = (
         h.AriaLabel(t(getDocumentLanguage()).settings.providerModelLabel),
         h.Disabled(isSending || Array.isReadonlyArrayEmpty(llmModelOptions)),
         h.Value(llmSelectedModel),
+        h.OnFocus(Message.OpenedLlmModelSelect()),
+        h.OnMouseDown(Message.OpenedLlmModelSelect()),
         h.OnChange((value) => Message.SelectedLlmModel({ value })),
       ],
       renderModelSelectChildren(llmModelOptions, llmSelectedModel, h),
