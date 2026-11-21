@@ -1,6 +1,7 @@
 import { Array, Option, Order, Schema } from "effect"
 import { defineTaggedUnion } from "foldkit/schema"
 import { invoke } from "@tauri-apps/api/core"
+import { listDraftFileNames } from "./drafts"
 import { listHistoryFileNames } from "./history"
 import { getDocumentLanguage, t } from "./i18n"
 import {
@@ -35,6 +36,7 @@ export const FileEntry = Schema.Struct({
   maybeSize: Schema.Option(Schema.Number),
   maybeLastModified: Schema.Option(Schema.Number),
   hasHistory: Schema.optionalKey(Schema.Boolean),
+  hasDraft: Schema.optionalKey(Schema.Boolean),
   isDeleted: Schema.optionalKey(Schema.Boolean),
 })
 export type FileEntry = typeof FileEntry.Type
@@ -320,20 +322,36 @@ const mergeEntriesWithHistory = async (
   subPath: ReadonlyArray<string>,
   entries: ReadonlyArray<FileEntry>,
 ): Promise<ReadonlyArray<FileEntry>> => {
-  const historyNames = await listHistoryFileNames(subPath)
-  if (Array.isReadonlyArrayEmpty(historyNames)) {
+  const [historyNames, draftNames] = await Promise.all([
+    listHistoryFileNames(subPath),
+    listDraftFileNames(subPath),
+  ])
+  if (Array.isReadonlyArrayEmpty(historyNames) && Array.isReadonlyArrayEmpty(draftNames)) {
     return Array.sort(entries, fileEntryOrder)
   }
   const historySet = new Set(historyNames)
+  const draftSet = new Set(draftNames)
   const existingFileNames = new Set(
     Array.map(
       Array.filter(entries, (entry) => entry.kind === "file"),
       (entry) => entry.name,
     ),
   )
-  const annotatedEntries: ReadonlyArray<FileEntry> = Array.map(entries, (entry) =>
-    entry.kind === "file" && historySet.has(entry.name) ? { ...entry, hasHistory: true } : entry,
-  )
+  const annotatedEntries: ReadonlyArray<FileEntry> = Array.map(entries, (entry) => {
+    if (entry.kind !== "file") {
+      return entry
+    }
+    const hasHistory = historySet.has(entry.name)
+    const hasDraft = draftSet.has(entry.name)
+    if (!hasHistory && !hasDraft) {
+      return entry
+    }
+    return {
+      ...entry,
+      ...(hasHistory ? { hasHistory: true } : {}),
+      ...(hasDraft ? { hasDraft: true } : {}),
+    }
+  })
   const deletedEntries: ReadonlyArray<FileEntry> = Array.map(
     Array.filter(historyNames, (name) => !existingFileNames.has(name)),
     (name): FileEntry => ({

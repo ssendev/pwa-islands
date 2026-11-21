@@ -32,6 +32,7 @@ import {
   getEditorToolsForFormat,
 } from "./edit-format"
 import { formatUpdatedHashlines } from "./hashline"
+import { clearFileDraft, hasDiskChangedSinceBase, saveFileDraft } from "./drafts"
 import {
   appendFileHistory,
   appendFileHistoryBytes,
@@ -174,6 +175,13 @@ export const EditorSplitDrag = Schema.Struct({
 })
 export type EditorSplitDrag = typeof EditorSplitDrag.Type
 
+export const ExternalConflict = Schema.Struct({
+  diskContent: Schema.String,
+  diskContentHash: Schema.Number,
+  diskByteLength: Schema.Number,
+})
+export type ExternalConflict = typeof ExternalConflict.Type
+
 export const HistoryEntry = Schema.Struct({
   offset: Schema.Number,
   endOffset: Schema.Number,
@@ -251,6 +259,10 @@ export const Model = defineTaggedUnion({
     name: Schema.String,
     fileMode: EditorFileMode,
     savedContent: Schema.optionalKey(Schema.String),
+    baseContentHash: Schema.optionalKey(Schema.Number),
+    baseByteLength: Schema.optionalKey(Schema.Number),
+    draftRestored: Schema.optionalKey(Schema.Boolean),
+    externalConflict: Schema.optionalKey(ExternalConflict),
     maybeValidationError: Schema.Option(Schema.String),
     maybePasteError: Schema.Option(Schema.String),
     llmBarMode: LlmBarMode,
@@ -930,6 +942,15 @@ export const Message = defineMessageUnion({
   FailedSaveChanges: {
     message: Schema.String,
   },
+  DetectedExternalFileConflict: {
+    diskContent: Schema.String,
+    diskContentHash: Schema.Number,
+    diskByteLength: Schema.Number,
+  },
+  ClickedOverwriteExternalConflict: {},
+  ClickedReloadExternalConflict: {},
+  CompletedPersistFileDraft: {},
+  CompletedClearFileDraft: {},
   SucceededDeleteEntry: {
     entries: Schema.Array(FileEntry),
   },
@@ -1248,7 +1269,9 @@ const executeSaveChanges = async (
       text: async (content) => {
         await recordPreviousFileVersion(storage, subPath, originalName, targetName, timestampMs)
         await storage.writeFile(subPath, targetName, content)
+        await clearFileDraft(subPath, originalName)
         if (originalName !== targetName) {
+          await clearFileDraft(subPath, targetName)
           await storage.deleteEntry(subPath, originalName, "file")
         }
       },
@@ -1306,17 +1329,95 @@ const executeSaveChanges = async (
   return { entries: updatedEntries, savedFileName }
 }
 
+export const PersistFileDraft = Command.define("PersistFileDraft", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+    content: Schema.String,
+    baseContentHash: Schema.Number,
+    baseByteLength: Schema.Number,
+  },
+  messages: [Message.CompletedPersistFileDraft],
+  execute: (args) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((updatedAtMs) =>
+        Effect.tryPromise({
+          try: () =>
+            saveFileDraft(args.subPath, args.fileName, {
+              content: args.content,
+              baseContentHash: args.baseContentHash,
+              baseByteLength: args.baseByteLength,
+              updatedAtMs,
+            }),
+          catch: () => undefined,
+        }),
+      ),
+      Effect.as(Message.CompletedPersistFileDraft()),
+      Effect.catch(() => Effect.succeed(Message.CompletedPersistFileDraft())),
+    ),
+})
+
+export const ClearFileDraft = Command.define("ClearFileDraft", {
+  args: {
+    subPath: Schema.Array(Schema.String),
+    fileName: Schema.String,
+  },
+  messages: [Message.CompletedClearFileDraft],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () => clearFileDraft(args.subPath, args.fileName),
+      catch: () => undefined,
+    }).pipe(
+      Effect.as(Message.CompletedClearFileDraft()),
+      Effect.catch(() => Effect.succeed(Message.CompletedClearFileDraft())),
+    ),
+})
+
 export const SaveChanges = Command.define("SaveChanges", {
   args: {
     model: Model,
     subPath: Schema.Array(Schema.String),
+    forceOverwrite: Schema.optionalKey(Schema.Boolean),
   },
-  messages: [Message.SucceededSaveChanges, Message.FailedSaveChanges],
+  messages: [
+    Message.SucceededSaveChanges,
+    Message.FailedSaveChanges,
+    Message.DetectedExternalFileConflict,
+  ],
   execute: (args) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((timestampMs) =>
         Effect.tryPromise({
           try: async () => {
+            if (
+              args.model._tag === "EditFile" &&
+              args.model.fileMode._tag === "Text" &&
+              args.forceOverwrite !== true &&
+              args.model.baseContentHash !== undefined &&
+              args.model.baseByteLength !== undefined
+            ) {
+              const storage = requireActiveStorage()
+              try {
+                const inspection = await storage.inspectFile(args.subPath, args.model.originalName)
+                if (
+                  inspection._tag === "EditableText" &&
+                  hasDiskChangedSinceBase(
+                    inspection.text,
+                    args.model.baseContentHash,
+                    args.model.baseByteLength,
+                  )
+                ) {
+                  const measured = hashAndMeasureHistoryContent(inspection.text)
+                  return Message.DetectedExternalFileConflict({
+                    diskContent: inspection.text,
+                    diskContentHash: measured.contentHash,
+                    diskByteLength: measured.byteLength,
+                  })
+                }
+              } catch {
+                // NOTE: If file no longer exists on disk, proceed with normal save
+              }
+            }
             const { entries } = await executeSaveChanges(args.model, args.subPath, timestampMs)
             return Message.SucceededSaveChanges({ entries })
           },
@@ -1355,6 +1456,7 @@ export const DeleteEntry = Command.define("DeleteEntry", {
                 args.entryName,
                 timestampMs,
               )
+              await clearFileDraft(args.subPath, args.entryName)
             } else {
               await recordDirectoryFileVersions(
                 storage,
@@ -2053,6 +2155,12 @@ const handleSaveAction = (
       }
     },
     EditFile: (editFile) => {
+      if (editFile.externalConflict !== undefined) {
+        return {
+          model: editFile,
+          outMessage: OutMessage.None(),
+        }
+      }
       const error = validateName(editFile.name, false)
       if (Option.isSome(error)) {
         return {
@@ -2173,28 +2281,51 @@ export const update = (
       outMessage: OutMessage.None(),
     }),
 
-    UpdatedTextContent: ({ content }) => ({
-      model: Model.match(model, {
-        CreateFile: (state) =>
-          modifyFields(state, {
+    UpdatedTextContent: ({ content }) =>
+      Model.match(model, {
+        CreateFile: (state) => ({
+          model: modifyFields(state, {
             content: () => content,
             maybePasteError: () => Option.none(),
           }),
-        CreateFolder: () => model,
-        EditFolder: () => model,
+          outMessage: OutMessage.None(),
+        }),
+        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
+        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
         EditFile: (state) =>
           EditorFileMode.match(state.fileMode, {
-            Text: () =>
-              modifyFields(state, {
+            Text: () => {
+              const nextState = modifyFields(state, {
                 fileMode: () => EditorFileMode.Text({ content }),
                 maybePasteError: () => Option.none(),
-              }),
-            Binary: () => state,
+              })
+              const base =
+                state.baseContentHash !== undefined && state.baseByteLength !== undefined
+                  ? { contentHash: state.baseContentHash, byteLength: state.baseByteLength }
+                  : hashAndMeasureHistoryContent(state.savedContent ?? "")
+              const draftCommand =
+                content === state.savedContent && state.externalConflict === undefined
+                  ? ClearFileDraft({
+                      subPath: context.subPath,
+                      fileName: state.originalName,
+                    })
+                  : PersistFileDraft({
+                      subPath: context.subPath,
+                      fileName: state.originalName,
+                      content,
+                      baseContentHash: base.contentHash,
+                      baseByteLength: base.byteLength,
+                    })
+              return {
+                model: nextState,
+                commands: [draftCommand],
+                outMessage: OutMessage.None(),
+              }
+            },
+            Binary: () => ({ model: state, outMessage: OutMessage.None() }),
           }),
-        ConfirmOverwrite: () => model,
+        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
       }),
-      outMessage: OutMessage.None(),
-    }),
 
     SelectedTemplate: ({ templateId }) =>
       whenCreateFile(model, (state) => {
@@ -3242,12 +3373,28 @@ export const update = (
           model.originalName !== savedName
             ? Option.some(buildEditUrl(context.subPath, savedName, model.isPreviewOpen))
             : Option.none()
+        const nextMeasured =
+          nextSavedContent !== undefined
+            ? hashAndMeasureHistoryContent(nextSavedContent)
+            : undefined
+        const {
+          externalConflict: _clearedConflict,
+          draftRestored: _clearedDraftRestored,
+          ...restEditModel
+        } = model
         return {
-          model: modifyFields(model, {
-            originalName: () => savedName,
-            name: () => savedName,
-            ...(nextSavedContent !== undefined ? { savedContent: () => nextSavedContent } : {}),
-            hasHistoryEntries: (current) => (model.isHistoryEnabled !== false ? true : current),
+          model: Model.EditFile({
+            ...restEditModel,
+            originalName: savedName,
+            name: savedName,
+            ...(nextSavedContent !== undefined ? { savedContent: nextSavedContent } : {}),
+            ...(nextMeasured !== undefined
+              ? {
+                  baseContentHash: nextMeasured.contentHash,
+                  baseByteLength: nextMeasured.byteLength,
+                }
+              : {}),
+            hasHistoryEntries: model.isHistoryEnabled !== false ? true : model.hasHistoryEntries,
           }),
           outMessage: OutMessage.EntriesUpdated({
             entries,
@@ -3322,6 +3469,83 @@ export const update = (
         closeModal: false,
         replaceUrl: false,
       }),
+    }),
+
+    DetectedExternalFileConflict: ({ diskContent, diskContentHash, diskByteLength }) => ({
+      model: Model.match(model, {
+        EditFile: (state) =>
+          Model.EditFile({
+            ...state,
+            externalConflict: {
+              diskContent,
+              diskContentHash,
+              diskByteLength,
+            },
+          }),
+        CreateFile: () => model,
+        CreateFolder: () => model,
+        EditFolder: () => model,
+        ConfirmOverwrite: () => model,
+      }),
+      outMessage: OutMessage.None(),
+    }),
+
+    ClickedOverwriteExternalConflict: () =>
+      Model.match(model, {
+        EditFile: (state) => ({
+          model: state,
+          commands: [SaveChanges({ model: state, subPath: context.subPath, forceOverwrite: true })],
+          outMessage: OutMessage.None(),
+        }),
+        CreateFile: () => ({ model, outMessage: OutMessage.None() }),
+        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
+        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
+      }),
+
+    ClickedReloadExternalConflict: () =>
+      Model.match(model, {
+        EditFile: (state) => {
+          if (state.externalConflict === undefined) {
+            return { model: state, outMessage: OutMessage.None() }
+          }
+          const { diskContent, diskContentHash, diskByteLength } = state.externalConflict
+          const {
+            externalConflict: _clearedConflict,
+            draftRestored: _clearedDraftRestored,
+            ...restState
+          } = state
+          return {
+            model: Model.EditFile({
+              ...restState,
+              fileMode: EditorFileMode.Text({ content: diskContent }),
+              savedContent: diskContent,
+              baseContentHash: diskContentHash,
+              baseByteLength: diskByteLength,
+            }),
+            commands: [
+              ClearFileDraft({
+                subPath: context.subPath,
+                fileName: state.originalName,
+              }),
+            ],
+            outMessage: OutMessage.None(),
+          }
+        },
+        CreateFile: () => ({ model, outMessage: OutMessage.None() }),
+        CreateFolder: () => ({ model, outMessage: OutMessage.None() }),
+        EditFolder: () => ({ model, outMessage: OutMessage.None() }),
+        ConfirmOverwrite: () => ({ model, outMessage: OutMessage.None() }),
+      }),
+
+    CompletedPersistFileDraft: () => ({
+      model,
+      outMessage: OutMessage.None(),
+    }),
+
+    CompletedClearFileDraft: () => ({
+      model,
+      outMessage: OutMessage.None(),
     }),
 
     SucceededDeleteEntry: ({ entries }) => ({
@@ -5079,6 +5303,7 @@ const viewEditorModal = (
     isNameToggleable,
     isNameInputVisible,
     hasUnsavedChanges = false,
+    hasExternalConflict = false,
     editorSplitPercent,
     isDraggingSplit,
     isEditingExisting,
@@ -5108,6 +5333,7 @@ const viewEditorModal = (
     readonly isNameToggleable: boolean
     readonly isNameInputVisible: boolean
     readonly hasUnsavedChanges?: boolean
+    readonly hasExternalConflict?: boolean
     readonly editorSplitPercent: number
     readonly isDraggingSplit: boolean
     readonly isEditingExisting: boolean
@@ -5243,6 +5469,41 @@ const viewEditorModal = (
                     onSome: (error) =>
                       h.div([h.Class("alert alert-danger mb-3"), h.Role("alert")], [error]),
                   }),
+                  hasExternalConflict
+                    ? h.div(
+                        [
+                          h.Class("alert alert-warning editor-conflict-banner mb-3"),
+                          h.Role("alert"),
+                        ],
+                        [
+                          h.p(
+                            [h.Class("editor-conflict-message")],
+                            [tr.editor.externalConflictMessage],
+                          ),
+                          h.div(
+                            [h.Class("editor-conflict-actions")],
+                            [
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Class("btn btn-danger btn-sm"),
+                                  h.OnClick(Message.ClickedOverwriteExternalConflict()),
+                                ],
+                                [tr.editor.overwriteWithDraft],
+                              ),
+                              h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Class("btn btn-secondary btn-sm"),
+                                  h.OnClick(Message.ClickedReloadExternalConflict()),
+                                ],
+                                [tr.editor.reloadFromDisk],
+                              ),
+                            ],
+                          ),
+                        ],
+                      )
+                    : h.empty,
                   isNameInputVisible || Option.isSome(maybeValidationError)
                     ? h.div(
                         [h.Class("form-group")],
@@ -6162,6 +6423,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         name,
         fileMode,
         savedContent,
+        externalConflict,
         maybeValidationError,
         maybePasteError,
         llmBarMode,
@@ -6241,6 +6503,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 isNameToggleable: true,
                 isNameInputVisible: isEditingName,
                 hasUnsavedChanges,
+                hasExternalConflict: externalConflict !== undefined,
                 editorSplitPercent,
                 isDraggingSplit: Option.isSome(editorSplitDrag),
                 isEditingExisting: true,

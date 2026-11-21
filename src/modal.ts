@@ -25,7 +25,8 @@ import {
 } from "./files"
 import * as Help from "./help"
 import { getDocumentLanguage, type Language, t } from "./i18n"
-import { hasFileHistory } from "./history"
+import { clearFileDraft, hasDiskChangedSinceBase, loadFileDraft } from "./drafts"
+import { hasFileHistory, hashAndMeasureHistoryContent } from "./history"
 import { viewIcon } from "./icons"
 import { AppRoute, HelpTopic, NewTarget, buildFolderUrl } from "./route"
 import { StarterTemplate } from "./templates"
@@ -622,19 +623,38 @@ export const resolveModalForRoute = async (
             }
           }
 
-          const [fileMode, isHistoryEnabled, hasHistoryEntries] = await Promise.all([
+          const [rawFileMode, isHistoryEnabled, hasHistoryEntries, maybeDraft] = await Promise.all([
             loadEditorFileModeForEntry(storage, subPath, targetEntry.name),
             getStoredHistoryEnabled(),
             hasFileHistory(subPath, targetEntry.name),
+            loadFileDraft(subPath, targetEntry.name),
           ])
+          const draftState = await resolveDraftForFileMode(
+            subPath,
+            targetEntry.name,
+            rawFileMode,
+            maybeDraft,
+          )
           return {
             maybeModalState: Option.some(
               ModalState.Editor({
                 editor: Editor.Model.EditFile({
                   originalName: targetEntry.name,
                   name: targetEntry.name,
-                  fileMode,
-                  ...(fileMode._tag === "Text" ? { savedContent: fileMode.content } : {}),
+                  fileMode: draftState.fileMode,
+                  ...(draftState.savedContent !== undefined
+                    ? { savedContent: draftState.savedContent }
+                    : {}),
+                  ...(draftState.baseContentHash !== undefined
+                    ? { baseContentHash: draftState.baseContentHash }
+                    : {}),
+                  ...(draftState.baseByteLength !== undefined
+                    ? { baseByteLength: draftState.baseByteLength }
+                    : {}),
+                  ...(draftState.draftRestored ? { draftRestored: true } : {}),
+                  ...(draftState.externalConflict !== undefined
+                    ? { externalConflict: draftState.externalConflict }
+                    : {}),
                   maybeValidationError: Option.none(),
                   maybePasteError: Option.none(),
                   llmBarMode: "Closed",
@@ -660,12 +680,80 @@ export const resolveModalForRoute = async (
                 }),
               }),
             ),
-            maybeAlertBanner: Option.none(),
+            maybeAlertBanner: draftState.draftRestored
+              ? Option.some<AlertBanner>({
+                  message: t(getDocumentLanguage()).editor.draftRestoredNotice,
+                  variant: "info",
+                })
+              : Option.none(),
           }
         },
       })
     },
   })
+}
+
+const resolveDraftForFileMode = async (
+  subPath: ReadonlyArray<string>,
+  fileName: string,
+  fileMode: EditorFileMode,
+  maybeDraft: Option.Option<{
+    readonly content: string
+    readonly baseContentHash: number
+    readonly baseByteLength: number
+    readonly updatedAtMs: number
+  }>,
+): Promise<{
+  readonly fileMode: EditorFileMode
+  readonly savedContent?: string
+  readonly baseContentHash?: number
+  readonly baseByteLength?: number
+  readonly draftRestored?: boolean
+  readonly externalConflict?: Editor.ExternalConflict
+}> => {
+  if (fileMode._tag !== "Text") {
+    return { fileMode }
+  }
+  const diskContent = fileMode.content
+  const diskMeasured = hashAndMeasureHistoryContent(diskContent)
+  if (Option.isNone(maybeDraft)) {
+    return {
+      fileMode,
+      savedContent: diskContent,
+      baseContentHash: diskMeasured.contentHash,
+      baseByteLength: diskMeasured.byteLength,
+    }
+  }
+  const draft = maybeDraft.value
+  if (draft.content === diskContent) {
+    await clearFileDraft(subPath, fileName)
+    return {
+      fileMode,
+      savedContent: diskContent,
+      baseContentHash: diskMeasured.contentHash,
+      baseByteLength: diskMeasured.byteLength,
+    }
+  }
+  if (hasDiskChangedSinceBase(diskContent, draft.baseContentHash, draft.baseByteLength)) {
+    return {
+      fileMode: EditorFileMode.Text({ content: draft.content }),
+      savedContent: diskContent,
+      baseContentHash: draft.baseContentHash,
+      baseByteLength: draft.baseByteLength,
+      externalConflict: {
+        diskContent,
+        diskContentHash: diskMeasured.contentHash,
+        diskByteLength: diskMeasured.byteLength,
+      },
+    }
+  }
+  return {
+    fileMode: EditorFileMode.Text({ content: draft.content }),
+    savedContent: diskContent,
+    baseContentHash: diskMeasured.contentHash,
+    baseByteLength: diskMeasured.byteLength,
+    draftRestored: true,
+  }
 }
 
 // MESSAGE
@@ -680,6 +768,11 @@ export const Message = defineMessageUnion({
   SucceededInspectFileForEditor: {
     originalName: Schema.String,
     fileMode: EditorFileMode,
+    savedContent: Schema.optionalKey(Schema.String),
+    baseContentHash: Schema.optionalKey(Schema.Number),
+    baseByteLength: Schema.optionalKey(Schema.Number),
+    draftRestored: Schema.optionalKey(Schema.Boolean),
+    externalConflict: Schema.optionalKey(Editor.ExternalConflict),
     isHistoryEnabled: Schema.optionalKey(Schema.Boolean),
     hasHistoryEntries: Schema.optionalKey(Schema.Boolean),
     openHistory: Schema.optionalKey(Schema.Boolean),
@@ -758,14 +851,36 @@ export const InspectFileForEditor = Command.define("InspectFileForEditor", {
     Effect.tryPromise({
       try: async () => {
         const storage = requireActiveStorage()
-        const [fileMode, isHistoryEnabled, hasHistoryEntries] = await Promise.all([
+        const [rawFileMode, isHistoryEnabled, hasHistoryEntries, maybeDraft] = await Promise.all([
           loadEditorFileModeForEntry(storage, args.subPath, args.entryName),
           getStoredHistoryEnabled(),
           hasFileHistory(args.subPath, args.entryName),
+          args.openHistory
+            ? Promise.resolve(Option.none())
+            : loadFileDraft(args.subPath, args.entryName),
         ])
+        const draftState = await resolveDraftForFileMode(
+          args.subPath,
+          args.entryName,
+          rawFileMode,
+          maybeDraft,
+        )
         return Message.SucceededInspectFileForEditor({
           originalName: args.entryName,
-          fileMode,
+          fileMode: draftState.fileMode,
+          ...(draftState.savedContent !== undefined
+            ? { savedContent: draftState.savedContent }
+            : {}),
+          ...(draftState.baseContentHash !== undefined
+            ? { baseContentHash: draftState.baseContentHash }
+            : {}),
+          ...(draftState.baseByteLength !== undefined
+            ? { baseByteLength: draftState.baseByteLength }
+            : {}),
+          ...(draftState.draftRestored ? { draftRestored: true } : {}),
+          ...(draftState.externalConflict !== undefined
+            ? { externalConflict: draftState.externalConflict }
+            : {}),
           isHistoryEnabled,
           hasHistoryEntries,
           openHistory: args.openHistory ?? false,
@@ -1089,55 +1204,82 @@ export const update = (
     SucceededInspectFileForEditor: ({
       originalName,
       fileMode,
+      savedContent,
+      baseContentHash,
+      baseByteLength,
+      draftRestored,
+      externalConflict,
       isHistoryEnabled,
       hasHistoryEntries,
       openHistory,
-    }) => ({
-      model: ModalState.Editor({
-        editor: Editor.Model.EditFile({
-          originalName,
-          name: originalName,
-          fileMode,
-          ...(fileMode._tag === "Text" ? { savedContent: fileMode.content } : {}),
-          maybeValidationError: Option.none(),
-          maybePasteError: Option.none(),
-          llmBarMode: context.editorDefaults?.llmBarMode ?? "Closed",
-          isLlmModeMenuOpen: false,
-          llmChatInput: "",
-          llmChatMessages: [],
-          llmChatDisplay: [],
-          llmChatState: Editor.LlmChatState.Idle(),
-          isLlmThinkingMarkdown: true,
-          isLlmContentMarkdown: true,
-          llmToolRawKeys: [],
-          isLlmUserMarkdown: true,
-          isEditingName: false,
-          isPreviewOpen: false,
-          editorSplitPercent:
-            context.editorDefaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
-          editorSplitDrag: Option.none(),
-          canUndo: false,
-          canRedo: false,
-          historyState: openHistory ? Editor.HistoryState.Loading() : Editor.HistoryState.Closed(),
-          isHistoryEnabled: isHistoryEnabled ?? true,
-          hasHistoryEntries: hasHistoryEntries ?? true,
-          isHistoryOnly: openHistory ?? false,
-          isConfirmingDelete: false,
+    }) => {
+      const effectiveSavedContent =
+        savedContent !== undefined
+          ? savedContent
+          : fileMode._tag === "Text"
+            ? fileMode.content
+            : undefined
+      return {
+        model: ModalState.Editor({
+          editor: Editor.Model.EditFile({
+            originalName,
+            name: originalName,
+            fileMode,
+            ...(effectiveSavedContent !== undefined ? { savedContent: effectiveSavedContent } : {}),
+            ...(baseContentHash !== undefined ? { baseContentHash } : {}),
+            ...(baseByteLength !== undefined ? { baseByteLength } : {}),
+            ...(draftRestored ? { draftRestored: true } : {}),
+            ...(externalConflict !== undefined ? { externalConflict } : {}),
+            maybeValidationError: Option.none(),
+            maybePasteError: Option.none(),
+            llmBarMode: context.editorDefaults?.llmBarMode ?? "Closed",
+            isLlmModeMenuOpen: false,
+            llmChatInput: "",
+            llmChatMessages: [],
+            llmChatDisplay: [],
+            llmChatState: Editor.LlmChatState.Idle(),
+            isLlmThinkingMarkdown: true,
+            isLlmContentMarkdown: true,
+            llmToolRawKeys: [],
+            isLlmUserMarkdown: true,
+            isEditingName: false,
+            isPreviewOpen: false,
+            editorSplitPercent:
+              context.editorDefaults?.editorSplitPercent ?? DEFAULT_EDITOR_SPLIT_PERCENT,
+            editorSplitDrag: Option.none(),
+            canUndo: false,
+            canRedo: false,
+            historyState: openHistory
+              ? Editor.HistoryState.Loading()
+              : Editor.HistoryState.Closed(),
+            isHistoryEnabled: isHistoryEnabled ?? true,
+            hasHistoryEntries: hasHistoryEntries ?? true,
+            isHistoryOnly: openHistory ?? false,
+            isConfirmingDelete: false,
+          }),
         }),
-      }),
-      commands: openHistory
-        ? Command.mapMessages(
-            [
-              Editor.LoadFullHistory({
-                subPath: context.subPath,
-                fileName: originalName,
-              }),
-            ],
-            (msg) => Message.GotEditorMessage({ message: msg }),
-          )
-        : [FocusModalNameInput()],
-      outMessage: OutMessage.None(),
-    }),
+        commands: openHistory
+          ? Command.mapMessages(
+              [
+                Editor.LoadFullHistory({
+                  subPath: context.subPath,
+                  fileName: originalName,
+                }),
+              ],
+              (msg) => Message.GotEditorMessage({ message: msg }),
+            )
+          : [FocusModalNameInput()],
+        outMessage: draftRestored
+          ? OutMessage.ShowAlert({
+              banner: {
+                message: t(getDocumentLanguage()).editor.draftRestoredNotice,
+                variant: "info",
+              },
+              replaceUrl: false,
+            })
+          : OutMessage.None(),
+      }
+    },
 
     FailedInspectFileForEditor: ({ message: errorMessage }) => ({
       model: ModalState.Closed(),

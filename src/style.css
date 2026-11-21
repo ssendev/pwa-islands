@@ -3658,3 +3658,34 @@ code {
 .downloads-releases-link:hover {
   text-decoration: underline;
 }
+
+.file-draft-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.45rem;
+  margin-left: 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+  background: var(--warning-bg, rgba(245, 158, 11, 0.16));
+  color: var(--warning-text, #b45309);
+  border: 1px solid var(--warning-border, rgba(245, 158, 11, 0.35));
+  flex-shrink: 0;
+}
+
+.editor-conflict-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.editor-conflict-message {
+  margin: 0;
+}
+
+.editor-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}

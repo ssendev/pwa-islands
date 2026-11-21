@@ -210,6 +210,7 @@ describe("PWA Islands Scene Tests", () => {
       CustomElement.emit(monacoEditorElement, selector("#modal-file-content"), "content-changed", {
         value: "<h1>Hallo Welt!</h1>",
       }),
+      Command.resolve(Editor.PersistFileDraft, Editor.Message.CompletedPersistFileDraft()),
       sceneExpect(selector("#modal-btn-save.btn-primary")).toExist(),
       click(selector("#modal-btn-save")),
       Command.resolve(

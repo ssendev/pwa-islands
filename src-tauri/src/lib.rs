@@ -640,6 +640,7 @@ fn tauri_fs_exists(sub_path: String) -> Result<bool, String> {
 }
 
 const HISTORY_FOLDER_NAME: &str = "pwa-islands-history";
+const DRAFTS_FOLDER_NAME: &str = "pwa-islands-drafts";
 // Binärformat-Vertrag: muss exakt mit `src/history.ts` (`TRAILER_SIZE_BYTES = 16`, LE) übereinstimmen:
 // [UTF-8 Inhalt] [contentHash: u32 LE (4B)] [timestampMs: f64 LE (8B)] [byteLength: u32 LE (4B)]
 const HISTORY_TRAILER_SIZE_BYTES: u64 = 16;
@@ -888,6 +889,103 @@ fn tauri_history_list_entries(app: tauri::AppHandle, sub_path: Vec<String>) -> R
   }
   let read_dir =
     fs::read_dir(&dir).map_err(|e| format!("Fehler beim Lesen des Verlaufsordners: {e}"))?;
+  let mut names = Vec::new();
+  for entry in read_dir {
+    let Ok(entry) = entry else {
+      continue;
+    };
+    let Ok(meta) = entry.metadata() else {
+      continue;
+    };
+    if meta.is_file() && meta.len() > 0 {
+      if let Some(name) = entry.file_name().to_str() {
+        names.push(name.to_string());
+      }
+    }
+  }
+  Ok(names)
+}
+
+fn resolve_draft_path(app: &tauri::AppHandle, sub_path: &[String], file_name: &str) -> Result<PathBuf, String> {
+  let base_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| format!("Konnte App-Datenordner nicht ermitteln: {e}"))?;
+  let mut resolved = base_dir.join(DRAFTS_FOLDER_NAME);
+  for segment in sub_path {
+    resolved.push(validate_history_segment(segment)?);
+  }
+  resolved.push(validate_history_segment(file_name)?);
+  Ok(resolved)
+}
+
+#[tauri::command]
+fn tauri_draft_write(
+  app: tauri::AppHandle,
+  sub_path: Vec<String>,
+  file_name: String,
+  content: String,
+) -> Result<(), String> {
+  let path = resolve_draft_path(&app, &sub_path, &file_name)?;
+  if let Some(parent) = path.parent() {
+    fs::create_dir_all(parent).map_err(|e| format!("Fehler beim Erstellen des Entwurfsordners: {e}"))?;
+  }
+  fs::write(&path, content.as_bytes()).map_err(|e| format!("Fehler beim Schreiben des Entwurfs: {e}"))
+}
+
+#[tauri::command]
+fn tauri_draft_read(
+  app: tauri::AppHandle,
+  sub_path: Vec<String>,
+  file_name: String,
+) -> Result<Option<String>, String> {
+  let path = resolve_draft_path(&app, &sub_path, &file_name)?;
+  if !path.is_file() {
+    return Ok(None);
+  }
+  let content = fs::read_to_string(&path).map_err(|e| format!("Fehler beim Lesen des Entwurfs: {e}"))?;
+  Ok(Some(content))
+}
+
+#[tauri::command]
+fn tauri_draft_clear(app: tauri::AppHandle, sub_path: Vec<String>, file_name: String) -> Result<(), String> {
+  let path = resolve_draft_path(&app, &sub_path, &file_name)?;
+  match fs::remove_file(&path) {
+    Ok(()) => Ok(()),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    Err(e) => Err(format!("Fehler beim Löschen des Entwurfs: {e}")),
+  }
+}
+
+#[tauri::command]
+fn tauri_draft_clear_all(app: tauri::AppHandle) -> Result<(), String> {
+  let base_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| format!("Konnte App-Datenordner nicht ermitteln: {e}"))?;
+  let drafts_root = base_dir.join(DRAFTS_FOLDER_NAME);
+  match fs::remove_dir_all(&drafts_root) {
+    Ok(()) => Ok(()),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+    Err(e) => Err(format!("Fehler beim Löschen aller Entwürfe: {e}")),
+  }
+}
+
+#[tauri::command]
+fn tauri_draft_list_entries(app: tauri::AppHandle, sub_path: Vec<String>) -> Result<Vec<String>, String> {
+  let base_dir = app
+    .path()
+    .app_data_dir()
+    .map_err(|e| format!("Konnte App-Datenordner nicht ermitteln: {e}"))?;
+  let mut dir = base_dir.join(DRAFTS_FOLDER_NAME);
+  for segment in &sub_path {
+    dir.push(validate_history_segment(segment)?);
+  }
+  if !dir.is_dir() {
+    return Ok(Vec::new());
+  }
+  let read_dir =
+    fs::read_dir(&dir).map_err(|e| format!("Fehler beim Lesen des Entwurfsordners: {e}"))?;
   let mut names = Vec::new();
   for entry in read_dir {
     let Ok(entry) = entry else {
@@ -1160,6 +1258,11 @@ pub fn run() {
       tauri_history_clear_all,
       tauri_history_read_index,
       tauri_history_list_entries,
+      tauri_draft_write,
+      tauri_draft_read,
+      tauri_draft_clear,
+      tauri_draft_clear_all,
+      tauri_draft_list_entries,
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");
