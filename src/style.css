@@ -967,6 +967,10 @@ code {
   margin: 0;
   font-size: 18px;
   color: var(--text-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .modal-title-name-btn {
@@ -978,6 +982,9 @@ code {
   cursor: pointer;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .modal-title-name-btn:hover {
@@ -1674,10 +1681,6 @@ code {
 }
 
 @media (max-width: 520px) {
-  .modal-title-prefix {
-    display: none;
-  }
-
   .icon-label-btn .icon-label-btn-text {
     display: none;
   }

@@ -250,6 +250,7 @@ export const Model = defineTaggedUnion({
     originalName: Schema.String,
     name: Schema.String,
     fileMode: EditorFileMode,
+    savedContent: Schema.optionalKey(Schema.String),
     maybeValidationError: Schema.Option(Schema.String),
     maybePasteError: Schema.Option(Schema.String),
     llmBarMode: LlmBarMode,
@@ -2408,6 +2409,7 @@ export const update = (
     SucceededLoadBase64: ({ base64Content }) =>
       whenBinaryEditor(model, (editState, binaryMode) => ({
         model: modifyFields(editState, {
+          savedContent: () => base64Content,
           fileMode: () =>
             modifyFields(binaryMode, {
               edit: () => BinaryEdit.Editing({ content: base64Content }),
@@ -3230,6 +3232,12 @@ export const update = (
     SucceededSaveChanges: ({ entries }) => {
       if (model._tag === "EditFile") {
         const savedName = model.name.trim()
+        const nextSavedContent =
+          model.fileMode._tag === "Text"
+            ? model.fileMode.content
+            : model.fileMode.edit._tag === "Editing"
+              ? model.fileMode.edit.content
+              : model.savedContent
         const maybeReplaceUrl =
           model.originalName !== savedName
             ? Option.some(buildEditUrl(context.subPath, savedName, model.isPreviewOpen))
@@ -3238,6 +3246,7 @@ export const update = (
           model: modifyFields(model, {
             originalName: () => savedName,
             name: () => savedName,
+            ...(nextSavedContent !== undefined ? { savedContent: () => nextSavedContent } : {}),
             hasHistoryEntries: (current) => (model.isHistoryEnabled !== false ? true : current),
           }),
           outMessage: OutMessage.EntriesUpdated({
@@ -3258,6 +3267,7 @@ export const update = (
             originalName: savedName,
             name: savedName,
             fileMode: EditorFileMode.Text({ content: model.content }),
+            savedContent: model.content,
             maybeValidationError: Option.none(),
             maybePasteError: Option.none(),
             llmBarMode: model.llmBarMode,
@@ -5068,6 +5078,7 @@ const viewEditorModal = (
     llmViewInputs,
     isNameToggleable,
     isNameInputVisible,
+    hasUnsavedChanges = false,
     editorSplitPercent,
     isDraggingSplit,
     isEditingExisting,
@@ -5096,6 +5107,7 @@ const viewEditorModal = (
     readonly llmViewInputs: ViewInputs
     readonly isNameToggleable: boolean
     readonly isNameInputVisible: boolean
+    readonly hasUnsavedChanges?: boolean
     readonly editorSplitPercent: number
     readonly isDraggingSplit: boolean
     readonly isEditingExisting: boolean
@@ -5168,7 +5180,6 @@ const viewEditorModal = (
                 [h.Id("modal-title"), h.Class("modal-title")],
                 isNameToggleable
                   ? [
-                      h.span([h.Class("modal-title-prefix")], [tr.editor.editFilePrefix]),
                       h.button(
                         [
                           h.Type("button"),
@@ -5438,7 +5449,9 @@ const viewEditorModal = (
                     [
                       h.Type("submit"),
                       h.Id("modal-btn-save"),
-                      h.Class("btn btn-primary icon-label-btn save-modal-btn"),
+                      h.Class(
+                        `btn ${!isEditingExisting || isFolder || hasUnsavedChanges ? "btn-primary" : "btn-secondary"} icon-label-btn save-modal-btn`,
+                      ),
                       h.AriaLabel(saveLabel),
                       h.DataAttribute("tip", saveLabel),
                       h.OnClick(Message.ClickedSave(), { defaultAction: "Prevent" }),
@@ -6148,6 +6161,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         originalName,
         name,
         fileMode,
+        savedContent,
         maybeValidationError,
         maybePasteError,
         llmBarMode,
@@ -6174,6 +6188,13 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
         isConfirmingDelete,
       }) => {
         const isBinaryHistory = !canPreviewHistoryEntry(originalName, fileMode, isDeletedHistory)
+        const hasUnsavedChanges =
+          name.trim() !== originalName ||
+          (fileMode._tag === "Text"
+            ? savedContent !== undefined && fileMode.content !== savedContent
+            : fileMode.edit._tag === "Editing" &&
+              savedContent !== undefined &&
+              fileMode.edit.content !== savedContent)
         if (isHistoryOnly) {
           return h.div(
             [h.Class("editor-modal-host")],
@@ -6219,6 +6240,7 @@ export const view = Submodel.defineView<Model, Message, ViewInputs>(
                 llmViewInputs: context,
                 isNameToggleable: true,
                 isNameInputVisible: isEditingName,
+                hasUnsavedChanges,
                 editorSplitPercent,
                 isDraggingSplit: Option.isSome(editorSplitDrag),
                 isEditingExisting: true,
