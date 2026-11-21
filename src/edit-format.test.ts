@@ -504,15 +504,16 @@ describe("edit-format", () => {
   it("includes fake text tool instructions in system prompt when useToolCalls is false", () => {
     for (const format of ["hashline", "search-replace", "unified-diff"] as const) {
       const textPrompt = formatSystemPromptForFormat(format, false)
-      expect(textPrompt).toContain("```edit")
-      expect(textPrompt).toContain("```search")
-      expect(textPrompt).toContain("```read")
-      expect(textPrompt).toContain("```write")
+      expect(textPrompt).toContain("<edit>")
+      expect(textPrompt).toContain("</edit>")
+      expect(textPrompt).toContain("<search>")
+      expect(textPrompt).toContain("<read>1-100</read>")
+      expect(textPrompt).toContain("<write>")
 
       const nativePrompt = formatSystemPromptForFormat(format, true)
-      expect(nativePrompt).not.toContain("```search")
-      expect(nativePrompt).not.toContain("```read")
-      expect(nativePrompt).not.toContain("```write")
+      expect(nativePrompt).not.toContain("<search>")
+      expect(nativePrompt).not.toContain("<read>")
+      expect(nativePrompt).not.toContain("<write>")
     }
   })
 
@@ -598,5 +599,49 @@ describe("edit-format", () => {
       ),
     ).toBe(["Ich schaue zuerst nach:", "", "```css", "body { color: red; }", "```"].join("\n"))
     expect(stripTextToolCalls("toolcall write\n```write\nfoo\n```")).toBe("")
+  })
+
+  it("extracts and strips XML tool tags and <tool_call> blocks without matching inside fenced code", () => {
+    const text = [
+      "Ich prüfe erst die Datei:",
+      "<search>renderApp</search>",
+      "<read>1-50</read>",
+      "<edit>",
+      "@@",
+      "-alt",
+      "+neu",
+      "</edit>",
+      "<write>",
+      "<!DOCTYPE html>",
+      "<search>darf nicht extra gematcht werden</search>",
+      "</write>",
+      '<tool_call>{"name": "search", "arguments": {"query": "foo"}}</tool_call>',
+      "```html",
+      "<search>im Codeblock ignoriert</search>",
+      "```",
+    ].join("\n")
+
+    expect(extractTextToolCalls(text)).toEqual([
+      { id: "xml_call_0", name: "search", arguments: '{"query":"renderApp"}' },
+      { id: "xml_call_1", name: "read", arguments: '{"startLine":1,"endLine":50}' },
+      { id: "xml_call_2", name: "edit", arguments: '{"edits":"@@\\n-alt\\n+neu"}' },
+      {
+        id: "xml_call_3",
+        name: "write",
+        arguments:
+          '{"content":"<!DOCTYPE html>\\n<search>darf nicht extra gematcht werden</search>"}',
+      },
+      { id: "xml_call_4", name: "search", arguments: '{"query":"foo"}' },
+    ])
+
+    expect(stripTextToolCalls(text)).toBe(
+      [
+        "Ich prüfe erst die Datei:",
+        "",
+        "```html",
+        "<search>im Codeblock ignoriert</search>",
+        "```",
+      ].join("\n"),
+    )
   })
 })

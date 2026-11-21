@@ -274,7 +274,7 @@ const de = {
     systemUseToolCalls:
       "Verwende für Änderungen an der Datei das Werkzeug `edit` mit den folgenden Befehlen:",
     systemUseTextToolCall:
-      "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden Befehlen:",
+      "Verwende für Änderungen an der Datei `<edit>...</edit>` mit folgenden Befehlen:",
     contextReplyOnly:
       "Antworte **nur** mit einem Markdown-Codeblock (` ```hashline `) mit folgenden Befehlen:",
     fileHeading: (fileName: string) => `## Datei: \`${fileName}\``,
@@ -355,37 +355,32 @@ const de = {
     additionalTextToolsInstructions: [
       "",
       "Weitere verfügbare Werkzeuge:",
-      "- `search`: Durchsucht die aktuelle Datei nach Text oder regulären Ausdrücken (`query`, optional `isRegex`, `caseSensitive`, `before`, `after`):",
+      "- `<search>`: Durchsucht die aktuelle Datei nach Text:",
       "",
-      "toolcall search",
-      "```search",
-      '{"query": "Suchbegriff"}',
-      "```",
-      "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (optional `startLine`, `endLine`):",
+      "<search>Suchbegriff</search>",
       "",
-      "toolcall read",
-      "```read",
-      '{"startLine": 1, "endLine": 100}',
-      "```",
-      "- `write`: Schreibt die gesamte aktuelle Datei komplett neu – nur verwenden, wenn umfangreiche Änderungen nötig sind:",
+      "- `<read>`: Liest die aktuelle Datei oder einen Zeilenbereich (z. B. `1-100` oder leer für alles):",
       "",
-      "toolcall write",
-      "```write",
+      "<read>1-100</read>",
+      "",
+      "- `<write>`: Schreibt die gesamte aktuelle Datei komplett neu – nur verwenden, wenn umfangreiche Änderungen nötig sind:",
+      "",
+      "<write>",
       "<vollständiger neuer Dateiinhalt>",
-      "```",
+      "</write>",
     ],
     srHeading: "## Anleitung für die Antwort (Search & Replace)",
     srUseToolCalls:
       "Verwende für Änderungen an der Datei das Werkzeug `edit` mit `SEARCH`/`REPLACE`-Blöcken:",
     srUseTextToolCall:
-      "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
+      "Verwende für Änderungen an der Datei `<edit>...</edit>` mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
     srContextReplyOnly:
       "Antworte **nur** mit einem Markdown-Codeblock mit folgenden `SEARCH`/`REPLACE`-Blöcken:",
     udHeading: "## Anleitung für die Antwort (Vereinfachter Unified Diff)",
     udUseToolCalls:
       "Verwende für Änderungen an der Datei das Werkzeug `edit` mit einem vereinfachten Unified Diff:",
     udUseTextToolCall:
-      "Verwende für Änderungen an der Datei `toolcall edit` mit einem Codeblock (` ```edit `) im vereinfachten Unified-Diff-Format:",
+      "Verwende für Änderungen an der Datei `<edit>...</edit>` im vereinfachten Unified-Diff-Format:",
     udContextReplyOnly:
       "Antworte **nur** mit einem Markdown-Codeblock (` ```diff `) im vereinfachten Unified-Diff-Format:",
     toolEditDescHashline:
@@ -1110,7 +1105,7 @@ const en: Translations = {
     systemFileFormat: "The file to edit is given in `LINE:HASH|CONTENT` format.",
     systemUseToolCalls: "Use the `edit` tool to modify the file with the following commands:",
     systemUseTextToolCall:
-      "Use `toolcall edit` with a code block (` ```edit `) containing the following commands to modify the file:",
+      "Use `<edit>...</edit>` containing the following commands to modify the file:",
     contextReplyOnly:
       "Reply **only** with a Markdown code block (` ```hashline `) containing the following commands:",
     fileHeading: (fileName: string) => `## File: \`${fileName}\``,
@@ -1189,35 +1184,30 @@ const en: Translations = {
     additionalTextToolsInstructions: [
       "",
       "Additional available tools:",
-      "- `search`: Searches the current file for text or regular expressions (`query`, optional `isRegex`, `caseSensitive`, `before`, `after`):",
+      "- `<search>`: Searches the current file for text:",
       "",
-      "toolcall search",
-      "```search",
-      '{"query": "search term"}',
-      "```",
-      "- `read`: Reads the current file or a line range (optional `startLine`, `endLine`):",
+      "<search>search term</search>",
       "",
-      "toolcall read",
-      "```read",
-      '{"startLine": 1, "endLine": 100}',
-      "```",
-      "- `write`: Rewrites the entire current file — only use when extensive changes are needed:",
+      "- `<read>`: Reads the current file or a line range (e.g. `1-100` or empty for the whole file):",
       "",
-      "toolcall write",
-      "```write",
+      "<read>1-100</read>",
+      "",
+      "- `<write>`: Rewrites the entire current file — only use when extensive changes are needed:",
+      "",
+      "<write>",
       "<complete new file content>",
-      "```",
+      "</write>",
     ],
     srHeading: "## Response Instructions (Search & Replace)",
     srUseToolCalls: "Use the `edit` tool with `SEARCH`/`REPLACE` blocks to modify the file:",
     srUseTextToolCall:
-      "Use `toolcall edit` with a code block (` ```edit `) containing the following `SEARCH`/`REPLACE` blocks to modify the file:",
+      "Use `<edit>...</edit>` containing the following `SEARCH`/`REPLACE` blocks to modify the file:",
     srContextReplyOnly:
       "Reply **only** with a Markdown code block containing the following `SEARCH`/`REPLACE` blocks:",
     udHeading: "## Response Instructions (Simplified Unified Diff)",
     udUseToolCalls: "Use the `edit` tool with a simplified unified diff to modify the file:",
     udUseTextToolCall:
-      "Use `toolcall edit` with a code block (` ```edit `) in simplified unified diff format to modify the file:",
+      "Use `<edit>...</edit>` in simplified unified diff format to modify the file:",
     udContextReplyOnly:
       "Reply **only** with a Markdown code block (` ```diff `) in simplified unified diff format:",
     toolEditDescHashline:

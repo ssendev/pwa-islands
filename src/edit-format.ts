@@ -114,45 +114,43 @@ export const formatFileMessageForFormat = (
     Match.exhaustive,
   )
 
-const formatSearchReplaceInstructions = (
-  fenceLang: string,
-  toolHeader?: string,
-): ReadonlyArray<string> => {
+const formatSearchReplaceInstructions = (wrapper: {
+  readonly open: string
+  readonly close: string
+}): ReadonlyArray<string> => {
   const tr = t(getDocumentLanguage())
   return [
     ...tr.editFormat.searchReplaceRules,
     "",
     tr.hashline.exampleHeading,
     "",
-    ...(toolHeader ? [toolHeader] : []),
-    `\`\`\`${fenceLang}`,
+    wrapper.open,
     "<<<<<<< SEARCH",
     tr.editFormat.exampleOldText,
     "=======",
     tr.hashline.exampleNewText,
     ">>>>>>> REPLACE",
-    "```",
+    wrapper.close,
   ]
 }
 
-const formatUnifiedDiffInstructions = (
-  fenceLang: string,
-  toolHeader?: string,
-): ReadonlyArray<string> => {
+const formatUnifiedDiffInstructions = (wrapper: {
+  readonly open: string
+  readonly close: string
+}): ReadonlyArray<string> => {
   const tr = t(getDocumentLanguage())
   return [
     ...tr.editFormat.unifiedDiffRules,
     "",
     tr.hashline.exampleHeading,
     "",
-    ...(toolHeader ? [toolHeader] : []),
-    `\`\`\`${fenceLang}`,
+    wrapper.open,
     "@@",
     " <main>",
     `-${tr.editFormat.exampleOldText}`,
     `+${tr.hashline.exampleNewText}`,
     " </main>",
-    "```",
+    wrapper.close,
   ]
 }
 
@@ -167,8 +165,7 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
         useToolCalls ? ef.srUseToolCalls : ef.srUseTextToolCall,
         "",
         ...formatSearchReplaceInstructions(
-          useToolCalls ? "" : "edit",
-          useToolCalls ? undefined : "toolcall edit",
+          useToolCalls ? { open: "```", close: "```" } : { open: "<edit>", close: "</edit>" },
         ),
       ].join("\n"),
     ),
@@ -179,8 +176,7 @@ export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = t
         useToolCalls ? ef.udUseToolCalls : ef.udUseTextToolCall,
         "",
         ...formatUnifiedDiffInstructions(
-          useToolCalls ? "diff" : "edit",
-          useToolCalls ? undefined : "toolcall edit",
+          useToolCalls ? { open: "```diff", close: "```" } : { open: "<edit>", close: "</edit>" },
         ),
       ].join("\n"),
     ),
@@ -207,7 +203,7 @@ export const formatLlmContextForFormat = (
         "",
         ef.srContextReplyOnly,
         "",
-        ...formatSearchReplaceInstructions(""),
+        ...formatSearchReplaceInstructions({ open: "```", close: "```" }),
         "",
         formatApiDtsMessage(apiDts),
         "",
@@ -220,7 +216,7 @@ export const formatLlmContextForFormat = (
         "",
         ef.udContextReplyOnly,
         "",
-        ...formatUnifiedDiffInstructions("diff"),
+        ...formatUnifiedDiffInstructions({ open: "```diff", close: "```" }),
         "",
         formatApiDtsMessage(apiDts),
         "",
@@ -827,7 +823,165 @@ const scanFencedCodeBlocks = (text: string): FencedScanResult => {
   }
 }
 
-export const stripTextToolCalls = (text: string): string => scanFencedCodeBlocks(text).strippedText
+const isTextToolName = (name: string): name is ParsedTextToolCall["name"] =>
+  name === "edit" || name === "read" || name === "search" || name === "write"
+
+const stripSingleEdgeNewlines = (body: string): string => body.replace(/^\n/, "").replace(/\n$/, "")
+
+const parseXmlToolCallPayload = (
+  rawBody: string,
+): { readonly name: ParsedTextToolCall["name"]; readonly arguments: string } | undefined => {
+  const parsed = parseJsonObjectLenient(rawBody)
+  if (parsed._tag !== "Valid" && parsed._tag !== "Repaired") {
+    return undefined
+  }
+  const record = parsed.record
+  const rawName =
+    typeof record.name === "string"
+      ? record.name
+      : typeof record.tool === "string"
+        ? record.tool
+        : ""
+  const name = rawName.trim().toLowerCase()
+  if (!isTextToolName(name)) {
+    return undefined
+  }
+  const rawArgs = record.arguments ?? record.args ?? record.parameters
+  if (typeof rawArgs === "string") {
+    return { name, arguments: rawArgs }
+  }
+  if (typeof rawArgs === "object" && rawArgs !== null && !globalThis.Array.isArray(rawArgs)) {
+    return { name, arguments: JSON.stringify(rawArgs) }
+  }
+  const restEntries = Object.entries(record).filter(
+    ([key]) =>
+      key !== "name" &&
+      key !== "tool" &&
+      key !== "arguments" &&
+      key !== "args" &&
+      key !== "parameters",
+  )
+  return {
+    name,
+    arguments: restEntries.length > 0 ? JSON.stringify(Object.fromEntries(restEntries)) : "{}",
+  }
+}
+
+const normalizeXmlToolTag = (
+  tag: string,
+  rawBody: string,
+): { readonly name: ParsedTextToolCall["name"]; readonly arguments: string } | undefined => {
+  const lower = tag.toLowerCase()
+  if (lower === "tool_call" || lower === "toolcall") {
+    return parseXmlToolCallPayload(rawBody)
+  }
+  const body = stripSingleEdgeNewlines(rawBody)
+  if (lower === "write") {
+    return { name: "write", arguments: JSON.stringify({ content: body }) }
+  }
+  if (lower === "read") {
+    return { name: "read", arguments: normalizeReadTextArgs(body) }
+  }
+  if (lower === "search") {
+    return { name: "search", arguments: normalizeSearchTextArgs(body) }
+  }
+  if (lower === "edit") {
+    return { name: "edit", arguments: normalizeEditTextArgs(body) }
+  }
+  return undefined
+}
+
+const XML_TOOL_OPEN_PATTERN = /<(tool[_-]?call|edit|read|search|write)\s*>/i
+
+const scanXmlToolCalls = (
+  text: string,
+): {
+  readonly calls: ReadonlyArray<{
+    readonly name: ParsedTextToolCall["name"]
+    readonly arguments: string
+  }>
+  readonly remainingText: string
+} => {
+  const normalized = text.replace(/\r\n/g, "\n")
+  const calls: Array<{
+    readonly name: ParsedTextToolCall["name"]
+    readonly arguments: string
+  }> = []
+  let out = ""
+  let pos = 0
+  let activeFence: { readonly char: string; readonly len: number } | undefined
+
+  while (pos < normalized.length) {
+    const lineEnd = normalized.indexOf("\n", pos)
+    const nextPos = lineEnd === -1 ? normalized.length : lineEnd + 1
+    const line = lineEnd === -1 ? normalized.slice(pos) : normalized.slice(pos, lineEnd)
+
+    if (activeFence) {
+      out += normalized.slice(pos, nextPos)
+      const trimmed = line.trim()
+      if (
+        trimmed.length >= activeFence.len &&
+        [...trimmed].every((ch) => ch === activeFence?.char)
+      ) {
+        activeFence = undefined
+      }
+      pos = nextPos
+      continue
+    }
+
+    const fenceMatch = OPENING_FENCE_PATTERN.exec(line)
+    if (fenceMatch && fenceMatch[1]) {
+      activeFence = {
+        char: fenceMatch[1][0] ?? "`",
+        len: fenceMatch[1].length,
+      }
+      out += normalized.slice(pos, nextPos)
+      pos = nextPos
+      continue
+    }
+
+    const openMatch = XML_TOOL_OPEN_PATTERN.exec(line)
+    if (!openMatch || !openMatch[1]) {
+      out += normalized.slice(pos, nextPos)
+      pos = nextPos
+      continue
+    }
+
+    const tagName = openMatch[1]
+    const tagStart = pos + openMatch.index
+    const bodyStart = tagStart + openMatch[0].length
+    const closeRegex = new RegExp(`</${tagName}\\s*>`, "i")
+    const closeMatch = closeRegex.exec(normalized.slice(bodyStart))
+    if (!closeMatch) {
+      out += normalized.slice(pos, nextPos)
+      pos = nextPos
+      continue
+    }
+
+    const body = normalized.slice(bodyStart, bodyStart + closeMatch.index)
+    const afterClose = bodyStart + closeMatch.index + closeMatch[0].length
+    const parsedCall = normalizeXmlToolTag(tagName, body)
+    if (!parsedCall) {
+      out += normalized.slice(pos, afterClose)
+      pos = afterClose
+      continue
+    }
+
+    calls.push(parsedCall)
+    out += normalized.slice(pos, tagStart)
+    pos = afterClose
+  }
+
+  return {
+    calls,
+    remainingText: out.replace(/\n{3,}/g, "\n\n").trim(),
+  }
+}
+
+export const stripTextToolCalls = (text: string): string => {
+  const xmlResult = scanXmlToolCalls(text)
+  return scanFencedCodeBlocks(xmlResult.remainingText).strippedText
+}
 
 const normalizeReadTextArgs = (body: string): string => {
   const trimmed = body.trim()
@@ -837,7 +991,7 @@ const normalizeReadTextArgs = (body: string): string => {
   if (trimmed.startsWith("{")) {
     return trimmed
   }
-  const rangeMatch = /^(\d+)\s*[-–:]\s*(\d+)$/.exec(trimmed)
+  const rangeMatch = /^(\d+)\s*(?:[-–:]|\.\.)\s*(\d+)$/.exec(trimmed)
   if (rangeMatch) {
     return JSON.stringify({
       startLine: Number(rangeMatch[1]),
@@ -863,8 +1017,16 @@ const normalizeEditTextArgs = (body: string): string => {
   return JSON.stringify({ edits: body })
 }
 
-export const extractTextToolCalls = (text: string): ReadonlyArray<ParsedTextToolCall> =>
-  scanFencedCodeBlocks(text).blocks.flatMap<ParsedTextToolCall>((block, index) => {
+export const extractTextToolCalls = (text: string): ReadonlyArray<ParsedTextToolCall> => {
+  const xmlResult = scanXmlToolCalls(text)
+  const xmlCalls: ReadonlyArray<ParsedTextToolCall> = xmlResult.calls.map((call, index) => ({
+    id: `xml_call_${index}`,
+    name: call.name,
+    arguments: call.arguments,
+  }))
+  const fencedCalls = scanFencedCodeBlocks(
+    xmlResult.remainingText,
+  ).blocks.flatMap<ParsedTextToolCall>((block, index) => {
     const id = `text_call_${index}`
     if (block.lang === "write") {
       return [{ id, name: "write" as const, arguments: JSON.stringify({ content: block.body }) }]
@@ -880,6 +1042,8 @@ export const extractTextToolCalls = (text: string): ReadonlyArray<ParsedTextTool
     }
     return []
   })
+  return [...xmlCalls, ...fencedCalls]
+}
 
 export const formatToolResultForFormat = (
   format: EditFormat,

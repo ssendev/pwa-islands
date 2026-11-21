@@ -25,18 +25,17 @@ export const formatFencedHashlineFile = (_fileName: string, content: string): st
   return ["```", hashedFile, "```"].join("\n") + "\n\n"
 }
 
-const formatHashlineCommandLines = (
-  fenceLang: string,
-  toolHeader?: string,
-): ReadonlyArray<string> => {
+const formatHashlineCommandLines = (wrapper: {
+  readonly open: string
+  readonly close: string
+}): ReadonlyArray<string> => {
   const hl = t(getDocumentLanguage()).hashline
   return [
     ...hl.commandRules,
     "",
     hl.exampleHeading,
     "",
-    ...(toolHeader ? [toolHeader] : []),
-    `\`\`\`${fenceLang}`,
+    wrapper.open,
     "REPLACE 12:a3f..13:b4c",
     hl.exampleNewText,
     "END",
@@ -44,7 +43,7 @@ const formatHashlineCommandLines = (
     "  <script>console.log('ok')</script>",
     "END",
     "DELETE 30:e2f",
-    "```",
+    wrapper.close,
   ]
 }
 
@@ -57,8 +56,7 @@ export const formatHashlineSystemPrompt = (useToolCalls = true): string => {
     useToolCalls ? hl.systemUseToolCalls : hl.systemUseTextToolCall,
     "",
     ...formatHashlineCommandLines(
-      useToolCalls ? "hashline" : "edit",
-      useToolCalls ? undefined : "toolcall edit",
+      useToolCalls ? { open: "```hashline", close: "```" } : { open: "<edit>", close: "</edit>" },
     ),
   ].join("\n")
 }
@@ -81,7 +79,7 @@ export const formatLlmContext = (fileName: string, content: string, apiDts: stri
     hl.systemFileFormat,
     hl.contextReplyOnly,
     "",
-    ...formatHashlineCommandLines("hashline"),
+    ...formatHashlineCommandLines({ open: "```hashline", close: "```" }),
     "",
     formatApiDtsMessage(apiDts),
     "",
