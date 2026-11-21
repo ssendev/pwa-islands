@@ -154,38 +154,70 @@ const formatUnifiedDiffInstructions = (wrapper: {
   ]
 }
 
+const formatTextToolFewShotPrompt = (format: EditFormat): string => {
+  const tr = t(getDocumentLanguage())
+  const ef = tr.editFormat
+  const editBody = Match.value(format).pipe(
+    Match.when("hashline", () => ["REPLACE 12:a3f", tr.hashline.exampleNewText, "END"]),
+    Match.when("search-replace", () => [
+      "<<<<<<< SEARCH",
+      ef.exampleOldText,
+      "=======",
+      tr.hashline.exampleNewText,
+      ">>>>>>> REPLACE",
+    ]),
+    Match.when("unified-diff", () => [
+      "@@",
+      " <main>",
+      `-${ef.exampleOldText}`,
+      `+${tr.hashline.exampleNewText}`,
+      " </main>",
+    ]),
+    Match.exhaustive,
+  )
+  return [
+    ef.textToolIntro,
+    "",
+    ef.textToolEditExampleHeading,
+    ef.textToolEditExampleUser,
+    ef.textToolEditExampleAssistant,
+    "<edit>",
+    ...editBody,
+    "</edit>",
+    "",
+    ef.textToolOtherExamplesHeading,
+    ...ef.textToolOtherExamples,
+  ].join("\n")
+}
+
 export const formatSystemPromptForFormat = (format: EditFormat, useToolCalls = true): string => {
+  if (!useToolCalls) {
+    return formatTextToolFewShotPrompt(format)
+  }
   const ef = t(getDocumentLanguage()).editFormat
   const basePrompt = Match.value(format).pipe(
-    Match.when("hashline", () => formatHashlineSystemPrompt(useToolCalls)),
+    Match.when("hashline", () => formatHashlineSystemPrompt(true)),
     Match.when("search-replace", () =>
       [
         ef.srHeading,
         "",
-        useToolCalls ? ef.srUseToolCalls : ef.srUseTextToolCall,
+        ef.srUseToolCalls,
         "",
-        ...formatSearchReplaceInstructions(
-          useToolCalls ? { open: "```", close: "```" } : { open: "<edit>", close: "</edit>" },
-        ),
+        ...formatSearchReplaceInstructions({ open: "```", close: "```" }),
       ].join("\n"),
     ),
     Match.when("unified-diff", () =>
       [
         ef.udHeading,
         "",
-        useToolCalls ? ef.udUseToolCalls : ef.udUseTextToolCall,
+        ef.udUseToolCalls,
         "",
-        ...formatUnifiedDiffInstructions(
-          useToolCalls ? { open: "```diff", close: "```" } : { open: "<edit>", close: "</edit>" },
-        ),
+        ...formatUnifiedDiffInstructions({ open: "```diff", close: "```" }),
       ].join("\n"),
     ),
     Match.exhaustive,
   )
-  return [
-    basePrompt,
-    ...(useToolCalls ? ef.additionalToolsInstructions : ef.additionalTextToolsInstructions),
-  ].join("\n")
+  return [basePrompt, ...ef.additionalToolsInstructions].join("\n")
 }
 
 export const formatLlmContextForFormat = (
@@ -693,135 +725,7 @@ export interface ParsedTextToolCall {
   readonly arguments: string
 }
 
-interface FencedCodeBlock {
-  readonly lang: string
-  readonly body: string
-}
-
 const OPENING_FENCE_PATTERN = /^\s*(`{3,}|~{3,})\s*([^\s`~]*)\s*$/
-const TOOLCALL_MENTION_PATTERN =
-  /(?:^|[\s*_`])tool[\s_-]*call[*_`]*\b[\s\S]*?\b(edit|read|search|write)\b/i
-const INLINE_TOOLCALL_FENCE_PATTERN =
-  /(?:^|[\s*_`])tool[\s_-]*call[*_`]*\b[\s\S]*?\b(edit|read|search|write)\b[\s\S]*?(`{3,}|~{3,})\s*([^\s`~]*)\s*$/i
-
-const isToolCallLang = (lang: string): boolean =>
-  lang === "edit" || lang === "read" || lang === "search" || lang === "write"
-
-interface FencedScanResult {
-  readonly blocks: ReadonlyArray<FencedCodeBlock>
-  readonly strippedText: string
-}
-
-const scanFencedCodeBlocks = (text: string): FencedScanResult => {
-  const lines = text.replace(/\r\n/g, "\n").split("\n")
-  const blocks: FencedCodeBlock[] = []
-  const keptLines: string[] = []
-  let pendingToolCall: string | undefined
-  let pendingHeaderLines: string[] = []
-  let activeFence:
-    | {
-        readonly char: string
-        readonly len: number
-        readonly lang: string
-        readonly isTool: boolean
-        readonly openingLine: string
-        readonly lines: string[]
-      }
-    | undefined
-
-  const flushPendingHeader = () => {
-    if (pendingHeaderLines.length > 0) {
-      keptLines.push(...pendingHeaderLines)
-      pendingHeaderLines = []
-    }
-    pendingToolCall = undefined
-  }
-
-  for (const line of lines) {
-    if (!activeFence) {
-      const inlineMatch = INLINE_TOOLCALL_FENCE_PATTERN.exec(line)
-      if (inlineMatch && inlineMatch[1] && inlineMatch[2]) {
-        flushPendingHeader()
-        const prefix = line.slice(0, inlineMatch.index).replace(/[*_`\s]+$/, "")
-        if (prefix !== "") {
-          keptLines.push(prefix)
-        }
-        activeFence = {
-          char: inlineMatch[2][0] ?? "`",
-          len: inlineMatch[2].length,
-          lang: inlineMatch[1].toLowerCase(),
-          isTool: true,
-          openingLine: line,
-          lines: [],
-        }
-        continue
-      }
-      const headerMatch = TOOLCALL_MENTION_PATTERN.exec(line)
-      if (headerMatch && headerMatch[1]) {
-        flushPendingHeader()
-        pendingToolCall = headerMatch[1].toLowerCase()
-        pendingHeaderLines = [line]
-        continue
-      }
-      const openMatch = OPENING_FENCE_PATTERN.exec(line)
-      if (openMatch && openMatch[1]) {
-        const lang = pendingToolCall ?? (openMatch[2] ?? "").trim().toLowerCase()
-        const isTool = isToolCallLang(lang)
-        if (!isTool) {
-          flushPendingHeader()
-          keptLines.push(line)
-        } else {
-          pendingToolCall = undefined
-          pendingHeaderLines = []
-        }
-        activeFence = {
-          char: openMatch[1][0] ?? "`",
-          len: openMatch[1].length,
-          lang,
-          isTool,
-          openingLine: line,
-          lines: [],
-        }
-        continue
-      }
-      if (line.trim() !== "") {
-        flushPendingHeader()
-        keptLines.push(line)
-      } else if (pendingToolCall !== undefined) {
-        pendingHeaderLines.push(line)
-      } else {
-        keptLines.push(line)
-      }
-      continue
-    }
-
-    const trimmed = line.trim()
-    const isClosing =
-      trimmed.length >= activeFence.len && [...trimmed].every((ch) => ch === activeFence?.char)
-    if (isClosing) {
-      blocks.push({ lang: activeFence.lang, body: activeFence.lines.join("\n") })
-      if (!activeFence.isTool) {
-        keptLines.push(...activeFence.lines, line)
-      }
-      activeFence = undefined
-    } else {
-      activeFence.lines.push(line)
-    }
-  }
-
-  flushPendingHeader()
-  if (activeFence) {
-    keptLines.push(activeFence.openingLine, ...activeFence.lines)
-  }
-
-  return {
-    blocks,
-    strippedText: keptLines
-      .join("\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim(),
-  }
-}
 
 const isTextToolName = (name: string): name is ParsedTextToolCall["name"] =>
   name === "edit" || name === "read" || name === "search" || name === "write"
@@ -978,10 +882,7 @@ const scanXmlToolCalls = (
   }
 }
 
-export const stripTextToolCalls = (text: string): string => {
-  const xmlResult = scanXmlToolCalls(text)
-  return scanFencedCodeBlocks(xmlResult.remainingText).strippedText
-}
+export const stripTextToolCalls = (text: string): string => scanXmlToolCalls(text).remainingText
 
 const normalizeReadTextArgs = (body: string): string => {
   const trimmed = body.trim()
@@ -1017,33 +918,12 @@ const normalizeEditTextArgs = (body: string): string => {
   return JSON.stringify({ edits: body })
 }
 
-export const extractTextToolCalls = (text: string): ReadonlyArray<ParsedTextToolCall> => {
-  const xmlResult = scanXmlToolCalls(text)
-  const xmlCalls: ReadonlyArray<ParsedTextToolCall> = xmlResult.calls.map((call, index) => ({
+export const extractTextToolCalls = (text: string): ReadonlyArray<ParsedTextToolCall> =>
+  scanXmlToolCalls(text).calls.map((call, index) => ({
     id: `xml_call_${index}`,
     name: call.name,
     arguments: call.arguments,
   }))
-  const fencedCalls = scanFencedCodeBlocks(
-    xmlResult.remainingText,
-  ).blocks.flatMap<ParsedTextToolCall>((block, index) => {
-    const id = `text_call_${index}`
-    if (block.lang === "write") {
-      return [{ id, name: "write" as const, arguments: JSON.stringify({ content: block.body }) }]
-    }
-    if (block.lang === "read") {
-      return [{ id, name: "read" as const, arguments: normalizeReadTextArgs(block.body) }]
-    }
-    if (block.lang === "search") {
-      return [{ id, name: "search" as const, arguments: normalizeSearchTextArgs(block.body) }]
-    }
-    if (block.lang === "edit") {
-      return [{ id, name: "edit" as const, arguments: normalizeEditTextArgs(block.body) }]
-    }
-    return []
-  })
-  return [...xmlCalls, ...fencedCalls]
-}
 
 export const formatToolResultForFormat = (
   format: EditFormat,

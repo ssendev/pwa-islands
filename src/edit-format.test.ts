@@ -517,95 +517,12 @@ describe("edit-format", () => {
     }
   })
 
-  it("extracts write, read, search, and edit calls from fenced text-only blocks", () => {
-    const text = [
-      "Hier ist der Plan:",
-      "```html",
-      "<div>ignoriert</div>",
-      "```",
-      "```search",
-      "renderApp",
-      "```",
-      "```read",
-      "1-20",
-      "```",
-      "```read",
-      "```",
-      "```write",
-      "foo",
-      "bar",
-      "```",
-    ].join("\n")
-
-    expect(extractTextToolCalls(text)).toEqual([
-      { id: "text_call_1", name: "search", arguments: '{"query":"renderApp"}' },
-      { id: "text_call_2", name: "read", arguments: '{"startLine":1,"endLine":20}' },
-      { id: "text_call_3", name: "read", arguments: "{}" },
-      { id: "text_call_4", name: "write", arguments: '{"content":"foo\\nbar"}' },
-    ])
-    expect(extractTextToolCalls("```write\nunclosed")).toEqual([])
-
-    const headerText = [
-      "toolcall edit",
-      "```diff",
-      "@@",
-      "-alt",
-      "+neu",
-      "```",
-      "Tool_Call: `write`",
-      "",
-      "```html",
-      "<p>neu</p>",
-      "```",
-      "toolcall edit",
-      "Doch nur ein CSS-Beispiel:",
-      "```css",
-      "body { color: red; }",
-      "```",
-      "hmm i need to edit the styles **toolcall** edit: ```",
-      "foo",
-      "```",
-      "hmm **toolcall** write:",
-      "```css",
-      "body { color: blue; }",
-      "```",
-      "jetzt **toolcall** edit -> bitte so anwenden: ```",
-      "bar",
-      "```",
-    ].join("\n")
-
-    expect(extractTextToolCalls(headerText)).toEqual([
-      { id: "text_call_0", name: "edit", arguments: '{"edits":"@@\\n-alt\\n+neu"}' },
-      { id: "text_call_1", name: "write", arguments: '{"content":"<p>neu</p>"}' },
-      { id: "text_call_3", name: "edit", arguments: '{"edits":"foo"}' },
-      { id: "text_call_4", name: "write", arguments: '{"content":"body { color: blue; }"}' },
-      { id: "text_call_5", name: "edit", arguments: '{"edits":"bar"}' },
-    ])
-
-    expect(
-      stripTextToolCalls(
-        [
-          "Ich schaue zuerst nach:",
-          "",
-          "toolcall search",
-          "```search",
-          "Alt",
-          "```",
-          "",
-          "```css",
-          "body { color: red; }",
-          "```",
-        ].join("\n"),
-      ),
-    ).toBe(["Ich schaue zuerst nach:", "", "```css", "body { color: red; }", "```"].join("\n"))
-    expect(stripTextToolCalls("toolcall write\n```write\nfoo\n```")).toBe("")
-  })
-
-  it("extracts and strips XML tool tags and <tool_call> blocks without matching inside fenced code", () => {
+  it("extracts and strips XML tool tags and <tool_call> blocks while ignoring fenced code", () => {
     const text = [
       "Ich prüfe erst die Datei:",
       "<search>renderApp</search>",
       "<read>1-50</read>",
+      "<read></read>",
       "<edit>",
       "@@",
       "-alt",
@@ -619,27 +536,36 @@ describe("edit-format", () => {
       "```html",
       "<search>im Codeblock ignoriert</search>",
       "```",
+      "```write",
+      "fenced toolcall ignoriert",
+      "```",
     ].join("\n")
 
     expect(extractTextToolCalls(text)).toEqual([
       { id: "xml_call_0", name: "search", arguments: '{"query":"renderApp"}' },
       { id: "xml_call_1", name: "read", arguments: '{"startLine":1,"endLine":50}' },
-      { id: "xml_call_2", name: "edit", arguments: '{"edits":"@@\\n-alt\\n+neu"}' },
+      { id: "xml_call_2", name: "read", arguments: "{}" },
+      { id: "xml_call_3", name: "edit", arguments: '{"edits":"@@\\n-alt\\n+neu"}' },
       {
-        id: "xml_call_3",
+        id: "xml_call_4",
         name: "write",
         arguments:
           '{"content":"<!DOCTYPE html>\\n<search>darf nicht extra gematcht werden</search>"}',
       },
-      { id: "xml_call_4", name: "search", arguments: '{"query":"foo"}' },
+      { id: "xml_call_5", name: "search", arguments: '{"query":"foo"}' },
     ])
 
+    expect(extractTextToolCalls("<write>unclosed")).toEqual([])
+    expect(stripTextToolCalls("<write>foo</write>")).toBe("")
     expect(stripTextToolCalls(text)).toBe(
       [
         "Ich prüfe erst die Datei:",
         "",
         "```html",
         "<search>im Codeblock ignoriert</search>",
+        "```",
+        "```write",
+        "fenced toolcall ignoriert",
         "```",
       ].join("\n"),
     )

@@ -1245,12 +1245,12 @@ describe("LanguageModel-API", () => {
     expect(result.turns[0]?.content).toBe("Diese Datei enthält einen Absatz.")
   })
 
-  it("unterstützt search, read und write als Markdown-Codeblöcke über LanguageModel-API", async () => {
+  it("unterstützt search, read und write als XML-Tags über LanguageModel-API", async () => {
     const destroy = vi.fn()
     const prompt = vi
       .fn()
-      .mockResolvedValueOnce("```search\nAlt\n```")
-      .mockResolvedValueOnce("```write\nfoo\nbar\n```")
+      .mockResolvedValueOnce("<search>Alt</search>")
+      .mockResolvedValueOnce("<write>\nfoo\nbar\n</write>")
     const create = vi.fn(async () => ({ prompt, promptStreaming: vi.fn(), destroy }))
     vi.stubGlobal("LanguageModel", {
       availability: vi.fn(async () => "available"),
@@ -1290,12 +1290,12 @@ describe("LanguageModel-API", () => {
     expect(result.turns[1]?.assistantContent).toBe("")
   })
 
-  it("nutzt im OpenAI-Text-Only-Modus (toolCalls: false) keine nativen tools und führt ```write``` aus", async () => {
+  it("nutzt im OpenAI-Text-Only-Modus (toolCalls: false) keine nativen tools und führt <write> aus", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(
           JSON.stringify({
-            choices: [{ message: { content: "```write\nfoo\nbar\n```" } }],
+            choices: [{ message: { content: "<write>\nfoo\nbar\n</write>" } }],
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),

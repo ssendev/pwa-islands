@@ -352,6 +352,19 @@ const de = {
       "- `read`: Liest die aktuelle Datei oder einen Zeilenbereich (`startLine`, `endLine`).",
       "- `write`: Schreibt die gesamte aktuelle Datei komplett neu (`content`) – nur verwenden, wenn umfangreiche Änderungen nötig sind.",
     ],
+    textToolIntro:
+      "Du bearbeitest die geöffnete Datei mit XML-Tags: `<edit>`, `<write>`, `<read>`, `<search>`.",
+    textToolEditExampleHeading: "Beispiel (kleine Änderung):",
+    textToolEditExampleUser: 'User: Ändere "Alter Text" zu "Neuer Text".',
+    textToolEditExampleAssistant: "Assistant:",
+    textToolOtherExamplesHeading: "Weitere Werkzeuge:",
+    textToolOtherExamples: [
+      "<search>Suchbegriff</search>",
+      "<read>1-100</read>",
+      "<write>",
+      "<vollständiger neuer Dateiinhalt>",
+      "</write>",
+    ],
     additionalTextToolsInstructions: [
       "",
       "Weitere verfügbare Werkzeuge:",
@@ -1180,6 +1193,19 @@ const en: Translations = {
       "- `search`: Searches the current file for text or regular expressions (`query`, optional `isRegex`, `caseSensitive`, `before`, `after` for context lines before/after matches).",
       "- `read`: Reads the current file or a line range (`startLine`, `endLine`).",
       "- `write`: Rewrites the entire current file (`content`) — only use when extensive changes are needed.",
+    ],
+    textToolIntro:
+      "You edit the open file using XML tags: `<edit>`, `<write>`, `<read>`, `<search>`.",
+    textToolEditExampleHeading: "Example (small edit):",
+    textToolEditExampleUser: 'User: Change "Old text" to "New text".',
+    textToolEditExampleAssistant: "Assistant:",
+    textToolOtherExamplesHeading: "Other tools:",
+    textToolOtherExamples: [
+      "<search>search term</search>",
+      "<read>1-100</read>",
+      "<write>",
+      "<complete new file content>",
+      "</write>",
     ],
     additionalTextToolsInstructions: [
       "",

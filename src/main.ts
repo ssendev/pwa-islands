@@ -5977,25 +5977,30 @@ export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
                 const initialMessages: ReadonlyArray<EditorChatMessage> =
                   Array.isReadonlyArrayEmpty(deps.messages)
                     ? await (async () => {
-                        const res = await fetch("/api.d.ts", {
-                          cache: "no-cache",
-                          signal: controller.signal,
-                        })
-                        if (!res.ok) {
-                          throw new Error(
-                            t(getDocumentLanguage()).errors.httpLoadingApiDts(res.status),
-                          )
-                        }
-                        const apiDts = await res.text()
+                        const useToolCalls = deps.toolCalls && !isLanguageModelSelection(deps.model)
+                        const apiDtsMessages: ReadonlyArray<EditorChatMessage> = useToolCalls
+                          ? await (async () => {
+                              const res = await fetch("/api.d.ts", {
+                                cache: "no-cache",
+                                signal: controller.signal,
+                              })
+                              if (!res.ok) {
+                                throw new Error(
+                                  t(getDocumentLanguage()).errors.httpLoadingApiDts(res.status),
+                                )
+                              }
+                              const apiDts = await res.text()
+                              return [
+                                { _tag: "User" as const, content: formatApiDtsMessage(apiDts) },
+                              ]
+                            })()
+                          : []
                         return [
                           {
                             _tag: "System" as const,
-                            content: formatSystemPromptForFormat(
-                              deps.editFormat,
-                              deps.toolCalls && !isLanguageModelSelection(deps.model),
-                            ),
+                            content: formatSystemPromptForFormat(deps.editFormat, useToolCalls),
                           },
-                          { _tag: "User" as const, content: formatApiDtsMessage(apiDts) },
+                          ...apiDtsMessages,
                           {
                             _tag: "User" as const,
                             content: formatFileMessageForFormat(
