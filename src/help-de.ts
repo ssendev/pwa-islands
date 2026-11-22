@@ -207,7 +207,7 @@ export const viewHelpDe = (
                                 [],
                                 [
                                   "HTML-Dateien ablegen und in einem sicheren Kontext ausführen — ohne ",
-                                  h.code([], ["file://"]),
+                                  h.code([h.Class("help-path")], ["file://"]),
                                   ", ohne Server, ohne Internet.",
                                 ],
                               ),
@@ -217,7 +217,7 @@ export const viewHelpDe = (
                             [h.Class("help-text")],
                             [
                               "Mit PWA Islands kannst du einzelne ",
-                              h.code([], [".html"]),
+                              h.code([h.Class("help-path")], [".html"]),
                               "-Mini-Apps lokal in einem sicheren Kontext speichern, bearbeiten und ausführen. Nutze es direkt im Browser als offline-fähige PWA oder installiere es als native Desktop-/Mobile-App.",
                             ],
                           ),
@@ -230,9 +230,9 @@ export const viewHelpDe = (
                                 [
                                   h.strong([], ["Offline-first & sicherer Kontext"]),
                                   " — Lokale ",
-                                  h.code([], [".html"]),
+                                  h.code([h.Class("help-path")], [".html"]),
                                   "-Dateien ohne ",
-                                  h.code([], ["file://"]),
+                                  h.code([h.Class("help-path")], ["file://"]),
                                   "-Einschränkungen und ohne Internetverbindung ausführen.",
                                 ],
                               ),
@@ -255,7 +255,7 @@ export const viewHelpDe = (
                                 [
                                   h.strong([], ["Islands API"]),
                                   " — Lese- und Schreibzugriff für Mini-Apps auf Dateien im gewählten Arbeitsordner über ",
-                                  h.code([], ["import islands from '/api.js'"]),
+                                  h.code([h.Class("help-path")], ["import islands from '/api.js'"]),
                                   ".",
                                 ],
                               ),
@@ -321,7 +321,7 @@ export const viewHelpDe = (
                               " ",
                               h.strong([], ["Chat"]),
                               " und schreibe deine Änderungswünsche direkt in das Chat-Feld – die KI bearbeitet die Datei automatisch. Mit ",
-                              h.code([], ["/clear"]),
+                              h.code([h.Class("help-path")], ["/clear"]),
                               " kannst du den Chat-Verlauf jederzeit zurücksetzen.",
                             ],
                           ),

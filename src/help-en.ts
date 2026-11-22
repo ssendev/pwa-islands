@@ -207,7 +207,7 @@ export const viewHelpEn = (
                                 [],
                                 [
                                   "Drop in HTML files, run them on a secure origin—no ",
-                                  h.code([], ["file://"]),
+                                  h.code([h.Class("help-path")], ["file://"]),
                                   ", no server, no internet needed.",
                                 ],
                               ),
@@ -217,7 +217,7 @@ export const viewHelpEn = (
                             [h.Class("help-text")],
                             [
                               "PWA Islands lets you store, edit, and run single-file ",
-                              h.code([], [".html"]),
+                              h.code([h.Class("help-path")], [".html"]),
                               " mini-apps locally on a secure origin. Use it directly in the browser as an offline-capable PWA, or install it as a native desktop/mobile app.",
                             ],
                           ),
@@ -230,9 +230,9 @@ export const viewHelpEn = (
                                 [
                                   h.strong([], ["Offline-first & secure origin"]),
                                   " — Run local ",
-                                  h.code([], [".html"]),
+                                  h.code([h.Class("help-path")], [".html"]),
                                   " files without ",
-                                  h.code([], ["file://"]),
+                                  h.code([h.Class("help-path")], ["file://"]),
                                   " restrictions or an internet connection.",
                                 ],
                               ),
@@ -255,7 +255,7 @@ export const viewHelpEn = (
                                 [
                                   h.strong([], ["Islands API"]),
                                   " — Give your mini-apps read/write access to files in the selected workspace folder via ",
-                                  h.code([], ["import islands from '/api.js'"]),
+                                  h.code([h.Class("help-path")], ["import islands from '/api.js'"]),
                                   ".",
                                 ],
                               ),
@@ -321,7 +321,7 @@ export const viewHelpEn = (
                               " in the mode menu at the bottom of the editor (",
                               viewIcon("edit", h),
                               " ▾) and type your requested changes directly into the chat box — the AI edits the file automatically. You can reset the chat history anytime with ",
-                              h.code([], ["/clear"]),
+                              h.code([h.Class("help-path")], ["/clear"]),
                               ".",
                             ],
                           ),
