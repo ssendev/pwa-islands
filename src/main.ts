@@ -60,6 +60,8 @@ import {
   toggleFullscreenWindow,
   exitFullscreenWindow,
   checkFileExists,
+  openExternalUrlInTauri,
+  syncOpenExternalLinksInBrowserToTauri,
 } from "./files"
 import * as Modal from "./modal"
 import { AlertBanner, Toast, view as viewToasts } from "./toast"
@@ -149,6 +151,7 @@ import {
   getStoredHistoryEnabled,
   getStoredShowDownloadsInMenu,
   getStoredShowInstallInMenu,
+  getStoredOpenExternalLinksInBrowser,
   getStoredLanguage,
   getStoredLlmChatNames,
   getStoredLlmSettings,
@@ -162,6 +165,7 @@ import {
   storeHistoryEnabled,
   storeShowDownloadsInMenu,
   storeShowInstallInMenu,
+  storeOpenExternalLinksInBrowser,
   storeLanguage,
   storeLlmChatNames,
   storeLlmSettings,
@@ -409,6 +413,7 @@ export const Model = Schema.Struct({
   showFileInfo: Schema.Boolean,
   showDownloadsInMenu: Schema.Boolean,
   showInstallInMenu: Schema.Boolean,
+  openExternalLinksInBrowser: Schema.Boolean,
   isSettingsOpen: Schema.Boolean,
   isSettingsDialogOpen: Schema.Boolean,
   maybeOverlayHelp: Schema.Option(Help.Model),
@@ -656,6 +661,10 @@ export const Message = defineMessageUnion({
   CompletedSaveShowDownloadsInMenu: {},
   ToggledShowInstallInMenu: { isEnabled: Schema.Boolean },
   CompletedSaveShowInstallInMenu: {},
+  ToggledOpenExternalLinksInBrowser: { isEnabled: Schema.Boolean },
+  CompletedSaveOpenExternalLinksInBrowser: {},
+  ClickedOpenExternalUrl: { url: Schema.String },
+  CompletedOpenExternalUrl: {},
   ToggledSettingsEditorLineNumbers: { isEnabled: Schema.Boolean },
   ToggledSettingsEditorFolding: { isEnabled: Schema.Boolean },
   ToggledSettingsEditorWordWrap: { isEnabled: Schema.Boolean },
@@ -740,6 +749,7 @@ export const Message = defineMessageUnion({
     draftsEnabled: Schema.optionalKey(Schema.Boolean),
     showDownloadsInMenu: Schema.optionalKey(Schema.Boolean),
     showInstallInMenu: Schema.optionalKey(Schema.Boolean),
+    openExternalLinksInBrowser: Schema.optionalKey(Schema.Boolean),
     monacoSettings: Schema.optionalKey(MonacoSettingsSchema),
     appTheme: Schema.optionalKey(AppThemeSchema),
     language: Schema.optionalKey(LanguageSchema),
@@ -1027,6 +1037,38 @@ export const SaveShowInstallInMenuPreference = Command.define("SaveShowInstallIn
     }).pipe(
       Effect.map(() => Message.CompletedSaveShowInstallInMenu()),
       Effect.catch(() => Effect.succeed(Message.CompletedSaveShowInstallInMenu())),
+    ),
+})
+
+export const SaveOpenExternalLinksInBrowserPreference = Command.define(
+  "SaveOpenExternalLinksInBrowserPreference",
+  {
+    args: { isEnabled: Schema.Boolean },
+    messages: [Message.CompletedSaveOpenExternalLinksInBrowser],
+    execute: (args) =>
+      Effect.tryPromise({
+        try: async () => {
+          await storeOpenExternalLinksInBrowser(args.isEnabled)
+          await syncOpenExternalLinksInBrowserToTauri(args.isEnabled)
+        },
+        catch: () => undefined,
+      }).pipe(
+        Effect.map(() => Message.CompletedSaveOpenExternalLinksInBrowser()),
+        Effect.catch(() => Effect.succeed(Message.CompletedSaveOpenExternalLinksInBrowser())),
+      ),
+  },
+)
+
+export const OpenExternalUrl = Command.define("OpenExternalUrl", {
+  args: { url: Schema.String },
+  messages: [Message.CompletedOpenExternalUrl],
+  execute: (args) =>
+    Effect.tryPromise({
+      try: () => openExternalUrlInTauri(args.url),
+      catch: () => undefined,
+    }).pipe(
+      Effect.map(() => Message.CompletedOpenExternalUrl()),
+      Effect.catch(() => Effect.succeed(Message.CompletedOpenExternalUrl())),
     ),
 })
 
@@ -1366,6 +1408,7 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
       getStoredDraftsEnabled(),
       getStoredShowDownloadsInMenu(),
       getStoredShowInstallInMenu(),
+      getStoredOpenExternalLinksInBrowser(),
       getStoredMonacoSettings(),
       getStoredAppTheme(),
       getStoredLanguage(),
@@ -1382,14 +1425,16 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
         draftsEnabled,
         showDownloadsInMenu,
         showInstallInMenu,
+        openExternalLinksInBrowser,
         monacoSettings,
         appTheme,
         maybeLanguage,
         dateFormat,
         timeFormat,
         llmChatNames,
-      ]) =>
-        Message.CompletedLoadEditorPreferences({
+      ]) => {
+        void syncOpenExternalLinksInBrowserToTauri(openExternalLinksInBrowser)
+        return Message.CompletedLoadEditorPreferences({
           llmBarMode: prefs.llmBarMode,
           llmModel: prefs.llmModel,
           llmThinkingLevel: prefs.llmThinkingLevel,
@@ -1399,13 +1444,15 @@ export const LoadEditorPreferences = Command.define("LoadEditorPreferences", {
           draftsEnabled,
           showDownloadsInMenu,
           showInstallInMenu,
+          openExternalLinksInBrowser,
           monacoSettings,
           appTheme,
           ...(Option.isSome(maybeLanguage) ? { language: maybeLanguage.value } : {}),
           dateFormat,
           timeFormat,
           llmChatNames,
-        }),
+        })
+      },
     ),
   ),
 })
@@ -2380,6 +2427,7 @@ export const init = (
         isSettingsOpen: false,
         showDownloadsInMenu: true,
         showInstallInMenu: true,
+        openExternalLinksInBrowser: false,
         isSettingsDialogOpen: isInitialSettingsOpen,
         maybeOverlayHelp: Option.none(),
         isDownloadsDialogOpen: isInitialDownloadsOpen,
@@ -2477,6 +2525,7 @@ export const init = (
       isSettingsOpen: false,
       showDownloadsInMenu: true,
       showInstallInMenu: true,
+      openExternalLinksInBrowser: false,
       isSettingsDialogOpen: isInitialSettingsOpen,
       maybeOverlayHelp: Option.none(),
       isDownloadsDialogOpen: isInitialDownloadsOpen,
@@ -3395,7 +3444,11 @@ export const update = (
         }),
         External: ({ href }) => ({
           model,
-          commands: [LoadUrl({ url: href })],
+          commands: [
+            model.hasTauri && model.openExternalLinksInBrowser
+              ? OpenExternalUrl({ url: href })
+              : LoadUrl({ url: href }),
+          ],
         }),
       }),
 
@@ -3809,6 +3862,22 @@ export const update = (
     }),
 
     CompletedSaveShowInstallInMenu: () => ({ model }),
+
+    ToggledOpenExternalLinksInBrowser: ({ isEnabled }) => ({
+      model: modifyFields(model, {
+        openExternalLinksInBrowser: () => isEnabled,
+      }),
+      commands: [SaveOpenExternalLinksInBrowserPreference({ isEnabled })],
+    }),
+
+    CompletedSaveOpenExternalLinksInBrowser: () => ({ model }),
+
+    ClickedOpenExternalUrl: ({ url }) => ({
+      model,
+      commands: [OpenExternalUrl({ url })],
+    }),
+
+    CompletedOpenExternalUrl: () => ({ model }),
 
     ClickedRequestClearAllHistory: () => ({
       model: modifyFields(model, {
@@ -4689,6 +4758,7 @@ export const update = (
       draftsEnabled,
       showDownloadsInMenu,
       showInstallInMenu,
+      openExternalLinksInBrowser,
       monacoSettings,
       appTheme,
       language,
@@ -4711,6 +4781,8 @@ export const update = (
           draftsEnabled: () => draftsEnabled ?? model.draftsEnabled,
           showDownloadsInMenu: () => showDownloadsInMenu ?? model.showDownloadsInMenu,
           showInstallInMenu: () => showInstallInMenu ?? model.showInstallInMenu,
+          openExternalLinksInBrowser: () =>
+            openExternalLinksInBrowser ?? model.openExternalLinksInBrowser,
           appTheme: () => nextAppTheme,
           language: () => nextLanguage,
           dateFormat: () => dateFormat ?? model.dateFormat,
@@ -6748,15 +6820,24 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                         [h.Class("downloads-subtitle")],
                         [
                           tr.downloads.pwaHintPrefix,
-                          h.a(
-                            [
-                              h.Class("downloads-releases-link"),
-                              h.Href(PWA_WEB_URL),
-                              h.Target("_blank"),
-                              h.Rel("noopener noreferrer"),
-                            ],
-                            [PWA_WEB_URL],
-                          ),
+                          model.hasTauri
+                            ? h.button(
+                                [
+                                  h.Type("button"),
+                                  h.Class("downloads-releases-link"),
+                                  h.OnClick(Message.ClickedOpenExternalUrl({ url: PWA_WEB_URL })),
+                                ],
+                                [PWA_WEB_URL],
+                              )
+                            : h.a(
+                                [
+                                  h.Class("downloads-releases-link"),
+                                  h.Href(PWA_WEB_URL),
+                                  h.Target("_blank"),
+                                  h.Rel("noopener noreferrer"),
+                                ],
+                                [PWA_WEB_URL],
+                              ),
                         ],
                       ),
                       h.p([h.Class("downloads-subtitle")], [tr.downloads.subtitle]),
@@ -7472,6 +7553,29 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                     [h.Class("settings-group"), h.Id("settings-group-app-downloads")],
                     [
                       h.h4([h.Class("settings-group-title")], [tr.downloads.settingsTitle]),
+                      model.hasTauri
+                        ? h.div(
+                            [h.Class("form-group")],
+                            [
+                              h.label(
+                                [h.Class("form-check")],
+                                [
+                                  h.input([
+                                    h.Type("checkbox"),
+                                    h.Id("settings-open-external-links-in-browser"),
+                                    h.Checked(model.openExternalLinksInBrowser),
+                                    h.OnChange(() =>
+                                      Message.ToggledOpenExternalLinksInBrowser({
+                                        isEnabled: !model.openExternalLinksInBrowser,
+                                      }),
+                                    ),
+                                  ]),
+                                  h.span([], [tr.downloads.openExternalLinksInBrowser]),
+                                ],
+                              ),
+                            ],
+                          )
+                        : h.empty,
                       h.div(
                         [h.Class("form-group")],
                         [
@@ -7493,27 +7597,29 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                           ),
                         ],
                       ),
-                      h.div(
-                        [h.Class("form-group")],
-                        [
-                          h.label(
-                            [h.Class("form-check")],
+                      isInstallAvailable
+                        ? h.div(
+                            [h.Class("form-group")],
                             [
-                              h.input([
-                                h.Type("checkbox"),
-                                h.Id("settings-show-install-in-menu"),
-                                h.Checked(model.showInstallInMenu),
-                                h.OnChange(() =>
-                                  Message.ToggledShowInstallInMenu({
-                                    isEnabled: !model.showInstallInMenu,
-                                  }),
-                                ),
-                              ]),
-                              h.span([], [tr.downloads.showInstallInMenu]),
+                              h.label(
+                                [h.Class("form-check")],
+                                [
+                                  h.input([
+                                    h.Type("checkbox"),
+                                    h.Id("settings-show-install-in-menu"),
+                                    h.Checked(model.showInstallInMenu),
+                                    h.OnChange(() =>
+                                      Message.ToggledShowInstallInMenu({
+                                        isEnabled: !model.showInstallInMenu,
+                                      }),
+                                    ),
+                                  ]),
+                                  h.span([], [tr.downloads.showInstallInMenu]),
+                                ],
+                              ),
                             ],
-                          ),
-                        ],
-                      ),
+                          )
+                        : h.empty,
                       h.div(
                         [h.Class("settings-actions")],
                         [

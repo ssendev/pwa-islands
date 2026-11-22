@@ -229,6 +229,35 @@ export const clearTauriRootDirectory = async (): Promise<void> => {
   }
 }
 
+let openExternalLinksInBrowserState = false
+
+export const getOpenExternalLinksInBrowserState = (): boolean => openExternalLinksInBrowserState
+
+export const openExternalUrlInTauri = async (url: string): Promise<void> => {
+  if (!supportsTauri()) {
+    return
+  }
+  await invoke("tauri_open_external_url", { url })
+}
+
+export const syncOpenExternalLinksInBrowserToTauri = async (enabled: boolean): Promise<void> => {
+  openExternalLinksInBrowserState = enabled
+  if (typeof document !== "undefined") {
+    const iframe = document.getElementById("island-iframe")
+    if (iframe instanceof HTMLIFrameElement && iframe.contentWindow) {
+      iframe.contentWindow.postMessage({ type: "TAURI_OPEN_EXTERNAL_LINKS_STATE", enabled }, "*")
+    }
+  }
+  if (!supportsTauri()) {
+    return
+  }
+  try {
+    await invoke("tauri_set_open_external_links_in_browser", { enabled })
+  } catch {
+    // Ignore when not running in Tauri
+  }
+}
+
 export const getSavedTauriFolder = async (): Promise<Option.Option<string>> => {
   try {
     const root = await invoke<string | null>("tauri_fs_get_root")

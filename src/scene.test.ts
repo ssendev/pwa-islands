@@ -96,6 +96,7 @@ const readyModel: Model = {
   isSettingsOpen: false,
   showDownloadsInMenu: true,
   showInstallInMenu: true,
+  openExternalLinksInBrowser: false,
   isSettingsDialogOpen: false,
   maybeOverlayHelp: Option.none(),
   isDownloadsDialogOpen: false,

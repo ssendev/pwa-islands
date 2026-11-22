@@ -28,6 +28,7 @@ export const API_HISTORY_ENABLED_KEY = "api_history_enabled"
 export const DRAFTS_ENABLED_KEY = "drafts_enabled"
 export const SHOW_DOWNLOADS_IN_MENU_KEY = "show_downloads_in_menu"
 export const SHOW_INSTALL_IN_MENU_KEY = "show_install_in_menu"
+export const OPEN_EXTERNAL_LINKS_IN_BROWSER_KEY = "open_external_links_in_browser"
 export const ISLAND_PARAM = "pwaislands"
 
 // NOTE: OPFS has a single root per origin; files are placed in a subfolder
@@ -241,6 +242,12 @@ export const getStoredShowInstallInMenu = (): Promise<boolean> =>
 
 export const storeShowInstallInMenu = (enabled: boolean): Promise<void> =>
   storeBooleanFlag(SHOW_INSTALL_IN_MENU_KEY, enabled)
+
+export const getStoredOpenExternalLinksInBrowser = (): Promise<boolean> =>
+  getStoredBooleanFlag(OPEN_EXTERNAL_LINKS_IN_BROWSER_KEY, false)
+
+export const storeOpenExternalLinksInBrowser = (enabled: boolean): Promise<void> =>
+  storeBooleanFlag(OPEN_EXTERNAL_LINKS_IN_BROWSER_KEY, enabled)
 
 import {
   emptyLlmSettings,

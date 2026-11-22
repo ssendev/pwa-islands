@@ -4,9 +4,11 @@ import * as Runtime from "foldkit/runtime"
 import { registerSW } from "virtual:pwa-register"
 import {
   exitFullscreenWindow,
+  getOpenExternalLinksInBrowserState,
   isWindowFullscreen,
   isWindows,
   isWindowsOrLinux,
+  openExternalUrlInTauri,
   supportsDirectoryPicker,
   supportsOPFS,
   supportsTauri,
@@ -179,6 +181,75 @@ if (typeof document !== "undefined") {
     const isFullscreen = Boolean(document.fullscreenElement)
     document.body.classList.toggle("is-fullscreen", isFullscreen)
     window.dispatchEvent(new CustomEvent("pwaislands:window-fullscreen", { detail: isFullscreen }))
+  })
+}
+
+const isExternalBrowserUrl = (href: string): string | null => {
+  try {
+    const parsed = new URL(href, window.location.href)
+    if (parsed.protocol === "mailto:") {
+      return parsed.href
+    }
+    if (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.hostname !== "localhost" &&
+      parsed.hostname !== "127.0.0.1" &&
+      parsed.hostname !== "tauri.localhost"
+    ) {
+      return parsed.href
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+if (supportsTauri()) {
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0) {
+      return
+    }
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+    const anchor = target.closest("a[href]")
+    if (!(anchor instanceof HTMLAnchorElement) || anchor.hasAttribute("download")) {
+      return
+    }
+    const externalUrl = isExternalBrowserUrl(anchor.href)
+    if (externalUrl === null) {
+      return
+    }
+    const isPwaWebUrl = new URL(externalUrl).hostname === "pwaislands.ssen.dev"
+    if (getOpenExternalLinksInBrowserState() || isPwaWebUrl) {
+      event.preventDefault()
+      void openExternalUrlInTauri(externalUrl).catch((error) => {
+        console.error("Failed to open external URL:", error)
+      })
+    }
+  })
+
+  window.addEventListener("message", async (event) => {
+    if (event.data?.type === "TAURI_QUERY_OPEN_EXTERNAL_LINKS") {
+      if (event.source && "postMessage" in event.source) {
+        ;(event.source as Window).postMessage(
+          {
+            type: "TAURI_OPEN_EXTERNAL_LINKS_STATE",
+            enabled: getOpenExternalLinksInBrowserState(),
+          },
+          "*",
+        )
+      }
+    } else if (
+      event.data?.type === "TAURI_OPEN_EXTERNAL_LINK" &&
+      typeof event.data.url === "string" &&
+      getOpenExternalLinksInBrowserState()
+    ) {
+      await openExternalUrlInTauri(event.data.url).catch((error) => {
+        console.error("Failed to open external URL:", error)
+      })
+    }
   })
 }
 

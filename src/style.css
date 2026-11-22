@@ -3676,6 +3676,14 @@ code {
   text-decoration: none;
 }
 
+button.downloads-releases-link {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+
 .downloads-releases-link:hover {
   text-decoration: underline;
 }

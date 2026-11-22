@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{OnceLock, RwLock};
 use tauri::http::{header, Response as HttpResponse, StatusCode};
 use tauri::ipc::Response;
@@ -12,6 +13,89 @@ use url::Url;
 
 static STORAGE_ROOT: OnceLock<RwLock<Option<PathBuf>>> = OnceLock::new();
 static CONFIG_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+static OPEN_EXTERNAL_LINKS_IN_BROWSER: AtomicBool = AtomicBool::new(false);
+
+fn is_external_browser_url(url: &Url) -> bool {
+  match url.scheme() {
+    "mailto" => true,
+    "http" | "https" => !matches!(
+      url.host_str(),
+      Some("localhost") | Some("127.0.0.1") | Some("tauri.localhost")
+    ),
+    _ => false,
+  }
+}
+
+fn validate_external_url(raw: &str) -> Result<Url, String> {
+  let parsed = Url::parse(raw.trim()).map_err(|e| format!("Ungültige URL: {e}"))?;
+  match parsed.scheme() {
+    "http" | "https" | "mailto" => Ok(parsed),
+    scheme => Err(format!("Nicht unterstütztes URL-Schema: {scheme}")),
+  }
+}
+
+fn open_external_url(raw: &str) -> Result<(), String> {
+  let parsed = validate_external_url(raw)?;
+  let target = parsed.as_str();
+
+  #[cfg(target_os = "linux")]
+  {
+    use std::process::Stdio;
+    if std::process::Command::new("xdg-open")
+      .arg(target)
+      .stdin(Stdio::null())
+      .stdout(Stdio::null())
+      .stderr(Stdio::null())
+      .spawn()
+      .is_err()
+    {
+      let target_owned = target.to_string();
+      gtk::glib::idle_add_once(move || {
+        if let Err(gio_err) = gtk::gio::AppInfo::launch_default_for_uri(
+          &target_owned,
+          gtk::gio::AppLaunchContext::NONE,
+        ) {
+          eprintln!("Konnte externen Link nicht öffnen ({target_owned}): {gio_err}");
+        }
+      });
+    }
+    Ok(())
+  }
+
+  #[cfg(target_os = "macos")]
+  {
+    std::process::Command::new("open")
+      .arg(target)
+      .spawn()
+      .map_err(|e| format!("Konnte externen Browser nicht öffnen: {e}"))?;
+    Ok(())
+  }
+
+  #[cfg(target_os = "windows")]
+  {
+    std::process::Command::new("rundll32")
+      .args(["url.dll,FileProtocolHandler", target])
+      .spawn()
+      .map_err(|e| format!("Konnte externen Browser nicht öffnen: {e}"))?;
+    Ok(())
+  }
+
+  #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+  {
+    let _ = target;
+    Err("Externes Öffnen von Links wird auf dieser Plattform nicht unterstützt.".to_string())
+  }
+}
+
+#[tauri::command]
+fn tauri_open_external_url(url: String) -> Result<(), String> {
+  open_external_url(&url)
+}
+
+#[tauri::command]
+fn tauri_set_open_external_links_in_browser(enabled: bool) {
+  OPEN_EXTERNAL_LINKS_IN_BROWSER.store(enabled, Ordering::Relaxed);
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct PersistedStorageConfig {
@@ -1158,11 +1242,70 @@ pub fn run() {
               }
             }
           }, true);
+
+          if (window !== window.top) {
+            let openExternalLinksInBrowser = false;
+            window.addEventListener('message', (e) => {
+              if (e.data && e.data.type === 'TAURI_OPEN_EXTERNAL_LINKS_STATE') {
+                openExternalLinksInBrowser = Boolean(e.data.enabled);
+              }
+            });
+            window.top.postMessage({ type: 'TAURI_QUERY_OPEN_EXTERNAL_LINKS' }, '*');
+
+            window.addEventListener('click', (e) => {
+              if (!openExternalLinksInBrowser || e.defaultPrevented || e.button !== 0) {
+                return;
+              }
+              const target = e.target;
+              if (!target || typeof target.closest !== 'function') {
+                return;
+              }
+              const anchor = target.closest('a[href]');
+              if (!anchor || anchor.hasAttribute('download')) {
+                return;
+              }
+              let parsed;
+              try {
+                parsed = new URL(anchor.href, window.location.href);
+              } catch {
+                return;
+              }
+              const isExternal =
+                parsed.protocol === 'mailto:' ||
+                ((parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+                  parsed.hostname !== 'localhost' &&
+                  parsed.hostname !== '127.0.0.1' &&
+                  parsed.hostname !== 'tauri.localhost');
+              if (isExternal) {
+                e.preventDefault();
+                window.top.postMessage({ type: 'TAURI_OPEN_EXTERNAL_LINK', url: parsed.href }, '*');
+              }
+            });
+          }
         "#;
 
         if let Some(window_config) = app.config().app.windows.first() {
           tauri::WebviewWindowBuilder::from_config(app.handle(), window_config)?
             .initialization_script_for_all_frames(init_script)
+            .on_navigation(|url| {
+              if OPEN_EXTERNAL_LINKS_IN_BROWSER.load(Ordering::Relaxed)
+                && is_external_browser_url(url)
+              {
+                let _ = open_external_url(url.as_str());
+                return false;
+              }
+              true
+            })
+            .on_new_window(|url, _features| {
+              if (OPEN_EXTERNAL_LINKS_IN_BROWSER.load(Ordering::Relaxed)
+                || url.host_str() == Some("pwaislands.ssen.dev"))
+                && is_external_browser_url(&url)
+              {
+                let _ = open_external_url(url.as_str());
+                return tauri::webview::NewWindowResponse::Deny;
+              }
+              tauri::webview::NewWindowResponse::Allow
+            })
             .build()?;
         }
       }
@@ -1263,6 +1406,8 @@ pub fn run() {
       tauri_draft_clear,
       tauri_draft_clear_all,
       tauri_draft_list_entries,
+      tauri_open_external_url,
+      tauri_set_open_external_links_in_browser,
     ])
     .run(tauri::generate_context!())
     .expect("error while building tauri application");
@@ -1563,5 +1708,32 @@ mod tests {
     assert!(history_read_index_at_path(&corrupt_path).unwrap().is_empty());
 
     let _ = fs::remove_dir_all(&base_dir);
+  }
+
+  #[test]
+  fn test_external_url_classification_and_validation() {
+    assert!(is_external_browser_url(
+      &Url::parse("https://pwaislands.ssen.dev").unwrap()
+    ));
+    assert!(is_external_browser_url(
+      &Url::parse("https://github.com/ssendev/pwa-islands").unwrap()
+    ));
+    assert!(is_external_browser_url(
+      &Url::parse("mailto:test@example.com").unwrap()
+    ));
+    assert!(!is_external_browser_url(
+      &Url::parse("http://localhost:5173/").unwrap()
+    ));
+    assert!(!is_external_browser_url(
+      &Url::parse("http://tauri.localhost/").unwrap()
+    ));
+    assert!(!is_external_browser_url(
+      &Url::parse("pwaislands://localhost/index.html").unwrap()
+    ));
+
+    assert!(validate_external_url("https://pwaislands.ssen.dev").is_ok());
+    assert!(validate_external_url("javascript:alert(1)").is_err());
+    assert!(validate_external_url("file:///etc/passwd").is_err());
+    assert!(validate_external_url("not a url").is_err());
   }
 }
