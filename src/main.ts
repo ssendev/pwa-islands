@@ -6650,26 +6650,83 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
 
   const platformOrder: ReadonlyArray<DownloadPlatform> = ["Android", "Windows", "Linux", "macOS"]
 
-  const viewReleasesFallback = () =>
-    h.div(
-      [h.Class("downloads-card-links")],
-      [
-        h.a(
+  const viewPwaCard = (isHighlighted: boolean): Html.Html => {
+    const linkClass = isHighlighted ? "downloads-link is-current" : "downloads-link"
+    const linkContent = [
+      h.span([h.Class("downloads-link-label")], [tr.downloads.pwaLabel]),
+      h.span([h.Class("downloads-link-file downloads-link-url")], [PWA_WEB_URL]),
+    ]
+    const pwaLink = model.hasTauri
+      ? h.button(
           [
-            h.Class("downloads-link"),
-            h.Href(GITHUB_RELEASES_URL),
+            h.Type("button"),
+            h.Class(linkClass),
+            h.OnClick(Message.ClickedOpenExternalUrl({ url: PWA_WEB_URL })),
+          ],
+          linkContent,
+        )
+      : h.a(
+          [
+            h.Class(linkClass),
+            h.Href(PWA_WEB_URL),
             h.Target("_blank"),
             h.Rel("noopener noreferrer"),
           ],
-          [h.span([h.Class("downloads-link-label")], ["PWA Islands Releases ↗"])],
+          linkContent,
+        )
+
+    return h.section(
+      [h.Class(isHighlighted ? "downloads-card is-current" : "downloads-card")],
+      [
+        h.div(
+          [h.Class("downloads-card-header")],
+          [h.h4([h.Class("downloads-card-title")], ["PWA"])],
+        ),
+        h.div([h.Class("downloads-card-links")], [pwaLink]),
+      ],
+    )
+  }
+
+  const viewReleasesFallback = () =>
+    h.div(
+      [h.Class("downloads-grid")],
+      [
+        viewPwaCard(installedKind === null),
+        h.div(
+          [h.Class("downloads-card-links")],
+          [
+            h.a(
+              [
+                h.Class("downloads-link"),
+                h.Href(GITHUB_RELEASES_URL),
+                h.Target("_blank"),
+                h.Rel("noopener noreferrer"),
+              ],
+              [h.span([h.Class("downloads-link-label")], ["PWA Islands Releases ↗"])],
+            ),
+          ],
         ),
       ],
     )
 
   let hasLoadedDownloads = false
   const downloadsBody = DownloadsReleaseState.match(model.downloadsReleaseState, {
-    Idle: () => h.p([h.Class("downloads-subtitle")], [tr.downloads.loading]),
-    Loading: () => h.p([h.Class("downloads-subtitle")], [tr.downloads.loading]),
+    Idle: () =>
+      h.div(
+        [h.Class("downloads-grid")],
+        [
+          viewPwaCard(installedKind === null),
+          h.p([h.Class("downloads-subtitle")], [tr.downloads.loading]),
+        ],
+      ),
+    Loading: () =>
+      h.div(
+        [h.Class("downloads-grid")],
+        [
+          viewPwaCard(installedKind === null),
+          h.p([h.Class("downloads-subtitle")], [tr.downloads.loading]),
+        ],
+      ),
     Failed: viewReleasesFallback,
     Loaded: ({ assets }) => {
       const byPlatform = new Map<
@@ -6715,57 +6772,64 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
               ...existingGroups.filter((g) => g.platform !== currentPlatform),
             ]
 
+      const hasHighlightedDownload =
+        installedKind !== null &&
+        groups.some((group) => group.items.some((item) => item.kind === installedKind))
+
       return h.div(
         [h.Class("downloads-grid")],
-        groups.map((group) => {
-          const isCurrentPlatform = currentPlatform === group.platform
-          const orderedItems =
-            installedKind === null
-              ? group.items
-              : [
-                  ...group.items.filter((i) => i.kind === installedKind),
-                  ...group.items.filter((i) => i.kind !== installedKind),
-                ]
-          return h.section(
-            [h.Class(isCurrentPlatform ? "downloads-card is-current" : "downloads-card")],
-            [
-              h.div(
-                [h.Class("downloads-card-header")],
-                [
-                  h.h4([h.Class("downloads-card-title")], [group.platform]),
-                  isCurrentPlatform
-                    ? h.span(
-                        [h.Class("downloads-current-badge")],
-                        [
-                          model.hasTauri
-                            ? `${tr.downloads.currentPlatform} · v${__APP_VERSION__}`
-                            : tr.downloads.currentPlatform,
-                        ],
-                      )
-                    : h.empty,
-                ],
-              ),
-              h.div(
-                [h.Class("downloads-card-links")],
-                orderedItems.map((item) => {
-                  const isCurrentFile = installedKind !== null && item.kind === installedKind
-                  return h.a(
-                    [
-                      h.Class(isCurrentFile ? "downloads-link is-current" : "downloads-link"),
-                      h.Href(item.url),
-                      h.Target("_blank"),
-                      h.Rel("noopener noreferrer"),
-                    ],
-                    [
-                      h.span([h.Class("downloads-link-label")], [item.label]),
-                      h.span([h.Class("downloads-link-file")], [item.file]),
-                    ],
-                  )
-                }),
-              ),
-            ],
-          )
-        }),
+        [
+          viewPwaCard(!hasHighlightedDownload),
+          ...groups.map((group) => {
+            const isCurrentPlatform = currentPlatform === group.platform
+            const orderedItems =
+              installedKind === null
+                ? group.items
+                : [
+                    ...group.items.filter((i) => i.kind === installedKind),
+                    ...group.items.filter((i) => i.kind !== installedKind),
+                  ]
+            return h.section(
+              [h.Class(isCurrentPlatform ? "downloads-card is-current" : "downloads-card")],
+              [
+                h.div(
+                  [h.Class("downloads-card-header")],
+                  [
+                    h.h4([h.Class("downloads-card-title")], [group.platform]),
+                    isCurrentPlatform
+                      ? h.span(
+                          [h.Class("downloads-current-badge")],
+                          [
+                            model.hasTauri
+                              ? `${tr.downloads.currentPlatform} · v${__APP_VERSION__}`
+                              : tr.downloads.currentPlatform,
+                          ],
+                        )
+                      : h.empty,
+                  ],
+                ),
+                h.div(
+                  [h.Class("downloads-card-links")],
+                  orderedItems.map((item) => {
+                    const isCurrentFile = installedKind !== null && item.kind === installedKind
+                    return h.a(
+                      [
+                        h.Class(isCurrentFile ? "downloads-link is-current" : "downloads-link"),
+                        h.Href(item.url),
+                        h.Target("_blank"),
+                        h.Rel("noopener noreferrer"),
+                      ],
+                      [
+                        h.span([h.Class("downloads-link-label")], [item.label]),
+                        h.span([h.Class("downloads-link-file")], [item.file]),
+                      ],
+                    )
+                  }),
+                ),
+              ],
+            )
+          }),
+        ],
       )
     },
   })
@@ -6815,33 +6879,7 @@ const viewDownloadsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 [
                   h.div(
                     [h.Class("downloads-intro")],
-                    [
-                      h.p(
-                        [h.Class("downloads-subtitle")],
-                        [
-                          tr.downloads.pwaHintPrefix,
-                          model.hasTauri
-                            ? h.button(
-                                [
-                                  h.Type("button"),
-                                  h.Class("downloads-releases-link"),
-                                  h.OnClick(Message.ClickedOpenExternalUrl({ url: PWA_WEB_URL })),
-                                ],
-                                [PWA_WEB_URL],
-                              )
-                            : h.a(
-                                [
-                                  h.Class("downloads-releases-link"),
-                                  h.Href(PWA_WEB_URL),
-                                  h.Target("_blank"),
-                                  h.Rel("noopener noreferrer"),
-                                ],
-                                [PWA_WEB_URL],
-                              ),
-                        ],
-                      ),
-                      h.p([h.Class("downloads-subtitle")], [tr.downloads.subtitle]),
-                    ],
+                    [h.p([h.Class("downloads-subtitle")], [tr.downloads.subtitle])],
                   ),
                   downloadsBody,
                   hasLoadedDownloads

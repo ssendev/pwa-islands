@@ -3652,6 +3652,12 @@ code {
   transform: translateY(-1px);
 }
 
+button.downloads-link {
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
 .downloads-link-label {
   font-size: 13px;
   font-weight: 500;
@@ -3663,10 +3669,16 @@ code {
   opacity: 0.7;
 }
 
+.downloads-link-url {
+  color: var(--accent, #2e69c9);
+  opacity: 1;
+  text-decoration: underline;
+}
+
 .downloads-footer {
   display: flex;
   justify-content: flex-end;
-  padding-top: 4px;
+  padding-top: 16px;
   border-top: 1px solid var(--border);
 }
 

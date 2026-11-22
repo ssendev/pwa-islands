@@ -899,8 +899,9 @@ const de = {
   },
   downloads: {
     title: "PWA Islands herunterladen",
-    subtitle: "Oder als eigenständige App herunterladen — auch komplett offline installierbar.",
-    pwaHintPrefix: "Direkt im Browser als PWA nutzen (offline-fähig): ",
+    subtitle:
+      "Direkt im Browser als PWA nutzen oder als eigenständige App herunterladen — auch komplett offline installierbar.",
+    pwaLabel: "Im Browser nutzen (offline-fähig)",
     olderVersions: "Ältere Versionen",
     androidApk: "Universal APK",
     windowsSetup: "Setup (x64)",
@@ -1721,8 +1722,9 @@ const en: Translations = {
   },
   downloads: {
     title: "Download PWA Islands",
-    subtitle: "Or download as a standalone app — can also be installed completely offline.",
-    pwaHintPrefix: "Use directly in your browser as a PWA (works offline): ",
+    subtitle:
+      "Use directly in your browser as a PWA or download as a standalone app — can also be installed completely offline.",
+    pwaLabel: "Use in browser (works offline)",
     olderVersions: "Older versions",
     androidApk: "Universal APK",
     windowsSetup: "Setup (x64)",
