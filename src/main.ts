@@ -6946,7 +6946,11 @@ const viewSettingsDialog = (model: Model, h: HtmlBuilder): Html.Html => {
                 [
                   h.h3(
                     [h.Id("settings-dialog-title"), h.Class("modal-title")],
-                    [tr.settings.title],
+                    [
+                      tr.settings.title,
+                      " ",
+                      h.span([h.Class("help-version-badge")], [`v${__APP_VERSION__}`]),
+                    ],
                   ),
                   h.button(
                     [
